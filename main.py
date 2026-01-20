@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, url_for, session, jsonify, send_file
+from flask import Flask, request, redirect, session, jsonify, send_file, send_from_directory
 from flask_cors import CORS
 from functools import wraps
 import json
@@ -38,11 +38,11 @@ except Exception as e:
 
 
 def login_required(f):
-    """Decorator to require authentication for routes."""
+    """Decorator to require authentication for API routes."""
     @wraps(f)
     def decorated_function(*args, **kwargs):
         if 'user' not in session:
-            return redirect(url_for('login'))
+            return jsonify({'error': 'Authentication required', 'success': False}), 401
         return f(*args, **kwargs)
     return decorated_function
 
@@ -71,24 +71,15 @@ def get_assessment():
 
 @app.route('/')
 def index():
-    # If user is logged in, redirect to general quiz
-    if 'user' in session:
-        return redirect(url_for('general'))
-    return render_template('index.html')
+    """Serve React SPA at root"""
+    return serve_react_index()
 
 
-@app.route('/login')
-def login():
-    # If user is already logged in, redirect to general
-    if 'user' in session:
-        return redirect(url_for('general'))
-    return render_template('login.html')
-
-
-@app.route('/logout')
-def logout():
+@app.route('/api/auth/logout', methods=['POST'])
+def api_logout():
+    """API endpoint to clear session"""
     session.clear()
-    return redirect(url_for('index'))
+    return jsonify({'success': True})
 
 
 @app.route('/api/auth/verify', methods=['POST'])
@@ -128,234 +119,9 @@ def verify_auth():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
-@app.route('/general', methods=['GET', 'POST'])
-@login_required
-def general():
-    uid = get_current_user_uid()
-
-    if request.method == 'POST':
-        goals = request.form.get('goals', '')
-        duration = request.form.get('duration', '0')
-
-        goals_list = [g.strip() for g in goals.split(',') if g.strip()]
-        duration_int = int(duration)
-
-        # Save to database
-        db.update_user_profile(uid, goals=goals_list, learning_duration=duration_int)
-
-        # Reset assessment in database
-        db.reset_assessment(uid)
-
-        # Keep session for quick access during assessment
-        session['user_goals'] = goals_list
-        session['learning_duration'] = duration_int
-        session.pop('assessment_responses', None)
-        session.pop('current_item_index', None)
-        session.pop('assessment_results', None)
-
-        return redirect(url_for('assessment'))
-
-    # Load existing profile from database
-    user_data = db.get_user(uid)
-    if user_data and user_data.get('profile'):
-        profile = user_data['profile']
-        session['user_goals'] = profile.get('goals', [])
-        session['learning_duration'] = profile.get('learning_duration', 0)
-
-    return render_template('general.html')
-
-
-@app.route('/assessment')
-@login_required
-def assessment():
-    uid = get_current_user_uid()
-    assessment_data = get_assessment()
-
-    # Load assessment state from database
-    assessment_state = db.get_assessment_state(uid)
-    if assessment_state:
-        session['assessment_responses'] = assessment_state.get('responses', {})
-        session['current_item_index'] = assessment_state.get('current_item_index', 0)
-    elif 'assessment_responses' not in session:
-        session['assessment_responses'] = {}
-        session['current_item_index'] = 0
-
-    current_index = session.get('current_item_index', 0)
-    items = assessment_data['items']
-
-    if current_index >= len(items):
-        return redirect(url_for('categories'))
-
-    current_item = items[current_index]
-
-    ui_lang = session.get('ui_language', 'en')
-
-    return render_template(
-        'assessment.html',
-        item=current_item,
-        item_index=current_index,
-        total_items=len(items),
-        ui_lang=ui_lang,
-        test_title=assessment_data['title']
-    )
-
-
-@app.route('/assessment/submit', methods=['POST'])
-@login_required
-def assessment_submit():
-    uid = get_current_user_uid()
-    assessment_data = get_assessment()
-    items = assessment_data['items']
-
-    current_index = session.get('current_item_index', 0)
-
-    if current_index >= len(items):
-        return redirect(url_for('categories'))
-
-    current_item = items[current_index]
-    item_id = current_item['id']
-
-    item_type = current_item.get('item_type')
-
-    if item_type == 'mcq_single':
-        response = request.form.get('response', '')
-    elif item_type == 'text_short':
-        response = request.form.get('response', '')
-    elif item_type == 'audio_read':
-        response = request.form.get('transcript', '')
-    else:
-        response = request.form.get('response', '')
-
-    responses = session.get('assessment_responses', {})
-    responses[item_id] = response
-    session['assessment_responses'] = responses
-
-    session['current_item_index'] = current_index + 1
-
-    # Save to database
-    db.update_assessment_response(uid, item_id, response, session['current_item_index'])
-
-    if session['current_item_index'] >= len(items):
-        return redirect(url_for('categories'))
-
-    return redirect(url_for('assessment'))
-
-
-@app.route('/assessment/skip', methods=['POST'])
-@login_required
-def assessment_skip():
-    uid = get_current_user_uid()
-    assessment_data = get_assessment()
-    items = assessment_data['items']
-
-    current_index = session.get('current_item_index', 0)
-
-    if current_index < len(items):
-        item_id = items[current_index]['id']
-        responses = session.get('assessment_responses', {})
-        responses[item_id] = ''
-        session['assessment_responses'] = responses
-        session['current_item_index'] = current_index + 1
-
-        # Save to database
-        db.update_assessment_response(uid, item_id, '', session['current_item_index'])
-
-    if session['current_item_index'] >= len(items):
-        return redirect(url_for('categories'))
-
-    return redirect(url_for('assessment'))
-
-
-@app.route('/assessment/results')
-@login_required
-def assessment_results():
-    assessment_data = get_assessment()
-    responses = session.get('assessment_responses', {})
-
-    if not responses:
-        return redirect(url_for('assessment'))
-
-    results = compute_results(assessment_data, responses)
-
-    ui_lang = session.get('ui_language', 'en')
-    sklc_info = get_sklc_description(results['global_stage'], ui_lang)
-
-    domain_sklc = {}
-    for domain, band in results['domain_bands'].items():
-        domain_sklc[domain] = get_sklc_description(band, ui_lang)
-
-    return render_template(
-        'results.html',
-        results=results,
-        sklc_info=sklc_info,
-        domain_sklc=domain_sklc,
-        domains=assessment_data['domains']
-    )
-
-
-@app.route('/assessment/reset')
-@login_required
-def assessment_reset():
-    uid = get_current_user_uid()
-    session.pop('assessment_responses', None)
-    session.pop('current_item_index', None)
-    session.pop('assessment_results', None)
-
-    # Reset in database
-    db.reset_assessment(uid)
-
-    return redirect(url_for('assessment'))
-
-
-@app.route('/categories', methods=['GET', 'POST'])
-@login_required
-def categories():
-    uid = get_current_user_uid()
-
-    # Try to load results from database first
-    if 'assessment_results' not in session:
-        db_results = db.get_assessment_results(uid)
-        if db_results:
-            session['assessment_results'] = db_results
-
-    # Compute results if we have responses but no results
-    if 'assessment_results' not in session and 'assessment_responses' in session:
-        assessment_data = get_assessment()
-        responses = session.get('assessment_responses', {})
-        if responses:
-            results = compute_results(assessment_data, responses)
-            session['assessment_results'] = results
-            # Save results to database
-            db.save_assessment_results(uid, results)
-
-    if request.method == 'POST':
-        selected_categories = request.form.get('categories', '')
-        categories_list = [c.strip() for c in selected_categories.split(',') if c.strip()]
-        session['selected_categories'] = categories_list
-
-        # Save to database
-        db.update_selected_categories(uid, categories_list)
-
-        return redirect(url_for('ai'))
-
-    return render_template('categories.html')
-
-
-@app.route('/ai')
-@login_required
-def ai():
-    uid = get_current_user_uid()
-
-    # Load results from database if not in session
-    results = session.get('assessment_results')
-    if not results:
-        results = db.get_assessment_results(uid) or {}
-        session['assessment_results'] = results
-
-    global_stage = results.get('global_stage', 0)
-    sklc_info = get_sklc_description(global_stage)
-
-    return render_template('ai.html', sklc_level=sklc_info.get('level', 'Not assessed'))
+# Old template routes removed - now using React SPA
+# All page rendering is handled by React at the root path
+# API endpoints below handle data operations
 
 
 def get_user_proficiency_context():
@@ -882,6 +648,40 @@ def api_update_categories():
         'success': True,
         'categories': categories
     })
+
+
+# ============================================
+# REACT SPA SERVING (Main Frontend)
+# ============================================
+
+REACT_BUILD_DIR = Path(__file__).parent / 'static' / 'react'
+STATIC_DIR = Path(__file__).parent / 'static'
+
+def serve_react_index():
+    """Serve React app index.html"""
+    if REACT_BUILD_DIR.exists():
+        return send_from_directory(REACT_BUILD_DIR, 'index.html')
+    return "React app not built. Run 'npm run build' in frontend/", 404
+
+@app.route('/imgs/<path:filename>')
+def serve_images(filename):
+    """Serve images from static/imgs folder"""
+    return send_from_directory(STATIC_DIR / 'imgs', filename)
+
+@app.route('/<path:path>')
+def serve_react_or_static(path):
+    """Serve React static files or fallback to index.html for SPA routing"""
+    # Skip API routes - they're handled by other route handlers
+    if path.startswith('api/'):
+        return jsonify({'error': 'Not found'}), 404
+
+    if REACT_BUILD_DIR.exists():
+        file_path = REACT_BUILD_DIR / path
+        if file_path.exists() and file_path.is_file():
+            return send_from_directory(REACT_BUILD_DIR, path)
+        # SPA fallback - return index.html for client-side routing
+        return send_from_directory(REACT_BUILD_DIR, 'index.html')
+    return "React app not built", 404
 
 
 if __name__ == '__main__':

@@ -1,7 +1,11 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Loader2 } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
-import { Button, ProgressBar, LanguageToggle, LoadingSpinner } from '../components/common';
+import { Button, Progress, Badge, AnimatedCard, Alert, AlertDescription } from '@/components/ui';
+import { AnimatedPage } from '@/components/layout/AnimatedPage';
+import { LanguageToggle } from '../components/common';
 import { MCQQuestion, TextQuestion, AudioQuestion } from '../components/assessment';
 import {
   getAssessmentItems,
@@ -136,83 +140,128 @@ export function AssessmentPage() {
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <LoadingSpinner size="lg" />
+        <motion.div
+          animate={{ rotate: 360 }}
+          transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+        >
+          <Loader2 className="h-12 w-12 text-primary" />
+        </motion.div>
       </div>
     );
   }
 
   if (!currentItem) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <AnimatedPage className="min-h-screen flex items-center justify-center">
         <div className="text-center">
-          <p className="text-text mb-4">No assessment items found</p>
+          <p className="text-foreground mb-4">No assessment items found</p>
           <Button onClick={() => navigate('/general')}>Go Back</Button>
         </div>
-      </div>
+      </AnimatedPage>
     );
   }
 
+  const progressValue = ((currentIndex + 1) / items.length) * 100;
+
   return (
-    <div className="min-h-screen flex items-center justify-center p-4">
-      <div className="bg-card rounded-2xl shadow-xl p-8 max-w-2xl w-full">
-        <div className="flex justify-between items-center mb-6">
-          <span className="text-text-secondary">
+    <AnimatedPage className="min-h-screen flex items-center justify-center p-4">
+      <AnimatedCard className="p-8 max-w-2xl w-full">
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="flex justify-between items-center mb-6"
+        >
+          <span className="text-muted-foreground">
             {t('assessment.progress')} {currentIndex + 1} {t('assessment.of')} {items.length}
           </span>
           <LanguageToggle />
-        </div>
+        </motion.div>
 
-        <ProgressBar current={currentIndex + 1} total={items.length} className="mb-6" />
+        <Progress value={progressValue} className="mb-6" />
 
-        <div className="mb-2">
-          <span className="inline-block px-3 py-1 bg-purple-100 text-purple-accent rounded-full text-sm">
-            {currentItem.section}
-          </span>
-        </div>
+        <motion.div
+          initial={{ opacity: 0, x: -10 }}
+          animate={{ opacity: 1, x: 0 }}
+          className="mb-2"
+        >
+          <Badge variant="accent">{currentItem.section}</Badge>
+        </motion.div>
 
-        {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-4">
-            {error}
-          </div>
-        )}
-
-        <div className="mb-6">
-          <p className="text-xl text-text mb-2">{getPrompt()}</p>
-          {getInstructions() && (
-            <p className="text-text-secondary text-sm italic">{getInstructions()}</p>
+        <AnimatePresence mode="wait">
+          {error && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              className="mb-4"
+            >
+              <Alert variant="destructive">
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            </motion.div>
           )}
-          {currentItem.ui.context && (
-            <div className="mt-4 p-4 bg-gray-50 rounded-lg">
-              <pre className="text-text whitespace-pre-wrap font-sans">
-                {currentItem.ui.context}
-              </pre>
-            </div>
-          )}
-        </div>
+        </AnimatePresence>
 
-        <div className="mb-8">
-          {currentItem.item_type === 'mcq_single' && currentItem.content.options && (
-            <MCQQuestion
-              options={currentItem.content.options}
-              selectedId={selectedOption}
-              onChange={setSelectedOption}
-            />
-          )}
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={currentIndex}
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -20 }}
+            transition={{ duration: 0.3 }}
+            className="mb-6"
+          >
+            <p className="text-xl text-foreground mb-2">{getPrompt()}</p>
+            {getInstructions() && (
+              <p className="text-muted-foreground text-sm italic">{getInstructions()}</p>
+            )}
+            {currentItem.ui.context && (
+              <div className="mt-4 p-4 bg-muted rounded-lg">
+                <pre className="text-foreground whitespace-pre-wrap font-sans">
+                  {currentItem.ui.context}
+                </pre>
+              </div>
+            )}
+          </motion.div>
+        </AnimatePresence>
 
-          {currentItem.item_type === 'text_short' && (
-            <TextQuestion value={textAnswer} onChange={setTextAnswer} />
-          )}
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={`answer-${currentIndex}`}
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            transition={{ duration: 0.3, delay: 0.1 }}
+            className="mb-8"
+          >
+            {currentItem.item_type === 'mcq_single' && currentItem.content.options && (
+              <MCQQuestion
+                options={currentItem.content.options}
+                selectedId={selectedOption}
+                onChange={setSelectedOption}
+              />
+            )}
 
-          {currentItem.item_type === 'audio_read' && (
-            <AudioQuestion
-              wordList={currentItem.content.word_list}
-              sentences={currentItem.content.sentences}
-              onTranscriptChange={setAudioTranscript}
-            />
-          )}
-        </div>
+            {currentItem.item_type === 'text_short' && (
+              <TextQuestion value={textAnswer} onChange={setTextAnswer} />
+            )}
 
-        <div className="flex gap-4">
+            {currentItem.item_type === 'audio_read' && (
+              <AudioQuestion
+                wordList={currentItem.content.word_list}
+                sentences={currentItem.content.sentences}
+                onTranscriptChange={setAudioTranscript}
+              />
+            )}
+          </motion.div>
+        </AnimatePresence>
+
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.2 }}
+          className="flex gap-4"
+        >
           <Button variant="secondary" onClick={handleSkip} disabled={submitting} className="flex-1">
             {t('assessment.skip')}
           </Button>
@@ -224,8 +273,8 @@ export function AssessmentPage() {
           >
             {t('assessment.next')}
           </Button>
-        </div>
-      </div>
-    </div>
+        </motion.div>
+      </AnimatedCard>
+    </AnimatedPage>
   );
 }

@@ -1,16 +1,43 @@
 @import "tailwindcss";
 
-/* Tailwind Custom Theme */
+/* Tailwind Custom Theme - shadcn/ui compatible */
 @theme {
+  /* Primary colors */
   --color-primary: #4f8cff;
   --color-primary-hover: #2563eb;
+  --color-primary-foreground: #ffffff;
+
+  /* Background colors */
   --color-background: #b385ce;
   --color-card: #ffffff;
+  --color-card-foreground: #2d3a4a;
+
+  /* Text colors */
+  --color-foreground: #2d3a4a;
   --color-text: #2d3a4a;
   --color-text-secondary: #6a7684;
-  --color-success: #10b981;
-  --color-error: #ef4444;
+  --color-muted: #f1f5f9;
+  --color-muted-foreground: #6a7684;
+
+  /* Accent colors */
+  --color-accent: rgb(135, 42, 211);
+  --color-accent-foreground: #ffffff;
   --color-purple-accent: rgb(135, 42, 211);
+
+  /* Status colors */
+  --color-success: #10b981;
+  --color-success-foreground: #ffffff;
+  --color-error: #ef4444;
+  --color-destructive: #ef4444;
+  --color-destructive-foreground: #ffffff;
+
+  /* Border & Input */
+  --color-border: #e2e8f0;
+  --color-input: #e2e8f0;
+  --color-ring: #4f8cff;
+
+  /* Radius */
+  --radius: 0.75rem;
 }
 
 /* Base Styles */

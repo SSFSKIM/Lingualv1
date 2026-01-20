@@ -1,4 +1,6 @@
+import { motion } from 'framer-motion';
 import { useLanguage } from '../../contexts/LanguageContext';
+import { cn } from '@/lib/utils';
 import type { Language } from '../../types';
 
 interface LanguageToggleProps {
@@ -14,17 +16,24 @@ export function LanguageToggle({ className = '' }: LanguageToggleProps) {
   ];
 
   return (
-    <div className={`flex gap-1 ${className}`}>
+    <div className={cn('flex gap-1 bg-muted p-1 rounded-lg relative', className)}>
       {languages.map(({ value, label }) => (
         <button
           key={value}
           onClick={() => setLang(value)}
-          className={`px-3 py-1 rounded-md text-sm font-medium transition-all ${
-            lang === value
-              ? 'bg-primary text-white'
-              : 'bg-gray-100 text-text-secondary hover:bg-gray-200'
-          }`}
+          className={cn(
+            'px-3 py-1 rounded-md text-sm font-medium transition-colors relative z-10',
+            lang === value ? 'text-primary' : 'text-muted-foreground hover:text-foreground'
+          )}
         >
+          {lang === value && (
+            <motion.div
+              layoutId="language-indicator"
+              className="absolute inset-0 bg-card rounded-md shadow-sm"
+              style={{ zIndex: -1 }}
+              transition={{ type: 'spring', stiffness: 500, damping: 30 }}
+            />
+          )}
           {label}
         </button>
       ))}

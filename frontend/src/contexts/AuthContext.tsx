@@ -3,8 +3,7 @@ import {
   onAuthStateChanged,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
-  signInWithRedirect,
-  getRedirectResult,
+  signInWithPopup,
   signOut,
   User as FirebaseUser,
 } from 'firebase/auth';
@@ -33,21 +32,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    // Handle redirect result from Google sign-in
-    getRedirectResult(auth)
-      .then(async (result) => {
-        if (result?.user) {
-          const idToken = await result.user.getIdToken();
-          const verifyResult = await verifyToken(idToken);
-          if (verifyResult.success && verifyResult.user) {
-            setUser(verifyResult.user);
-          }
-        }
-      })
-      .catch((err) => {
-        console.error('Redirect result error:', err);
-      });
-
     const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
       setFirebaseUser(fbUser);
 
@@ -123,14 +107,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signInWithGoogle = async () => {
+    setLoading(true);
     setError(null);
+
     try {
-      // Use redirect instead of popup to avoid COOP issues
-      await signInWithRedirect(auth, googleProvider);
+      const result = await signInWithPopup(auth, googleProvider);
+      const idToken = await result.user.getIdToken();
+      const verifyResult = await verifyToken(idToken);
+
+      if (verifyResult.success && verifyResult.user) {
+        setUser(verifyResult.user);
+      } else {
+        throw new Error(verifyResult.error || 'Failed to verify token');
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Google sign in failed';
       setError(message);
       throw err;
+    } finally {
+      setLoading(false);
     }
   };
 

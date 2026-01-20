@@ -1,7 +1,10 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useLanguage } from '../contexts/LanguageContext';
-import { Button, Slider } from '../components/common';
+import { Button, Slider, AnimatedCard, Alert, AlertDescription } from '@/components/ui';
+import { AnimatedPage } from '@/components/layout/AnimatedPage';
+import { staggerContainer, staggerItem } from '@/lib/animations';
 import { updateProfile } from '../api/user';
 
 const GOAL_OPTIONS = [
@@ -52,54 +55,89 @@ export function GeneralPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4">
-      <div className="bg-card rounded-2xl shadow-xl p-8 max-w-lg w-full">
-        <h1 className="text-2xl font-bold text-center text-purple-accent mb-8">
+    <AnimatedPage className="min-h-screen flex items-center justify-center p-4">
+      <AnimatedCard className="p-8 max-w-lg w-full">
+        <motion.h1
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="text-2xl font-bold text-center text-accent mb-8"
+        >
           {t('general.title')}
-        </h1>
+        </motion.h1>
 
-        {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-4">
-            {error}
-          </div>
-        )}
+        <AnimatePresence mode="wait">
+          {error && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              className="mb-4"
+            >
+              <Alert variant="destructive">
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
-        <div className="mb-8">
-          <p className="text-text font-medium mb-4">{t('general.goalsQuestion')}</p>
-          <div className="flex flex-wrap gap-3">
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.2 }}
+          className="mb-8"
+        >
+          <p className="text-foreground font-medium mb-4">{t('general.goalsQuestion')}</p>
+          <motion.div
+            variants={staggerContainer}
+            initial="initial"
+            animate="animate"
+            className="flex flex-wrap gap-3"
+          >
             {GOAL_OPTIONS.map(({ id, labelKey }) => (
-              <Button
-                key={id}
-                variant="option"
-                selected={selectedGoals.includes(id)}
-                onClick={() => toggleGoal(id)}
-              >
-                {t(labelKey)}
-              </Button>
+              <motion.div key={id} variants={staggerItem}>
+                <Button
+                  variant="option"
+                  selected={selectedGoals.includes(id)}
+                  onClick={() => toggleGoal(id)}
+                >
+                  {t(labelKey)}
+                </Button>
+              </motion.div>
             ))}
-          </div>
-        </div>
+          </motion.div>
+        </motion.div>
 
-        <div className="mb-8">
-          <p className="text-text font-medium mb-4">{t('general.durationQuestion')}</p>
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.4 }}
+          className="mb-8"
+        >
+          <p className="text-foreground font-medium mb-4">{t('general.durationQuestion')}</p>
           <Slider
             min={0}
             max={10}
-            value={duration}
-            onChange={(e) => setDuration(Number(e.target.value))}
+            value={[duration]}
+            onValueChange={(values) => setDuration(values[0])}
             displayValue={getDurationLabel(duration)}
           />
-        </div>
+        </motion.div>
 
-        <Button
-          onClick={handleSubmit}
-          loading={isSubmitting}
-          disabled={selectedGoals.length === 0}
-          className="w-full"
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.5 }}
         >
-          {t('general.continue')}
-        </Button>
-      </div>
-    </div>
+          <Button
+            onClick={handleSubmit}
+            loading={isSubmitting}
+            disabled={selectedGoals.length === 0}
+            className="w-full"
+          >
+            {t('general.continue')}
+          </Button>
+        </motion.div>
+      </AnimatedCard>
+    </AnimatedPage>
   );
 }

@@ -1,7 +1,10 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useLanguage } from '../contexts/LanguageContext';
-import { Button } from '../components/common';
+import { Button, AnimatedCard, Alert, AlertDescription } from '@/components/ui';
+import { AnimatedPage } from '@/components/layout/AnimatedPage';
+import { staggerContainer, staggerItem } from '@/lib/animations';
 import { updateCategories } from '../api/assessment';
 
 const CATEGORY_OPTIONS = [
@@ -47,40 +50,65 @@ export function CategoriesPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4">
-      <div className="bg-card rounded-2xl shadow-xl p-8 max-w-lg w-full">
-        <h1 className="text-2xl font-bold text-center text-purple-accent mb-8">
-          {t('categories.title')}
-        </h1>
-
-        {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-4">
-            {error}
-          </div>
-        )}
-
-        <div className="flex flex-wrap gap-3 mb-8">
-          {CATEGORY_OPTIONS.map(({ id, labelKey }) => (
-            <Button
-              key={id}
-              variant="option"
-              selected={selectedCategories.includes(id)}
-              onClick={() => toggleCategory(id)}
-            >
-              {t(labelKey)}
-            </Button>
-          ))}
-        </div>
-
-        <Button
-          onClick={handleSubmit}
-          loading={isSubmitting}
-          disabled={selectedCategories.length === 0}
-          className="w-full"
+    <AnimatedPage className="min-h-screen flex items-center justify-center p-4">
+      <AnimatedCard className="p-8 max-w-lg w-full">
+        <motion.h1
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="text-2xl font-bold text-center text-accent mb-8"
         >
-          {t('categories.continue')}
-        </Button>
-      </div>
-    </div>
+          {t('categories.title')}
+        </motion.h1>
+
+        <AnimatePresence mode="wait">
+          {error && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              className="mb-4"
+            >
+              <Alert variant="destructive">
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        <motion.div
+          variants={staggerContainer}
+          initial="initial"
+          animate="animate"
+          className="flex flex-wrap gap-3 mb-8"
+        >
+          {CATEGORY_OPTIONS.map(({ id, labelKey }) => (
+            <motion.div key={id} variants={staggerItem}>
+              <Button
+                variant="option"
+                selected={selectedCategories.includes(id)}
+                onClick={() => toggleCategory(id)}
+              >
+                {t(labelKey)}
+              </Button>
+            </motion.div>
+          ))}
+        </motion.div>
+
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.4 }}
+        >
+          <Button
+            onClick={handleSubmit}
+            loading={isSubmitting}
+            disabled={selectedCategories.length === 0}
+            className="w-full"
+          >
+            {t('categories.continue')}
+          </Button>
+        </motion.div>
+      </AnimatedCard>
+    </AnimatedPage>
   );
 }

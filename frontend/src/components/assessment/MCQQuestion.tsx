@@ -1,3 +1,7 @@
+import { motion } from 'framer-motion';
+import { cn } from '@/lib/utils';
+import { staggerContainer, staggerItem } from '@/lib/animations';
+
 interface Option {
   id: string;
   text: string;
@@ -11,20 +15,29 @@ interface MCQQuestionProps {
 
 export function MCQQuestion({ options, selectedId, onChange }: MCQQuestionProps) {
   return (
-    <div className="space-y-3">
+    <motion.div
+      variants={staggerContainer}
+      initial="initial"
+      animate="animate"
+      className="space-y-3"
+    >
       {options.map((option) => (
-        <button
+        <motion.button
           key={option.id}
+          variants={staggerItem}
           onClick={() => onChange(option.id)}
-          className={`w-full text-left px-4 py-3 rounded-lg border-2 transition-all ${
+          className={cn(
+            'w-full text-left px-4 py-3 rounded-lg border-2 transition-all',
             selectedId === option.id
               ? 'bg-primary/10 border-primary text-primary'
-              : 'bg-white border-gray-200 hover:border-primary/50 text-text'
-          }`}
+              : 'bg-card border-gray-200 hover:border-primary/50 text-foreground'
+          )}
+          whileHover={{ scale: 1.01 }}
+          whileTap={{ scale: 0.99 }}
         >
           {option.text}
-        </button>
+        </motion.button>
       ))}
-    </div>
+    </motion.div>
   );
 }

@@ -49,3 +49,11 @@ htmlcov/
 *.log
 tmp/
 temp/
+
+# Frontend build artifacts (built inside Docker)
+frontend/node_modules/
+frontend/dist/
+
+# Service account (injected via Cloud Run)
+service-account.json
+*-firebase-adminsdk-*.json

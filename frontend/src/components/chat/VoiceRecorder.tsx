@@ -1,3 +1,7 @@
+import { motion } from 'framer-motion';
+import { Mic, Square } from 'lucide-react';
+import { cn } from '@/lib/utils';
+
 interface VoiceRecorderProps {
   isRecording: boolean;
   onToggleRecording: () => void;
@@ -10,32 +14,29 @@ export function VoiceRecorder({
   disabled = false,
 }: VoiceRecorderProps) {
   return (
-    <button
+    <motion.button
       onClick={onToggleRecording}
       disabled={disabled}
-      className={`w-16 h-16 flex items-center justify-center rounded-full transition-all ${
+      className={cn(
+        'w-16 h-16 flex items-center justify-center rounded-full transition-colors',
+        isRecording ? 'bg-destructive' : 'bg-success hover:bg-success/90',
+        disabled && 'opacity-50 cursor-not-allowed'
+      )}
+      animate={
         isRecording
-          ? 'bg-red-500 animate-pulse-recording'
-          : 'bg-success hover:bg-success/90'
-      } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+          ? {
+              scale: [1, 1.05, 1],
+              transition: { duration: 1.5, repeat: Infinity, ease: 'easeInOut' },
+            }
+          : { scale: 1 }
+      }
+      whileTap={{ scale: 0.95 }}
     >
-      <svg
-        className="w-8 h-8 text-white"
-        fill="none"
-        stroke="currentColor"
-        viewBox="0 0 24 24"
-      >
-        {isRecording ? (
-          <rect x="6" y="6" width="12" height="12" strokeWidth="2" fill="currentColor" />
-        ) : (
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"
-          />
-        )}
-      </svg>
-    </button>
+      {isRecording ? (
+        <Square className="w-8 h-8 text-white fill-white" />
+      ) : (
+        <Mic className="w-8 h-8 text-white" />
+      )}
+    </motion.button>
   );
 }

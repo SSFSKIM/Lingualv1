@@ -1,9 +1,13 @@
 import { useState, useEffect, useRef } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Loader2 } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useChat } from '../hooks/useChat';
 import { useVoiceRecorder } from '../hooks/useVoiceRecorder';
 import { getUserProfile } from '../api/user';
-import { LoadingSpinner } from '../components/common';
+import { Card, Alert, AlertDescription } from '@/components/ui';
+import { AnimatedPage } from '@/components/layout/AnimatedPage';
+import { messageVariants } from '@/lib/animations';
 import {
   ChatMessage,
   ChatInput,
@@ -119,82 +123,139 @@ export function ChatPage() {
   };
 
   return (
-    <div className="min-h-screen bg-background p-4">
+    <AnimatedPage className="min-h-screen bg-background p-4">
       <div className="max-w-6xl mx-auto flex gap-6">
         {/* Main Chat Area */}
-        <div className="flex-1 bg-card rounded-2xl shadow-lg flex flex-col h-[calc(100vh-2rem)]">
+        <Card className="flex-1 flex flex-col h-[calc(100vh-2rem)] shadow-lg">
           {/* Header */}
-          <div className="p-4 border-b border-gray-100">
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="p-4 border-b border-gray-100"
+          >
             <div className="flex justify-between items-center">
               <div>
-                <h1 className="text-xl font-bold text-purple-accent">
+                <h1 className="text-xl font-bold text-accent">
                   {t('chat.title')}
                 </h1>
-                <p className="text-sm text-text-secondary">{t('chat.subtitle')}</p>
+                <p className="text-sm text-muted-foreground">{t('chat.subtitle')}</p>
               </div>
               <ModeToggle mode={mode} onModeChange={setMode} />
             </div>
-          </div>
+          </motion.div>
 
           {/* Messages */}
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
-            {messages.map((message) => (
-              <ChatMessage
-                key={message.id}
-                role={message.role}
-                content={message.content}
-              />
-            ))}
+            <AnimatePresence initial={false}>
+              {messages.map((message) => (
+                <motion.div
+                  key={message.id}
+                  variants={messageVariants}
+                  initial="initial"
+                  animate="animate"
+                  layout
+                >
+                  <ChatMessage
+                    role={message.role}
+                    content={message.content}
+                  />
+                </motion.div>
+              ))}
+            </AnimatePresence>
 
-            {isLoading && (
-              <div className="flex justify-start">
-                <div className="bg-gray-100 px-4 py-3 rounded-2xl rounded-bl-md">
-                  <LoadingSpinner size="sm" />
-                </div>
-              </div>
-            )}
+            <AnimatePresence>
+              {isLoading && (
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0 }}
+                  className="flex justify-start"
+                >
+                  <div className="bg-muted px-4 py-3 rounded-2xl rounded-bl-md">
+                    <motion.div
+                      animate={{ rotate: 360 }}
+                      transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+                    >
+                      <Loader2 className="h-5 w-5 text-primary" />
+                    </motion.div>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
 
-            {error && (
-              <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
-                {error}
-              </div>
-            )}
+            <AnimatePresence>
+              {error && (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.95 }}
+                >
+                  <Alert variant="destructive">
+                    <AlertDescription>{error}</AlertDescription>
+                  </Alert>
+                </motion.div>
+              )}
+            </AnimatePresence>
 
             <div ref={messagesEndRef} />
           </div>
 
           {/* Input Area */}
-          <div className="p-4 border-t border-gray-100">
-            {mode === 'text' ? (
-              <ChatInput
-                value={inputValue}
-                onChange={setInputValue}
-                onSend={handleSendText}
-                disabled={isLoading}
-                placeholder={t('chat.placeholder')}
-              />
-            ) : (
-              <div className="flex justify-center">
-                <VoiceRecorder
-                  isRecording={isRecording}
-                  onToggleRecording={handleToggleRecording}
-                  disabled={isLoading}
-                />
-              </div>
-            )}
-          </div>
-        </div>
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="p-4 border-t border-gray-100"
+          >
+            <AnimatePresence mode="wait">
+              {mode === 'text' ? (
+                <motion.div
+                  key="text-input"
+                  initial={{ opacity: 0, x: -10 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: 10 }}
+                >
+                  <ChatInput
+                    value={inputValue}
+                    onChange={setInputValue}
+                    onSend={handleSendText}
+                    disabled={isLoading}
+                    placeholder={t('chat.placeholder')}
+                  />
+                </motion.div>
+              ) : (
+                <motion.div
+                  key="voice-input"
+                  initial={{ opacity: 0, x: 10 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -10 }}
+                  className="flex justify-center"
+                >
+                  <VoiceRecorder
+                    isRecording={isRecording}
+                    onToggleRecording={handleToggleRecording}
+                    disabled={isLoading}
+                  />
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </motion.div>
+        </Card>
 
         {/* Sidebar */}
-        <div className="hidden lg:block w-72">
+        <motion.div
+          initial={{ opacity: 0, x: 20 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ delay: 0.2 }}
+          className="hidden lg:block w-72"
+        >
           <ProfileSidebar
             level={profile?.sklcLevel}
             goals={profile?.goals}
             onClearChat={handleClearChat}
             aiState={aiState}
           />
-        </div>
+        </motion.div>
       </div>
-    </div>
+    </AnimatedPage>
   );
 }
