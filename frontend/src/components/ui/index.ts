@@ -15,3 +15,26 @@ export { Label } from './label';
 export { Badge, badgeVariants, type BadgeProps } from './badge';
 export { Alert, AlertTitle, AlertDescription } from './alert';
 export { AnimatedCard } from './animated-card';
+export {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuGroup,
+  DropdownMenuPortal,
+} from './dropdown-menu';
+export { Avatar, AvatarImage, AvatarFallback } from './avatar';
+export {
+  Dialog,
+  DialogPortal,
+  DialogOverlay,
+  DialogClose,
+  DialogTrigger,
+  DialogContent,
+  DialogHeader,
+  DialogFooter,
+  DialogTitle,
+  DialogDescription,
+} from './dialog';

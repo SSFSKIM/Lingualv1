@@ -17,6 +17,8 @@ export interface UserProfile {
     pronunciation: number;
   };
   goals?: string[];
+  learningDuration?: number;
+  selectedCategories?: string[];
 }
 
 // Assessment Types

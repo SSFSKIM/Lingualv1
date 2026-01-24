@@ -10,6 +10,7 @@ import {
   AssessmentPage,
   CategoriesPage,
   ChatPage,
+  ProfilePage,
 } from './pages';
 
 function AnimatedRoutes() {
@@ -28,6 +29,7 @@ function AnimatedRoutes() {
           <Route path="/assessment" element={<AssessmentPage />} />
           <Route path="/categories" element={<CategoriesPage />} />
           <Route path="/chat" element={<ChatPage />} />
+          <Route path="/profile" element={<ProfilePage />} />
         </Route>
       </Routes>
     </AnimatePresence>

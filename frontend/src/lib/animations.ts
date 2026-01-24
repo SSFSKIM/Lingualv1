@@ -160,3 +160,33 @@ export const scaleOnHover = {
   whileHover: { scale: 1.02 },
   whileTap: { scale: 0.98 },
 };
+
+// Header slide down animation
+export const headerVariants: Variants = {
+  initial: { y: -60, opacity: 0 },
+  animate: {
+    y: 0,
+    opacity: 1,
+    transition: {
+      duration: 0.3,
+      ease: 'easeOut',
+    },
+  },
+};
+
+// Dropdown menu animation
+export const dropdownVariants: Variants = {
+  initial: { opacity: 0, scale: 0.95, y: -10 },
+  animate: {
+    opacity: 1,
+    scale: 1,
+    y: 0,
+    transition: { duration: 0.15 },
+  },
+  exit: {
+    opacity: 0,
+    scale: 0.95,
+    y: -10,
+    transition: { duration: 0.1 },
+  },
+};

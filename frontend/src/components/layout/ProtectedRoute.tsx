@@ -1,6 +1,7 @@
 import { Navigate, Outlet } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
 import { LoadingSpinner } from '../common';
+import { AppLayout } from './AppLayout';
 
 export function ProtectedRoute() {
   const { user, loading } = useAuth();
@@ -17,5 +18,9 @@ export function ProtectedRoute() {
     return <Navigate to="/auth" replace />;
   }
 
-  return <Outlet />;
+  return (
+    <AppLayout>
+      <Outlet />
+    </AppLayout>
+  );
 }

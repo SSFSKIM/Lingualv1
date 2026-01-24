@@ -428,13 +428,38 @@ def serve_audio(filename):
 
 
 @app.route('/api/user/profile')
+@login_required
 def api_user_profile():
-    results = session.get('assessment_results', {})
-    goals = session.get('user_goals', [])
+    """Get user profile from database."""
+    uid = get_current_user_uid()
 
-    if not results:
+    # Get user data from database
+    user_data = db.get_user(uid)
+
+    if not user_data:
         return jsonify({
             'assessed': False,
+            'message': 'User not found'
+        }), 404
+
+    # Extract profile data
+    profile = user_data.get('profile', {})
+    results = user_data.get('results')
+    assessment = user_data.get('assessment', {})
+
+    goals = profile.get('goals', [])
+    learning_duration = profile.get('learning_duration', 0)
+    selected_categories = user_data.get('selected_categories', [])
+
+    # Check if assessment is completed
+    is_assessed = assessment.get('completed', False) and results is not None
+
+    if not is_assessed:
+        return jsonify({
+            'assessed': False,
+            'goals': goals,
+            'learning_duration': learning_duration,
+            'selected_categories': selected_categories,
             'message': 'Please complete the assessment first'
         })
 
@@ -447,7 +472,9 @@ def api_user_profile():
         'sklc_level': sklc_info['level'],
         'sklc_description': sklc_info['description'],
         'domain_bands': results.get('domain_bands', {}),
-        'goals': goals
+        'goals': goals,
+        'learning_duration': learning_duration,
+        'selected_categories': selected_categories
     })
 
 

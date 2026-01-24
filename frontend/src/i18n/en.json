@@ -49,5 +49,26 @@
   "chat.yourGoals": "Your Goals",
   "chat.tips": "Tips",
   "chat.tipContent": "Try speaking in Korean! Lingu will help you improve.",
-  "chat.welcome": "안녕하세요! I'm Lingu, your Korean language tutor. How can I help you today?"
+  "chat.welcome": "안녕하세요! I'm Lingu, your Korean language tutor. How can I help you today?",
+
+  "nav.profile": "Profile",
+  "nav.settings": "Settings",
+  "nav.logout": "Logout",
+  "nav.back": "Back",
+
+  "profile.title": "Your Profile",
+  "profile.learningProgress": "Learning Progress",
+  "profile.yourLevel": "Your Level",
+  "profile.domainScores": "Domain Scores",
+  "profile.goals": "Your Goals",
+  "profile.account": "Account",
+  "profile.grammar": "Grammar",
+  "profile.vocabulary": "Vocabulary",
+  "profile.pragmatics": "Pragmatics",
+  "profile.pronunciation": "Pronunciation",
+
+  "logout.title": "Logout",
+  "logout.confirm": "Are you sure you want to log out?",
+  "logout.cancel": "Cancel",
+  "logout.confirm_button": "Log Out"
 }

@@ -13,6 +13,8 @@ export interface ProfileResponse {
     pronunciation: number;
   };
   goals?: string[];
+  learning_duration?: number;
+  selected_categories?: string[];
 }
 
 export const getUserProfile = async (): Promise<UserProfile> => {
@@ -26,6 +28,8 @@ export const getUserProfile = async (): Promise<UserProfile> => {
     sklcDescription: data.sklc_description,
     domainBands: data.domain_bands,
     goals: data.goals,
+    learningDuration: data.learning_duration,
+    selectedCategories: data.selected_categories,
   };
 };
 
