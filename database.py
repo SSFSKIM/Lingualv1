@@ -27,7 +27,16 @@ Schema:
         - domain_raw_scores: dict (domain -> score)
         - item_scores: dict (item_id -> score)
     - selected_categories: list[str]
-    - chat_history: list[dict] (role, content)
+    - chat_history: list[dict] (role, content) [DEPRECATED - kept for migration]
+
+- users/{uid}/chats/{chat_id}
+    - title: str (auto-generated from first message or default)
+    - created_at: timestamp
+    - updated_at: timestamp
+    - messages: list[dict]
+        - role: str ('user' or 'assistant')
+        - content: str
+        - timestamp: str (ISO format)
 """
 
 from firebase_admin import firestore
@@ -252,3 +261,117 @@ def get_user_profile_context(uid):
             'selected_categories': user.get('selected_categories', [])
         }
     return None
+
+
+# ============================================
+# CHAT SESSION FUNCTIONS
+# ============================================
+
+def get_chats_collection(uid):
+    """Get reference to user's chats subcollection."""
+    return get_user_ref(uid).collection('chats')
+
+
+def create_chat_session(uid, title=None):
+    """Create a new chat session for user."""
+    chats_ref = get_chats_collection(uid)
+    chat_data = {
+        'title': title or 'New Chat',
+        'created_at': firestore.SERVER_TIMESTAMP,
+        'updated_at': firestore.SERVER_TIMESTAMP,
+        'messages': []
+    }
+    doc_ref = chats_ref.add(chat_data)
+    return doc_ref[1].id  # Returns the document ID
+
+
+def _timestamp_to_iso(ts):
+    """Convert Firestore timestamp to ISO string."""
+    if ts is None:
+        return None
+    if hasattr(ts, 'isoformat'):
+        return ts.isoformat()
+    if hasattr(ts, 'seconds'):
+        # Firestore Timestamp object
+        return datetime.utcfromtimestamp(ts.seconds).isoformat()
+    return str(ts)
+
+
+def get_chat_sessions(uid, limit=50):
+    """Get all chat sessions for user, ordered by most recent."""
+    chats_ref = get_chats_collection(uid)
+    docs = chats_ref.order_by('updated_at', direction=firestore.Query.DESCENDING).limit(limit).stream()
+
+    sessions = []
+    for doc in docs:
+        data = doc.to_dict()
+        # Get preview from last message
+        messages = data.get('messages', [])
+        last_message = messages[-1] if messages else None
+
+        sessions.append({
+            'id': doc.id,
+            'title': data.get('title', 'New Chat'),
+            'created_at': _timestamp_to_iso(data.get('created_at')),
+            'updated_at': _timestamp_to_iso(data.get('updated_at')),
+            'message_count': len(messages),
+            'last_message': last_message.get('content', '')[:50] if last_message else None
+        })
+    return sessions
+
+
+def get_chat_session(uid, chat_id):
+    """Get a specific chat session with all messages."""
+    chat_ref = get_chats_collection(uid).document(chat_id)
+    doc = chat_ref.get()
+
+    if doc.exists:
+        data = doc.to_dict()
+        return {
+            'id': doc.id,
+            'title': data.get('title', 'New Chat'),
+            'created_at': _timestamp_to_iso(data.get('created_at')),
+            'updated_at': _timestamp_to_iso(data.get('updated_at')),
+            'messages': data.get('messages', [])
+        }
+    return None
+
+
+def add_message_to_chat(uid, chat_id, role, content):
+    """Add a message to a chat session."""
+    chat_ref = get_chats_collection(uid).document(chat_id)
+    message = {
+        'role': role,
+        'content': content,
+        'timestamp': datetime.utcnow().isoformat()
+    }
+
+    chat_ref.update({
+        'messages': firestore.ArrayUnion([message]),
+        'updated_at': firestore.SERVER_TIMESTAMP
+    })
+    return message
+
+
+def update_chat_title(uid, chat_id, title):
+    """Update the title of a chat session."""
+    chat_ref = get_chats_collection(uid).document(chat_id)
+    chat_ref.update({
+        'title': title,
+        'updated_at': firestore.SERVER_TIMESTAMP
+    })
+
+
+def delete_chat_session(uid, chat_id):
+    """Delete a chat session."""
+    chat_ref = get_chats_collection(uid).document(chat_id)
+    chat_ref.delete()
+
+
+def get_chat_messages_for_context(uid, chat_id, limit=20):
+    """Get recent messages from a chat for AI context."""
+    session = get_chat_session(uid, chat_id)
+    if session:
+        messages = session.get('messages', [])
+        return messages[-limit:] if len(messages) > limit else messages
+    return []

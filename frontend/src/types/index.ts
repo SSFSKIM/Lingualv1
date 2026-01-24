@@ -105,6 +105,30 @@ export interface ChatMessage {
   timestamp: string;
 }
 
+// Raw message from API (no id)
+export interface RawChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: string;
+}
+
+export interface ChatSession {
+  id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+  message_count: number;
+  last_message?: string;
+}
+
+export interface ChatSessionDetail {
+  id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+  messages: RawChatMessage[];
+}
+
 export interface ChatResponse {
   success: boolean;
   response?: string;

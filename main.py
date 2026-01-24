@@ -447,6 +447,158 @@ def serve_audio(filename):
         return jsonify({'error': str(e)}), 500
 
 
+# ============================================
+# CHAT SESSION API ENDPOINTS
+# ============================================
+
+@app.route('/api/chats', methods=['GET'])
+@login_required
+def api_get_chats():
+    """Get all chat sessions for the user."""
+    uid = get_current_user_uid()
+    try:
+        sessions = db.get_chat_sessions(uid)
+        return jsonify({
+            'success': True,
+            'chats': sessions
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/chats', methods=['POST'])
+@login_required
+def api_create_chat():
+    """Create a new chat session."""
+    uid = get_current_user_uid()
+    data = request.get_json() or {}
+    title = data.get('title', 'New Chat')
+
+    try:
+        chat_id = db.create_chat_session(uid, title)
+        return jsonify({
+            'success': True,
+            'chatId': chat_id,
+            'title': title
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/chats/<chat_id>', methods=['GET'])
+@login_required
+def api_get_chat(chat_id):
+    """Get a specific chat session with messages."""
+    uid = get_current_user_uid()
+    try:
+        chat = db.get_chat_session(uid, chat_id)
+        if not chat:
+            return jsonify({'success': False, 'error': 'Chat not found'}), 404
+        return jsonify({
+            'success': True,
+            'chat': chat
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/chats/<chat_id>', methods=['DELETE'])
+@login_required
+def api_delete_chat(chat_id):
+    """Delete a chat session."""
+    uid = get_current_user_uid()
+    try:
+        db.delete_chat_session(uid, chat_id)
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/chats/<chat_id>/title', methods=['PUT'])
+@login_required
+def api_update_chat_title(chat_id):
+    """Update a chat session's title."""
+    uid = get_current_user_uid()
+    data = request.get_json()
+    title = data.get('title')
+
+    if not title:
+        return jsonify({'success': False, 'error': 'Title is required'}), 400
+
+    try:
+        db.update_chat_title(uid, chat_id, title)
+        return jsonify({'success': True, 'title': title})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/chats/<chat_id>/messages', methods=['POST'])
+@login_required
+def api_send_chat_message(chat_id):
+    """Send a message in a specific chat session."""
+    uid = get_current_user_uid()
+    data = request.get_json()
+    user_message = data.get('message', '').strip()
+
+    if not user_message:
+        return jsonify({'success': False, 'error': 'Message is required'}), 400
+
+    if not os.environ.get('OPENAI_API_KEY'):
+        return jsonify({'success': False, 'error': 'OpenAI API key not configured'}), 500
+
+    try:
+        # Load chat history for this specific chat
+        chat = db.get_chat_session(uid, chat_id)
+        if not chat:
+            return jsonify({'success': False, 'error': 'Chat not found'}), 404
+
+        chat_messages = chat.get('messages', [])
+
+        proficiency_context = get_user_proficiency_context()
+        system_prompt = build_system_prompt(proficiency_context)
+
+        messages = [{"role": "system", "content": system_prompt}]
+
+        # Include recent messages for context
+        for msg in chat_messages[-10:]:
+            messages.append({"role": msg["role"], "content": msg["content"]})
+
+        messages.append({"role": "user", "content": user_message})
+
+        client = get_openai_client()
+        if not client:
+            return jsonify({'success': False, 'error': 'OpenAI client not initialized'}), 500
+
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=messages,
+            max_tokens=500,
+            temperature=0.7
+        )
+
+        assistant_message = response.choices[0].message.content
+
+        # Save messages to this specific chat
+        user_msg = db.add_message_to_chat(uid, chat_id, "user", user_message)
+        assistant_msg = db.add_message_to_chat(uid, chat_id, "assistant", assistant_message)
+
+        # Auto-generate title from first user message if it's a new chat
+        if len(chat_messages) == 0:
+            # Generate a short title from the first message
+            title = user_message[:30] + ('...' if len(user_message) > 30 else '')
+            db.update_chat_title(uid, chat_id, title)
+
+        return jsonify({
+            'success': True,
+            'response': assistant_message,
+            'userMessage': user_msg,
+            'assistantMessage': assistant_msg
+        })
+
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/api/user/profile')
 @login_required
 def api_user_profile():

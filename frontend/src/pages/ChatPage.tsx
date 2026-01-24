@@ -1,11 +1,17 @@
 import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Plus, MessageSquare, Trash2, ChevronLeft } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
-import { useChat } from '../hooks/useChat';
 import { useRealtimeChat } from '../hooks/useRealtimeChat';
 import { getUserProfile } from '../api/user';
-import { Card, Alert, AlertDescription } from '@/components/ui';
+import {
+  getChatSessions,
+  createChatSession,
+  getChatSession,
+  deleteChatSession,
+  sendChatMessage,
+} from '../api/chat';
+import { Card, Alert, AlertDescription, Button } from '@/components/ui';
 import { AnimatedPage } from '@/components/layout/AnimatedPage';
 import { messageVariants } from '@/lib/animations';
 import {
@@ -13,35 +19,33 @@ import {
   ChatInput,
   ProfileSidebar,
 } from '../components/chat';
-import type { UserProfile, ChatMessage as ChatMessageType } from '../types';
+import type {
+  UserProfile,
+  ChatMessage as ChatMessageType,
+  ChatSession,
+  ChatSessionDetail,
+} from '../types';
 
 type Mode = 'text' | 'realtime';
+type View = 'list' | 'chat';
 
 export function ChatPage() {
   const { t } = useLanguage();
+  const [view, setView] = useState<View>('list');
   const [mode, setMode] = useState<Mode>('realtime');
   const [inputValue, setInputValue] = useState('');
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [aiState, setAiState] = useState<'speak' | 'notalk' | 'bruh'>('notalk');
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const initialMessages: ChatMessageType[] = [
-    {
-      id: 'welcome',
-      role: 'assistant',
-      content: t('chat.welcome'),
-      timestamp: new Date().toISOString(),
-    },
-  ];
-
-  // Text chat hook
-  const {
-    messages: textMessages,
-    isLoading,
-    error: textError,
-    sendTextMessage,
-    clearChat,
-  } = useChat(initialMessages);
+  // Chat sessions state
+  const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
+  const [loadingChats, setLoadingChats] = useState(true);
+  const [currentChatId, setCurrentChatId] = useState<string | null>(null);
+  const [currentChat, setCurrentChat] = useState<ChatSessionDetail | null>(null);
+  const [messages, setMessages] = useState<ChatMessageType[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   // Realtime chat hook
   const {
@@ -54,17 +58,18 @@ export function ChatPage() {
     disconnect,
   } = useRealtimeChat();
 
-  // Current messages and error based on mode
-  const messages = mode === 'realtime' ? realtimeMessages : textMessages;
-  const error = mode === 'realtime' ? realtimeError : textError;
+  // Use realtime messages when in realtime mode
+  const displayMessages = mode === 'realtime' ? realtimeMessages : messages;
+  const displayError = mode === 'realtime' ? realtimeError : error;
 
   useEffect(() => {
     loadProfile();
+    loadChatSessions();
   }, []);
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages]);
+  }, [displayMessages]);
 
   // Update AI state based on realtime status
   useEffect(() => {
@@ -96,27 +101,266 @@ export function ChatPage() {
     }
   };
 
+  const loadChatSessions = async () => {
+    setLoadingChats(true);
+    try {
+      const sessions = await getChatSessions();
+      setChatSessions(sessions);
+    } catch (err) {
+      console.error('Failed to load chat sessions:', err);
+    } finally {
+      setLoadingChats(false);
+    }
+  };
+
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
-  const handleSendText = async () => {
-    if (!inputValue.trim() || isLoading) return;
-
-    const message = inputValue;
-    setInputValue('');
-    setAiState('speak');
-
-    await sendTextMessage(message);
-    setAiState('notalk');
-  };
-
-  const handleClearChat = async () => {
-    if (confirm('Are you sure you want to clear the chat history?')) {
-      await clearChat();
+  const handleSelectChat = async (chatId: string) => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const chat = await getChatSession(chatId);
+      setCurrentChatId(chatId);
+      setCurrentChat(chat);
+      // Convert messages to ChatMessageType format
+      const formattedMessages: ChatMessageType[] = chat.messages.map((msg, index) => ({
+        id: `${chatId}-${index}`,
+        role: msg.role as 'user' | 'assistant',
+        content: msg.content,
+        timestamp: msg.timestamp,
+      }));
+      setMessages(formattedMessages);
+      setView('chat');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load chat');
+    } finally {
+      setIsLoading(false);
     }
   };
 
+  const handleNewChat = async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const { chatId } = await createChatSession();
+      setCurrentChatId(chatId);
+      setCurrentChat({
+        id: chatId,
+        title: 'New Chat',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        messages: [],
+      });
+      // Add welcome message
+      setMessages([
+        {
+          id: 'welcome',
+          role: 'assistant',
+          content: t('chat.welcome'),
+          timestamp: new Date().toISOString(),
+        },
+      ]);
+      setView('chat');
+      // Refresh chat list
+      loadChatSessions();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create chat');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleDeleteChat = async (chatId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!confirm(t('chat.deleteConfirm') || 'Are you sure you want to delete this chat?')) {
+      return;
+    }
+    try {
+      await deleteChatSession(chatId);
+      setChatSessions((prev) => prev.filter((c) => c.id !== chatId));
+      if (currentChatId === chatId) {
+        setCurrentChatId(null);
+        setCurrentChat(null);
+        setMessages([]);
+        setView('list');
+      }
+    } catch (err) {
+      console.error('Failed to delete chat:', err);
+    }
+  };
+
+  const handleBackToList = () => {
+    if (mode === 'realtime' && isConnected) {
+      disconnect();
+    }
+    setView('list');
+    setCurrentChatId(null);
+    setCurrentChat(null);
+    loadChatSessions();
+  };
+
+  const handleSendText = async () => {
+    if (!inputValue.trim() || isLoading || !currentChatId) return;
+
+    const message = inputValue;
+    setInputValue('');
+    setIsLoading(true);
+    setAiState('speak');
+
+    // Add user message immediately
+    const userMessage: ChatMessageType = {
+      id: `user-${Date.now()}`,
+      role: 'user',
+      content: message,
+      timestamp: new Date().toISOString(),
+    };
+    setMessages((prev) => [...prev, userMessage]);
+
+    try {
+      const response = await sendChatMessage(currentChatId, message);
+      // Add assistant message
+      const assistantMessage: ChatMessageType = {
+        id: `assistant-${Date.now()}`,
+        role: 'assistant',
+        content: response.response,
+        timestamp: new Date().toISOString(),
+      };
+      setMessages((prev) => [...prev, assistantMessage]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to send message');
+    } finally {
+      setIsLoading(false);
+      setAiState('notalk');
+    }
+  };
+
+  const formatDate = (dateStr: string) => {
+    if (!dateStr) return '';
+    const date = new Date(dateStr);
+    const now = new Date();
+    const diff = now.getTime() - date.getTime();
+    const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+
+    if (days === 0) {
+      return t('chat.today') || 'Today';
+    } else if (days === 1) {
+      return t('chat.yesterday') || 'Yesterday';
+    } else if (days < 7) {
+      return `${days} ${t('chat.daysAgo') || 'days ago'}`;
+    } else {
+      return date.toLocaleDateString();
+    }
+  };
+
+  // Chat List View
+  if (view === 'list') {
+    return (
+      <AnimatedPage className="min-h-screen bg-background p-4">
+        <div className="max-w-2xl mx-auto">
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mb-6"
+          >
+            <h1 className="text-2xl font-bold text-accent mb-2">
+              {t('chat.title')}
+            </h1>
+            <p className="text-muted-foreground">{t('chat.selectOrCreate')}</p>
+          </motion.div>
+
+          {/* New Chat Button */}
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.1 }}
+            className="mb-6"
+          >
+            <Button
+              onClick={handleNewChat}
+              className="w-full gap-2"
+              size="lg"
+              disabled={isLoading}
+            >
+              <Plus className="h-5 w-5" />
+              {t('chat.newChat')}
+            </Button>
+          </motion.div>
+
+          {/* Chat List */}
+          {loadingChats ? (
+            <div className="flex justify-center py-12">
+              <motion.div
+                animate={{ rotate: 360 }}
+                transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+              >
+                <Loader2 className="h-8 w-8 text-primary" />
+              </motion.div>
+            </div>
+          ) : chatSessions.length === 0 ? (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="text-center py-12"
+            >
+              <MessageSquare className="h-12 w-12 mx-auto text-muted-foreground/50 mb-4" />
+              <p className="text-muted-foreground">{t('chat.noChats')}</p>
+              <p className="text-sm text-muted-foreground/70 mt-1">
+                {t('chat.startNewChat')}
+              </p>
+            </motion.div>
+          ) : (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.2 }}
+              className="space-y-3"
+            >
+              {chatSessions.map((chat, index) => (
+                <motion.div
+                  key={chat.id}
+                  initial={{ opacity: 0, x: -20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: index * 0.05 }}
+                >
+                  <Card
+                    className="p-4 cursor-pointer hover:border-accent/50 transition-colors group"
+                    onClick={() => handleSelectChat(chat.id)}
+                  >
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1 min-w-0">
+                        <h3 className="font-medium truncate">{chat.title}</h3>
+                        {chat.last_message && (
+                          <p className="text-sm text-muted-foreground truncate mt-1">
+                            {chat.last_message}
+                          </p>
+                        )}
+                        <p className="text-xs text-muted-foreground/70 mt-2">
+                          {formatDate(chat.updated_at)} · {chat.message_count}{' '}
+                          {t('chat.messages')}
+                        </p>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="opacity-0 group-hover:opacity-100 transition-opacity h-8 w-8 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
+                        onClick={(e) => handleDeleteChat(chat.id, e)}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </Card>
+                </motion.div>
+              ))}
+            </motion.div>
+          )}
+        </div>
+      </AnimatedPage>
+    );
+  }
+
+  // Chat View
   return (
     <AnimatedPage className="min-h-screen bg-background p-4">
       <div className="max-w-6xl mx-auto flex gap-6">
@@ -129,11 +373,21 @@ export function ChatPage() {
             className="p-4 border-b border-gray-100"
           >
             <div className="flex justify-between items-center">
-              <div>
-                <h1 className="text-xl font-bold text-accent">
-                  {t('chat.title')}
-                </h1>
-                <p className="text-sm text-muted-foreground">{t('chat.subtitle')}</p>
+              <div className="flex items-center gap-3">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleBackToList}
+                  className="h-8 w-8 p-0"
+                >
+                  <ChevronLeft className="h-5 w-5" />
+                </Button>
+                <div>
+                  <h1 className="text-xl font-bold text-accent">
+                    {currentChat?.title || t('chat.title')}
+                  </h1>
+                  <p className="text-sm text-muted-foreground">{t('chat.subtitle')}</p>
+                </div>
               </div>
               {/* Custom Mode Toggle with Realtime option */}
               <div className="flex bg-gray-100 rounded-lg p-1">
@@ -166,7 +420,7 @@ export function ChatPage() {
           {/* Messages */}
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
             <AnimatePresence initial={false}>
-              {messages.map((message) => (
+              {displayMessages.map((message) => (
                 <motion.div
                   key={message.id}
                   variants={messageVariants}
@@ -203,14 +457,14 @@ export function ChatPage() {
             </AnimatePresence>
 
             <AnimatePresence>
-              {error && (
+              {displayError && (
                 <motion.div
                   initial={{ opacity: 0, scale: 0.95 }}
                   animate={{ opacity: 1, scale: 1 }}
                   exit={{ opacity: 0, scale: 0.95 }}
                 >
                   <Alert variant="destructive">
-                    <AlertDescription>{error}</AlertDescription>
+                    <AlertDescription>{displayError}</AlertDescription>
                   </Alert>
                 </motion.div>
               )}
@@ -316,8 +570,8 @@ export function ChatPage() {
         >
           <ProfileSidebar
             level={profile?.sklcLevel}
-            goals={profile?.goals}
-            onClearChat={handleClearChat}
+            goals={profile?.levelObjective}
+            onClearChat={handleBackToList}
             aiState={aiState}
           />
         </motion.div>

@@ -3,17 +3,19 @@ import { Button } from '../common';
 
 interface ProfileSidebarProps {
   level?: string;
-  goals?: string[];
+  goals?: string | string[];
   onClearChat: () => void;
   aiState?: 'speak' | 'notalk' | 'bruh';
 }
 
 export function ProfileSidebar({
   level,
-  goals = [],
+  goals,
   onClearChat,
   aiState = 'notalk',
 }: ProfileSidebarProps) {
+  // Normalize goals to always be an array or single string display
+  const goalsArray = Array.isArray(goals) ? goals : goals ? [goals] : [];
   const { t } = useLanguage();
 
   const aiImages: Record<string, string> = {
@@ -41,13 +43,13 @@ export function ProfileSidebar({
         </div>
       )}
 
-      {goals.length > 0 && (
+      {goalsArray.length > 0 && (
         <div className="mb-4">
           <h3 className="text-sm font-medium text-text-secondary mb-1">
             {t('chat.yourGoals')}
           </h3>
           <div className="flex flex-wrap gap-1">
-            {goals.map((goal, index) => (
+            {goalsArray.map((goal, index) => (
               <span
                 key={index}
                 className="px-2 py-1 bg-gray-100 rounded text-sm text-text"
