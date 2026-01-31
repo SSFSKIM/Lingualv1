@@ -1038,6 +1038,77 @@ def api_update_categories():
 
 
 # ============================================
+# FLASHCARDFLIP
+# ============================================
+
+@app.route('/api/minigames/flashcards', methods=['POST'])
+@login_required
+def generate_flashcards():
+    """Generate flashcards from recent chat messages"""
+    uid = get_current_user_uid()
+    data = request.get_json() or {}
+    chat_id = data.get('chatId')
+    
+    if not chat_id:
+        return jsonify({'error': 'chatId is required'}), 400
+    
+    # Get last 10 messages from the chat
+    messages = db.get_chat_messages_for_context(uid, chat_id, limit=10)
+    
+    if not messages:
+        return jsonify({'error': 'No messages found in this chat'}), 400
+    
+    # Format messages for the AI prompt
+    conversation_text = "\n".join([
+        f"{msg.get('role', 'user')}: {msg.get('content', '')}" 
+        for msg in messages
+    ])
+    
+    # Generate flashcards using OpenAI
+    prompt = f"""Based on this Korean language learning conversation, create exactly 10 flashcards for vocabulary practice.
+
+Conversation:
+{conversation_text}
+
+Create flashcards with Korean words/phrases from the conversation that would be useful to learn.
+Return ONLY a JSON array with exactly 10 flashcard objects in this format:
+[
+  {{"korean": "안녕하세요", "english": "Hello"}},
+  {{"korean": "감사합니다", "english": "Thank you"}}
+]
+
+If there aren't enough words in the conversation, add common related Korean vocabulary.
+Return ONLY the JSON array, no other text."""
+
+    try:
+        client = get_openai_client()
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "You are a Korean language tutor. Return only valid JSON."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.7
+        )
+        
+        result = response.choices[0].message.content.strip()
+        # Clean up response if needed
+        if result.startswith("```"):
+            result = result.split("\n", 1)[1]
+            result = result.rsplit("```", 1)[0]
+        
+        flashcards = json.loads(result)
+        return jsonify({'flashcards': flashcards})
+        
+    except Exception as e:
+        print(f"Error generating flashcards: {e}")
+        return jsonify({'error': 'Failed to generate flashcards'}), 500
+
+# FLASHCARDFLIP
+# ============================================
+
+
+# ============================================
 # REACT SPA SERVING (Main Frontend)
 # ============================================
 

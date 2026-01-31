@@ -12,6 +12,10 @@ import {
   sendChatMessage,
   saveMessageToChat,
 } from '../api/chat';
+// FLASHCARDFLIP
+import { generateFlashcards, type Flashcard } from '../api/minigames';
+import { FlashcardFlip } from '../components/minigames';
+// FLASHCARDFLIP
 import { Card, Alert, AlertDescription, Button } from '@/components/ui';
 import { AnimatedPage } from '@/components/layout/AnimatedPage';
 import { messageVariants } from '@/lib/animations';
@@ -47,6 +51,12 @@ export function ChatPage() {
   const [messages, setMessages] = useState<ChatMessageType[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // FLASHCARDFLIP
+  const [showFlashcards, setShowFlashcards] = useState(false);
+  const [flashcards, setFlashcards] = useState<Flashcard[]>([]);
+  const [loadingFlashcards, setLoadingFlashcards] = useState(false);
+  // FLASHCARDFLIP
 
   // Use ref for currentChatId to avoid stale closures in callback
   const currentChatIdRef = useRef<string | null>(null);
@@ -223,10 +233,44 @@ export function ChatPage() {
     loadChatSessions();
   };
 
+  // FLASHCARDFLIP
+  const handleMinigameCommand = async (command: string): Promise<boolean> => {
+    if (!currentChatId) return false;
+    
+    if (command.toLowerCase() === '!flashcardflip') {
+      setLoadingFlashcards(true);
+      try {
+        const cards = await generateFlashcards(currentChatId);
+        setFlashcards(cards);
+        setShowFlashcards(true);
+      } catch (err) {
+        setError('Failed to generate flashcards');
+      } finally {
+        setLoadingFlashcards(false);
+      }
+      return true;
+    }
+    
+    return false;
+  };
+  // FLASHCARDFLIP
+
   const handleSendText = async () => {
     if (!inputValue.trim() || isLoading || !currentChatId) return;
 
     const message = inputValue;
+    
+    // FLASHCARDFLIP
+    // Check for minigame commands first
+    if (message.startsWith('!')) {
+      setInputValue('');
+      const isCommand = await handleMinigameCommand(message.trim());
+      if (isCommand) return;
+      // If not a valid command, continue with normal message
+      setInputValue(message);
+    }
+    // FLASHCARDFLIP
+
     setInputValue('');
     setIsLoading(true);
     setAiState('speak');
@@ -598,6 +642,25 @@ export function ChatPage() {
           />
         </motion.div>
       </div>
+
+      {/* FLASHCARDFLIP */}
+      <AnimatePresence>
+        {showFlashcards && flashcards.length > 0 && (
+          <FlashcardFlip
+            flashcards={flashcards}
+            onClose={() => setShowFlashcards(false)}
+          />
+        )}
+      </AnimatePresence>
+      {loadingFlashcards && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl p-6 flex items-center gap-3">
+            <Loader2 className="h-6 w-6 animate-spin text-blue-600" />
+            <span>Generating flashcards...</span>
+          </div>
+        </div>
+      )}
+      {/* FLASHCARDFLIP */}
     </AnimatedPage>
   );
 }
