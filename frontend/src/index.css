@@ -96,3 +96,27 @@ p, span, h1, h2, h3, h4, h5, h6, .selectable {
 .animate-spin {
   animation: spin 1s linear infinite;
 }
+
+/* Custom scrollbar for minigames */
+.minigame-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: #94a3b8 #f1f5f9;
+}
+
+.minigame-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+
+.minigame-scroll::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-radius: 4px;
+}
+
+.minigame-scroll::-webkit-scrollbar-thumb {
+  background: #94a3b8;
+  border-radius: 4px;
+}
+
+.minigame-scroll::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
+}

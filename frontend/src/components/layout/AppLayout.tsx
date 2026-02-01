@@ -8,9 +8,9 @@ interface AppLayoutProps {
 
 export function AppLayout({ children, showHeader = true }: AppLayoutProps) {
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className="h-screen flex flex-col overflow-hidden">
       {showHeader && <Header />}
-      <main className={showHeader ? 'flex-1 pt-16' : 'flex-1'}>
+      <main className={showHeader ? 'flex-1 pt-16 overflow-hidden' : 'flex-1 overflow-hidden'}>
         {children}
       </main>
     </div>

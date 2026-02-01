@@ -428,10 +428,10 @@ export function ChatPage() {
 
   // Chat View
   return (
-    <AnimatedPage className="min-h-screen bg-background p-4">
-      <div className="max-w-6xl mx-auto flex gap-6">
+    <AnimatedPage className="h-full overflow-hidden bg-background p-4">
+      <div className="max-w-6xl mx-auto flex gap-6 h-full">
         {/* Main Chat Area */}
-        <Card className="flex-1 flex flex-col h-[calc(100vh-2rem)] shadow-lg">
+        <Card className="flex-1 flex flex-col h-full shadow-lg">
           {/* Header */}
           <motion.div
             initial={{ opacity: 0, y: -10 }}
@@ -632,12 +632,13 @@ export function ChatPage() {
           initial={{ opacity: 0, x: 20 }}
           animate={{ opacity: 1, x: 0 }}
           transition={{ delay: 0.2 }}
-          className="hidden lg:block w-72"
+          className="hidden lg:flex lg:flex-col w-72 h-full"
         >
           <ProfileSidebar
             level={profile?.sklcLevel}
             goals={profile?.levelObjective}
             onClearChat={handleBackToList}
+            onMinigameSelect={handleMinigameCommand}
             aiState={aiState}
           />
         </motion.div>
