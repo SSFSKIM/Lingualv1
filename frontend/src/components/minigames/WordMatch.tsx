@@ -97,6 +97,8 @@ export function WordMatch({ wordPairs, onClose }: WordMatchProps) {
           </div>
           <button
             onClick={onClose}
+            aria-label="Close word match"
+            title="Close"
             className="p-2 text-muted-foreground hover:text-foreground hover:bg-secondary rounded-xl border-2 border-transparent hover:border-border transition-colors"
           >
             <X size={28} strokeWidth={2.5} />

@@ -240,8 +240,8 @@ export function AssessmentPage() {
   const progressValue = ((currentIndex + 1) / items.length) * 100;
 
   return (
-    <AnimatedPage className="min-h-screen bg-background flex items-center justify-center p-6">
-      <Card className="p-8 max-w-3xl w-full">
+    <AnimatedPage className="min-h-screen bg-background overflow-y-auto py-8 px-6">
+      <Card className="p-8 max-w-3xl w-full mx-auto">
         {/* Header */}
         <div className="border-b-2 border-border pb-6 mb-6 space-y-5">
           <div className="flex items-start justify-between gap-4">

@@ -187,6 +187,11 @@ export function AppLearningPage() {
     if (isListening) return t('app.learn.status.listening');
     return t('app.learn.status.ready');
   }, [isConnecting, isConnected, isSpeaking, isListening, t]);
+  const micButtonLabel = useMemo(() => {
+    if (isConnecting) return t('app.learn.status.connecting');
+    if (isConnected) return t('app.learn.chat.input.connected');
+    return t('app.learn.chat.input.disconnected');
+  }, [isConnecting, isConnected, t]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -356,7 +361,7 @@ export function AppLearningPage() {
       const cards = await generateFlashcards(currentChatId);
       setFlashcards(cards);
       setShowFlashcards(true);
-    } catch (err) {
+    } catch (_err) {
       setError('Failed to generate flashcards');
     } finally {
       setLoadingFlashcards(false);
@@ -370,7 +375,7 @@ export function AppLearningPage() {
       const cards = await generateFlashcards(currentChatId);
       setWordMatchPairs(cards);
       setShowWordMatch(true);
-    } catch (err) {
+    } catch (_err) {
       setError('Failed to generate word match pairs');
     } finally {
       setLoadingWordMatch(false);
@@ -509,6 +514,24 @@ export function AppLearningPage() {
     pragmatics: 'bg-success/10 text-success border border-success/20',
     pronunciation: 'bg-foreground/10 text-foreground border border-foreground/20',
   };
+  const scoreWidthClasses: Record<number, string> = {
+    0: 'w-0',
+    1: 'w-[10%]',
+    2: 'w-[20%]',
+    3: 'w-[30%]',
+    4: 'w-[40%]',
+    5: 'w-[50%]',
+    6: 'w-[60%]',
+    7: 'w-[70%]',
+    8: 'w-[80%]',
+    9: 'w-[90%]',
+    10: 'w-[100%]',
+  };
+  const getScoreWidthClass = (score: number) => {
+    const rounded = Math.round(score);
+    const clamped = Math.min(10, Math.max(0, rounded));
+    return scoreWidthClasses[clamped] ?? 'w-0';
+  };
   const topDomain = domainEntries[0];
   const focusBadge = focusAreas.length > 0
     ? `${getCategoryLabel(focusAreas[0])}${focusAreas.length > 1 ? ` +${focusAreas.length - 1}` : ''}`
@@ -598,8 +621,11 @@ export function AppLearningPage() {
                   </div>
                   <div className="h-2 w-full rounded-lg bg-secondary border border-border overflow-hidden">
                     <div
-                      className={`h-full rounded-lg ${domainStyles[domain] || 'bg-muted-foreground'}`}
-                      style={{ width: `${score * 10}%` }}
+                      className={clsx(
+                        'h-full rounded-lg',
+                        domainStyles[domain] || 'bg-muted-foreground',
+                        getScoreWidthClass(score)
+                      )}
                     />
                   </div>
                 </div>
@@ -796,6 +822,8 @@ export function AppLearningPage() {
             )}
             <button
               onClick={createNewChat}
+              aria-label={t('app.learn.sessions.newChatTitle')}
+              title={t('app.learn.sessions.newChatTitle')}
               className="p-2 text-muted-foreground hover:text-foreground hover:bg-secondary rounded-xl border-2 border-transparent hover:border-border transition-colors"
             >
               <RefreshCcw size={20} strokeWidth={2.5} />
@@ -882,6 +910,9 @@ export function AppLearningPage() {
                 <button
                   onClick={handleRecordToggle}
                   disabled={!currentChatId || isConnecting}
+                  aria-label={micButtonLabel}
+                  aria-pressed={isConnected}
+                  title={micButtonLabel}
                   className={clsx(
                     'w-14 h-14 rounded-xl flex items-center justify-center border-2 border-foreground transition-all',
                     isConnected

@@ -309,11 +309,6 @@
 }
 
 /* Custom scrollbar - Warm Brutalism style */
-.minigame-scroll {
-  scrollbar-width: thin;
-  scrollbar-color: var(--border) var(--muted);
-}
-
 .minigame-scroll::-webkit-scrollbar {
   width: 10px;
 }

@@ -45,7 +45,7 @@ const indicatorVariants = cva('h-full rounded-lg', {
 });
 
 interface ProgressProps
-  extends React.ComponentPropsWithoutRef<typeof ProgressPrimitive.Root>,
+  extends Omit<React.ComponentPropsWithoutRef<typeof ProgressPrimitive.Root>, 'color'>,
     VariantProps<typeof progressVariants>,
     VariantProps<typeof indicatorVariants> {
   value?: number;
