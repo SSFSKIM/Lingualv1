@@ -18,6 +18,12 @@ export interface ProfileFormData {
   frequency: number | null;
   frequencyUnit: FrequencyUnit | null;
   levelObjective: string;
+  avatarUrl?: string;
+  contactEmail?: string;
+  gradeLevel?: string;
+  nativeLanguage?: string;
+  location?: string;
+  schoolName?: string;
 }
 
 export interface UserProfile {
@@ -29,6 +35,12 @@ export interface UserProfile {
   displayName?: string;
   age?: number;
   gender?: Gender;
+  avatarUrl?: string;
+  contactEmail?: string;
+  gradeLevel?: string;
+  nativeLanguage?: string;
+  location?: string;
+  schoolName?: string;
 
   // Learning preferences
   rigor?: Rigor;

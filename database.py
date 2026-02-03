@@ -16,6 +16,12 @@ Schema:
         - frequency_unit: str ('day', 'week', 'month')
         - level_objective: str (user's goal description)
         - ui_language: str ('en' or 'ko')
+        - avatar_url: str (profile image URL or data URI)
+        - contact_email: str (editable email address for profile)
+        - grade_level: str (e.g. "10th Grade")
+        - native_language: str (e.g. "English (US)")
+        - location: str (city/state or region)
+        - school_name: str
     - assessment:
         - responses: dict (item_id -> response)
         - current_item_index: int
@@ -70,7 +76,13 @@ def create_user(uid, email, name):
             'frequency': None,
             'frequency_unit': None,
             'level_objective': '',
-            'ui_language': 'en'
+            'ui_language': 'en',
+            'avatar_url': '',
+            'contact_email': '',
+            'grade_level': '',
+            'native_language': '',
+            'location': '',
+            'school_name': ''
         },
         'assessment': {
             'responses': {},
@@ -105,7 +117,9 @@ def get_or_create_user(uid, email, name):
 
 def update_user_profile(uid, display_name=None, age=None, gender=None,
                         rigor=None, frequency=None, frequency_unit=None,
-                        level_objective=None, ui_language=None):
+                        level_objective=None, ui_language=None,
+                        avatar_url=None, contact_email=None, grade_level=None,
+                        native_language=None, location=None, school_name=None):
     """Update user profile fields."""
     user_ref = get_user_ref(uid)
     updates = {'updated_at': firestore.SERVER_TIMESTAMP}
@@ -126,6 +140,18 @@ def update_user_profile(uid, display_name=None, age=None, gender=None,
         updates['profile.level_objective'] = level_objective
     if ui_language is not None:
         updates['profile.ui_language'] = ui_language
+    if avatar_url is not None:
+        updates['profile.avatar_url'] = avatar_url
+    if contact_email is not None:
+        updates['profile.contact_email'] = contact_email
+    if grade_level is not None:
+        updates['profile.grade_level'] = grade_level
+    if native_language is not None:
+        updates['profile.native_language'] = native_language
+    if location is not None:
+        updates['profile.location'] = location
+    if school_name is not None:
+        updates['profile.school_name'] = school_name
 
     user_ref.update(updates)
 

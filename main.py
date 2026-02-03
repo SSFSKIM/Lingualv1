@@ -698,7 +698,7 @@ def api_user_profile():
     results = user_data.get('results')
     assessment = user_data.get('assessment', {})
 
-    # New profile fields
+    # Profile fields
     display_name = profile.get('display_name', '')
     age = profile.get('age')
     gender = profile.get('gender')
@@ -706,6 +706,12 @@ def api_user_profile():
     frequency = profile.get('frequency')
     frequency_unit = profile.get('frequency_unit')
     level_objective = profile.get('level_objective', '')
+    avatar_url = profile.get('avatar_url', '')
+    contact_email = profile.get('contact_email', '')
+    grade_level = profile.get('grade_level', '')
+    native_language = profile.get('native_language', '')
+    location = profile.get('location', '')
+    school_name = profile.get('school_name', '')
     selected_categories = user_data.get('selected_categories', [])
 
     # Check if assessment is completed
@@ -723,7 +729,13 @@ def api_user_profile():
         'frequency': frequency,
         'frequency_unit': frequency_unit,
         'level_objective': level_objective,
-        'selected_categories': selected_categories
+        'selected_categories': selected_categories,
+        'avatar_url': avatar_url,
+        'contact_email': contact_email,
+        'grade_level': grade_level,
+        'native_language': native_language,
+        'location': location,
+        'school_name': school_name
     }
 
     if not is_assessed:
@@ -784,13 +796,19 @@ def api_update_profile():
     data = request.get_json()
 
     # Extract new profile fields
-    display_name = data.get('displayName', '')
+    display_name = data.get('displayName')
     age = data.get('age')
     gender = data.get('gender')
     rigor = data.get('rigor')
     frequency = data.get('frequency')
     frequency_unit = data.get('frequencyUnit')
-    level_objective = data.get('levelObjective', '')
+    level_objective = data.get('levelObjective')
+    avatar_url = data.get('avatarUrl')
+    contact_email = data.get('contactEmail')
+    grade_level = data.get('gradeLevel')
+    native_language = data.get('nativeLanguage')
+    location = data.get('location')
+    school_name = data.get('schoolName')
     is_edit = data.get('isEdit', False)
 
     # Save to database
@@ -802,7 +820,13 @@ def api_update_profile():
         rigor=rigor,
         frequency=frequency,
         frequency_unit=frequency_unit,
-        level_objective=level_objective
+        level_objective=level_objective,
+        avatar_url=avatar_url,
+        contact_email=contact_email,
+        grade_level=grade_level,
+        native_language=native_language,
+        location=location,
+        school_name=school_name
     )
 
     # Only reset assessment if this is NOT an edit (first time setup)
@@ -820,7 +844,13 @@ def api_update_profile():
         'rigor': rigor,
         'frequency': frequency,
         'frequency_unit': frequency_unit,
-        'level_objective': level_objective
+        'level_objective': level_objective,
+        'avatar_url': avatar_url,
+        'contact_email': contact_email,
+        'grade_level': grade_level,
+        'native_language': native_language,
+        'location': location,
+        'school_name': school_name
     }
 
     return jsonify({
@@ -832,7 +862,13 @@ def api_update_profile():
             'rigor': rigor,
             'frequency': frequency,
             'frequencyUnit': frequency_unit,
-            'levelObjective': level_objective
+            'levelObjective': level_objective,
+            'avatarUrl': avatar_url,
+            'contactEmail': contact_email,
+            'gradeLevel': grade_level,
+            'nativeLanguage': native_language,
+            'location': location,
+            'schoolName': school_name
         }
     })
 

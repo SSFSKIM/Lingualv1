@@ -1,71 +1,238 @@
-# Product Requirements Document (v1.0)
+# Product Requirements Document (v2.0)
 
-**Product name (working):** Korean Speaking Coach (Lingual)  
-**Owner:** [TBD]  
-**Platform:** Web (desktop + mobile web)  
-**Status:** v1.0  
-**Pricing:** Free (no paid tiers)  
-**UI language:** User-selectable (start with English and Korean)  
-**Curriculum reference:** Explicitly show equivalence to Standard Korean Language Curriculum (SKLC) levels
+**Product name:** Lingual
+**Mission:** Become the standard for spoken/colloquial language learning
+**Owner:** [TBD]
+**Platform:** Web (desktop + mobile web); Native mobile apps planned
+**Status:** v2.0
+**Pricing:** B2B contracts (schools); B2C free tier
+**UI language:** User-selectable (English, Korean; expandable)
+
+---
 
 ## 1. Product Overview
 
-Web-based AI coach that helps anyone improve Korean speaking and listening through personalized, scenario-based practice. Focus domains: Grammar, Vocabulary, Pragmatics (speech levels/politeness/context), Pronunciation. Every user completes a short diagnostic to profile strengths/needs, then practices via 7–10 minute AI-guided conversations and receives targeted feedback. UI surfaces SKLC-equivalent levels for transparency.
+Lingual is an AI-powered platform for learning colloquial/spoken language through real-time conversation practice. Users complete a diagnostic assessment to determine their proficiency level, then practice speaking with an AI tutor through personalized, curriculum-aligned scenarios.
 
-## 2. Objectives & Success Criteria
+**Key Principle:** Curriculum is the backbone of learning. Teachers can upload their own curriculum or use Lingual's standard curriculum.
 
-- **Accurate profiling:** Short (~10 minute) diagnostic estimating domain abilities and mapping to SKLC-equivalent levels.  
-- **Personalized, curriculum-backed learning:** Define per-domain goals aligned with SKLC and present them clearly to users.  
-- **Effective 7–10 minute sessions:** AI role-plays scenarios, elicits targeted forms/lexis/pragmatics, and keeps conversation flowing.  
-- **Visible progress:** Post-session feedback lists practiced patterns, pronunciation clarity, and SKLC-equivalent references (e.g., “Overall ≈ SKLC Level X”).  
-- **Success indicators (conceptual):** High completion of the diagnostic and at least one session; users perceive SKLC labels as accurate; feedback is rated specific/actionable; repeated use shows improvement in domain scores.
+### Current State
 
-## 3. Target Users & Use Cases
+- **Language:** Korean (SKLC-aligned curriculum)
+- **Market:** B2C (general population)
+- **Features:** Assessment, AI conversation, progress tracking, basic teacher dashboard
 
-- **Audience:** Broad, general population—anyone wanting better Korean conversations (beginners to near-native, in or outside Korea).  
-- **Use cases:**  
-  - Onboarding and self-knowledge of speaking ability.  
-  - Goal-based practice (e.g., polite requests to a professor, past-tense storytelling with friends).  
-  - Domain-focused improvement (e.g., ㅓ vs ㅗ pronunciation; 존댓말 vs 반말).  
-  - Long-term growth with SKLC equivalence made visible.
+### Planned Evolution
 
-## 4. Product Scope (v1)
+- **Languages:** Spanish, French, Russian (Korean serves as the template)
+- **Market:** B2B-first (K-12 schools, language institutes)
+- **Platform:** Native mobile apps
 
-### In-scope
-- **Initial assessment (~7–10 minutes):** MCQs, micro-writing, short audio reads → outputs domain bands (0–5), global stage (0–5), and SKLC-equivalent level.  
-- **Domain profile & goal selection:** Visualize domains; predefined goals per domain/band aligned with SKLC; system recommends goals.  
-- **User-selected focus:** Multi-select domains (Grammar, Vocabulary, Pragmatics, Pronunciation); optional context selection (e.g., school, work, travel, friends, daily life).  
-- **AI-guided sessions (7–10 minutes):** Clear goals shown; AI role-play aligned to level/context; elicits targets; provides light scaffolding (recasts, hints, speech-level coaching).  
-- **Post-session debrief:** Recap of goals, patterns used, key vocab, pragmatics fit, pronunciation clarity with 1–3 concrete points; short fluency descriptors per selected domain; option to save phrases/patterns to a review list.  
-- **Level alignment:** Display “Equivalent to SKLC Level X” overall and, when useful, per domain.
+---
 
-### Out-of-scope (v1)
-- Native mobile apps.  
-- Paid features/subscriptions or gated content.  
-- Complex scheduling, streaks, or enforced usage frequency (users decide cadence).  
-- Alignment with exams beyond SKLC (e.g., TOPIK, KIIP).
+## 2. Target Markets
+
+### Primary Market: Educational Institutions (B2B)
+
+**K-12 Schools**
+
+- Language teachers integrating speaking practice into curriculum
+- World language departments (Spanish, French, Korean programs)
+- Use cases: Classroom practice sessions, homework assignments, proficiency assessments
+
+**Language Institutes/Academies**
+
+- Hagwons, Alliance Française, Cervantes Institute, etc.
+- Supplementary conversation practice alongside traditional instruction
+- Use cases: Level placement, individualized practice between classes, progress documentation
+
+### Secondary Market: General Population (B2C)
+
+- **Heritage speakers** - Improving formal registers or filling gaps
+- **Self-learners** - Conversational fluency without classroom access
+- **Travel/relocation prep** - Practical speaking for real-world contexts
+- **Professionals** - Business language and cultural pragmatics
+
+---
+
+## 3. User Roles & Capabilities
+
+| Role | Capabilities |
+| ---- | ------------ |
+| **Student** | Assessment, AI conversation practice, progress tracking |
+| **Teacher** | Student monitoring, class management, curriculum customization, assignment creation |
+| **Administrator** | School-wide analytics, multi-teacher management, billing |
+
+### Teacher Capabilities (Detail)
+
+- Create and manage classes
+- View student progress and assessment results
+- Assign practice sessions with specific goals
+- Customize scenarios to align with syllabus
+- Set curriculum-aligned learning objectives
+- Upload custom curriculum OR use Lingual standard curriculum
+
+### Administrator Capabilities (Detail)
+
+- School-wide analytics dashboard
+- Multi-teacher account management
+- Billing and contract management
+- Usage reporting for ROI justification
+
+---
+
+## 4. Product Scope
+
+### Current (v1) - Korean B2C
+
+- Diagnostic assessment (~10 min) → SKLC level mapping
+- AI-guided conversation sessions (7-10 min)
+- Post-session feedback and progress tracking
+- User profile with learning preferences
+- Basic teacher dashboard (view-only)
+
+### Near-term (v2) - School Features
+
+**Teacher Capabilities:**
+
+- Create and manage classes
+- View student progress and assessment results
+- Assign practice sessions with specific goals
+- Customize scenarios to align with syllabus
+- Set curriculum-aligned learning objectives
+- Upload custom curriculum OR use Lingual standard curriculum
+
+**Administrator Capabilities:**
+
+- School-wide analytics dashboard
+- Multi-teacher account management
+- Billing and contract management
+- Usage reporting for ROI justification
+
+### Future - Multi-language Expansion
+
+- **Spanish** - Learning structure adapted from Korean template
+- **French** - Learning structure adapted from Korean template
+- **Russian** - Learning structure adapted from Korean template
+- Language-agnostic assessment framework
+- Per-language proficiency standards (CEFR, ACTFL, etc.)
+- Native mobile apps
+
+### Out of Scope (for now)
+
+- University-specific features
+- Exam prep (TOPIK, DELE, DELF, etc.)
+- Synchronous multi-student sessions
+
+---
 
 ## 5. User Flows
 
-- **Onboarding & assessment:** User picks UI language → brief explanation → ~10-minute diagnostic → results page with domain bands, global stage, and SKLC-equivalent level plus a simple description of what that level means.  
-- **Session setup:** System suggests focus domains; user can override/multi-select domains and pick context; system generates 1–3 goals based on SKLC level + context; user confirms.  
-- **Conversation (7–10 minutes):** AI sets scene; turn-by-turn role-play; AI elicits targets, gives light corrections/explanations, and keeps scenario coherent.  
-- **Debrief:** Shows goals practiced, grammar/pragmatics patterns, key vocab, pronunciation highlights (1–3 specifics), short progress note (e.g., “practiced SKLC Level 2 grammar today”); options to save items or start another session.
+### Onboarding & Assessment
 
-## 6. Functional Requirements (Non-technical)
+User picks UI language → brief explanation → ~10-minute diagnostic → results page with domain bands, global stage, and proficiency level plus a simple description of what that level means.
 
-- **Assessment:** Completable in one web session (~10 minutes); outputs domain and global bands plus SKLC-equivalent level; messaging is plain-language.  
-- **Goal mapping:** Maintain tables mapping domain bands (0–5) to SKLC levels and concrete goals (e.g., Grammar band 2 → past/present/future basics, connectives -고/-아서/어서). Select 1–3 goals per session based on level and practice history.  
-- **Session creation:** Generate scenarios appropriate to SKLC level and selected domains/context; fit interaction to 7–10 minutes.  
-- **AI behavior:** Keep role/setting consistent; balance natural conversation with targeted elicitation, reformulation, and “try again using X” prompts; scale correction density by level.  
-- **Feedback & progress:** Track in-session patterns and user usage to produce per-domain recaps and concise pronunciation notes; no enforced frequency, but maintain history of goals practiced.  
-- **Localization:** All non-Korean UI text (menus, instructions, feedback summaries) respect user-chosen UI language; practice stays in Korean.  
-- **Web delivery:** Works on modern desktop/mobile browsers; reliable in-browser audio capture for pronunciation and speaking input.
+### Session Setup
 
-## 7. Risks & Open Questions
+System suggests focus domains; user can override/multi-select domains and pick context; system generates 1–3 goals based on curriculum level + context; user confirms.
 
-- ASR robustness in noisy environments may affect pronunciation scoring and UX.  
-- Perceived accuracy of SKLC equivalence could vary; need clear expectation-setting.  
-- Balancing conversational flow vs. correction density, especially for beginners.  
-- Tuning of teaching tone and reassessment cadence (how often to re-run diagnostics) remains open.  
-- Breadth vs. depth: covering all SKLC levels across four domains for a wide audience may stretch content depth initially.
+### Conversation (7–10 minutes)
+
+AI sets scene; turn-by-turn role-play; AI elicits targets, gives light corrections/explanations, and keeps scenario coherent.
+
+### Debrief
+
+Shows goals practiced, grammar/pragmatics patterns, key vocab, pronunciation highlights (1–3 specifics), short progress note; options to save items or start another session.
+
+### Teacher Flow (v2)
+
+Teacher creates class → invites students → sets curriculum (upload or Lingual standard) → assigns practice sessions → monitors progress → adjusts assignments based on results.
+
+### Administrator Flow (v2)
+
+Admin onboards school → creates teacher accounts → configures billing → monitors school-wide usage → generates reports for stakeholders.
+
+---
+
+## 6. Functional Requirements
+
+### Assessment
+
+- Completable in one web session (~10 minutes)
+- Outputs domain and global bands plus proficiency level
+- Messaging is plain-language
+- Framework must be language-agnostic (adaptable to Spanish, French, Russian)
+
+### Curriculum System
+
+- Support for Lingual standard curricula (per language)
+- Support for teacher-uploaded custom curricula
+- Curriculum maps to learning objectives, scenarios, and assessment criteria
+- All practice sessions trace back to curriculum objectives
+
+### Session Creation
+
+- Generate scenarios appropriate to proficiency level and selected domains/context
+- Fit interaction to 7–10 minutes
+- Align to curriculum objectives
+
+### AI Behavior
+
+- Keep role/setting consistent
+- Balance natural conversation with targeted elicitation
+- Scale correction density by level
+- Provide reformulation and "try again using X" prompts
+
+### Feedback & Progress
+
+- Track in-session patterns and user usage
+- Produce per-domain recaps and pronunciation notes
+- Maintain history of goals practiced
+- For teachers: aggregate class-level analytics
+
+### Multi-tenancy (B2B)
+
+- Organization/school isolation
+- Role-based access control (Student, Teacher, Administrator)
+- Per-organization billing and usage tracking
+
+### Localization
+
+- All non-target-language UI respects user-chosen UI language
+- Practice stays in target language
+
+### Web Delivery
+
+- Works on modern desktop/mobile browsers
+- Reliable in-browser audio capture for pronunciation and speaking input
+
+---
+
+## 7. Technical Architecture Principles
+
+- **Language-agnostic core** - Assessment framework, conversation engine, and feedback systems should not hardcode any specific language
+- **Curriculum-driven learning** - All practice sessions trace back to curriculum objectives
+- **Multi-tenancy ready** - Organization/school isolation for B2B
+
+---
+
+## 8. Risks & Open Questions
+
+- ASR robustness in noisy classroom environments
+- Perceived accuracy of proficiency equivalence across different standards
+- Balancing conversational flow vs. correction density for beginners
+- Tuning of teaching tone and reassessment cadence
+- Curriculum upload format and validation requirements
+- Pricing model for B2B contracts (per-student, per-school, usage-based)
+- Teacher training and onboarding for curriculum customization
+
+---
+
+## 9. Success Criteria
+
+- **Assessment:** High completion rate of diagnostic (~10 min)
+- **Engagement:** Users complete at least one practice session after assessment
+- **B2B Adoption:** Schools renew contracts after pilot period
+- **Learning Outcomes:** Measurable improvement in domain scores over time
+- **Teacher Satisfaction:** Teachers find curriculum tools useful and time-saving
+- **Scalability:** Platform handles multiple languages without architectural changes

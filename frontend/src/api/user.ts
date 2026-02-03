@@ -11,6 +11,12 @@ export interface ProfileResponse {
   frequency?: number;
   frequency_unit?: string;
   level_objective?: string;
+  avatar_url?: string;
+  contact_email?: string;
+  grade_level?: string;
+  native_language?: string;
+  location?: string;
+  school_name?: string;
   global_stage?: number;
   sklc_level?: string;
   sklc_description?: string;
@@ -37,6 +43,12 @@ export const getUserProfile = async (): Promise<UserProfile> => {
     frequency: data.frequency,
     frequencyUnit: data.frequency_unit as FrequencyUnit | undefined,
     levelObjective: data.level_objective,
+    avatarUrl: data.avatar_url,
+    contactEmail: data.contact_email,
+    gradeLevel: data.grade_level,
+    nativeLanguage: data.native_language,
+    location: data.location,
+    schoolName: data.school_name,
     globalStage: data.global_stage,
     sklcLevel: data.sklc_level,
     sklcDescription: data.sklc_description,
@@ -46,7 +58,7 @@ export const getUserProfile = async (): Promise<UserProfile> => {
 };
 
 export const updateProfile = async (profile: ProfileFormData, isEdit = false): Promise<void> => {
-  await api.post('/profile', {
+  const payload: Record<string, unknown> = {
     displayName: profile.displayName,
     age: profile.age,
     gender: profile.gender,
@@ -55,7 +67,16 @@ export const updateProfile = async (profile: ProfileFormData, isEdit = false): P
     frequencyUnit: profile.frequencyUnit,
     levelObjective: profile.levelObjective,
     isEdit,
-  });
+  };
+
+  if (profile.avatarUrl !== undefined) payload.avatarUrl = profile.avatarUrl;
+  if (profile.contactEmail !== undefined) payload.contactEmail = profile.contactEmail;
+  if (profile.gradeLevel !== undefined) payload.gradeLevel = profile.gradeLevel;
+  if (profile.nativeLanguage !== undefined) payload.nativeLanguage = profile.nativeLanguage;
+  if (profile.location !== undefined) payload.location = profile.location;
+  if (profile.schoolName !== undefined) payload.schoolName = profile.schoolName;
+
+  await api.post('/profile', payload);
 };
 
 export const setLanguage = async (language: Language): Promise<void> => {

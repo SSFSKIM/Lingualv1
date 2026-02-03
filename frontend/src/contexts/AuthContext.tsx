@@ -5,9 +5,12 @@ import {
   createUserWithEmailAndPassword,
   signInWithPopup,
   signOut,
+  linkWithPopup,
+  unlink,
+  AuthProvider,
   User as FirebaseUser,
 } from 'firebase/auth';
-import { auth, googleProvider } from '../config/firebase';
+import { auth, googleProvider, githubProvider, facebookProvider } from '../config/firebase';
 import { verifyToken } from '../api/auth';
 import type { User } from '../types';
 
@@ -19,6 +22,10 @@ interface AuthContextType {
   signInWithEmail: (email: string, password: string) => Promise<void>;
   signUpWithEmail: (email: string, password: string) => Promise<void>;
   signInWithGoogle: () => Promise<void>;
+  linkWithGoogle: () => Promise<void>;
+  linkWithGithub: () => Promise<void>;
+  linkWithFacebook: () => Promise<void>;
+  unlinkProvider: (providerId: string) => Promise<void>;
   logout: () => Promise<void>;
   clearError: () => void;
 }
@@ -129,6 +136,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const refreshFirebaseUser = async () => {
+    if (auth.currentUser) {
+      await auth.currentUser.reload();
+      setFirebaseUser(auth.currentUser);
+    }
+  };
+
+  const linkWithProvider = async (provider: AuthProvider) => {
+    if (!auth.currentUser) {
+      throw new Error('No authenticated user');
+    }
+
+    await linkWithPopup(auth.currentUser, provider);
+    await refreshFirebaseUser();
+  };
+
+  const linkWithGoogle = () => linkWithProvider(googleProvider);
+  const linkWithGithub = () => linkWithProvider(githubProvider);
+  const linkWithFacebook = () => linkWithProvider(facebookProvider);
+
+  const unlinkProvider = async (providerId: string) => {
+    if (!auth.currentUser) {
+      throw new Error('No authenticated user');
+    }
+
+    await unlink(auth.currentUser, providerId);
+    await refreshFirebaseUser();
+  };
+
   const logout = async () => {
     try {
       await signOut(auth);
@@ -151,6 +187,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         signInWithEmail,
         signUpWithEmail,
         signInWithGoogle,
+        linkWithGoogle,
+        linkWithGithub,
+        linkWithFacebook,
+        unlinkProvider,
         logout,
         clearError,
       }}

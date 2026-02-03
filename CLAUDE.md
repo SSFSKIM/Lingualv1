@@ -4,7 +4,36 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Lingual is an AI-powered Korean language learning coach with real-time conversation practice. Users take a diagnostic assessment to determine their proficiency level (mapped to SKLC levels 0-5), then practice speaking with an AI tutor through personalized scenarios.
+**Lingual** is an AI-powered platform for learning colloquial/spoken language through real-time conversation practice. Our mission is to become **the standard for spoken language learning**.
+
+### Vision & Roadmap
+
+| Aspect | Current (v1) | Future |
+|--------|--------------|--------|
+| **Languages** | Korean (SKLC-aligned) | Spanish, French, Russian |
+| **Market** | B2C (general population) | B2B-first (K-12 schools, language institutes) |
+| **Platform** | Web only | Web + Native mobile apps |
+
+### Target Markets
+
+- **Primary (B2B):** K-12 schools and language institutes - contract-based service for classroom speaking practice
+- **Secondary (B2C):** General population seeking conversational fluency
+
+### User Roles
+
+| Role | Capabilities |
+|------|-------------|
+| **Student** | Assessment, AI conversation practice, progress tracking |
+| **Teacher** | Student monitoring, class management, curriculum customization, assignment creation |
+| **Administrator** | School-wide analytics, multi-teacher management, billing |
+
+### Core Learning Flow
+
+1. Diagnostic assessment → proficiency level mapping (per-language standards)
+2. Curriculum-driven AI tutor conversations (7-10 min sessions)
+3. Post-session feedback with curriculum-aligned progress tracking
+
+**Key Principle:** Curriculum is the backbone of learning - teachers can upload their own curriculum or use Lingual's standard curriculum.
 
 ## Development Commands
 
