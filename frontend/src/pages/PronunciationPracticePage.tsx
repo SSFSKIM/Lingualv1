@@ -179,7 +179,12 @@ export function PronunciationPracticePage() {
     if (!attempts.length) return [];
     const map = new Map<
       string,
-      { count: number; accuracy: number[]; fluency: number[]; completeness: number[] }
+      {
+        count: number;
+        accuracy: Array<number | undefined | null>;
+        fluency: Array<number | undefined | null>;
+        completeness: Array<number | undefined | null>;
+      }
     >();
     attempts.forEach((attempt) => {
       const objectiveId = attempt.objectiveId || 'unassigned';
@@ -208,6 +213,11 @@ export function PronunciationPracticePage() {
       completeness: average(stats.completeness),
     }));
   }, [attempts, objectivesById, t]);
+
+  const phonemeThresholdLabel = (t('app.practice.words.phonemes.threshold') || '{{n}}').replace(
+    '{{n}}',
+    String(phonemeLowThreshold)
+  );
 
   const resetSession = useCallback(() => {
     setAttempts([]);
@@ -586,7 +596,7 @@ export function PronunciationPracticePage() {
                             {t('app.practice.words.phonemes.title')}
                           </div>
                           <div className="text-xs text-muted-foreground">
-                            {t('app.practice.words.phonemes.threshold', { n: phonemeLowThreshold })}
+                            {phonemeThresholdLabel}
                           </div>
                         </div>
                         {!selectedWord.phonemes?.length ? (

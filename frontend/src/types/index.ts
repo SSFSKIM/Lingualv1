@@ -191,6 +191,40 @@ export interface PronunciationSession {
   updatedAt: string;
 }
 
+// Minigame Types
+export type MinigameType = 'listening_quiz' | 'grammar_challenge';
+
+export interface MinigameAttempt {
+  id?: string;
+  gameType: MinigameType;
+  locale: LearningLocale;
+  objectiveId?: string | null;
+  scenarioId?: string | null;
+  score: number;
+  correctAnswers: number;
+  totalQuestions: number;
+  accuracy?: number;
+  durationSeconds?: number;
+  metadata?: Record<string, unknown>;
+  createdAt?: string;
+}
+
+export interface MinigameSummaryByGame {
+  attempts: number;
+  averageAccuracy: number;
+  bestScore: number;
+}
+
+export interface MinigameSummary {
+  totalAttempts: number;
+  averageAccuracy: number;
+  bestScore: number;
+  totalQuestions: number;
+  totalCorrectAnswers: number;
+  byGame: Record<string, MinigameSummaryByGame>;
+  recentAttempts: MinigameAttempt[];
+}
+
 // API Response Types
 export interface ApiResponse<T = unknown> {
   success: boolean;

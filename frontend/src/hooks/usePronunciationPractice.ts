@@ -235,7 +235,8 @@ export function usePronunciationPractice() {
       // and some SDK builds don't expose the helper method.
       const maybeEnableProsody = (pronunciationConfig as unknown as { enableProsodyAssessment?: () => void })
         .enableProsodyAssessment;
-      if (locale === 'en-US' && typeof maybeEnableProsody === 'function') {
+      const localeSupportsProsody = (locale as string) === 'en-US';
+      if (localeSupportsProsody && typeof maybeEnableProsody === 'function') {
         maybeEnableProsody.call(pronunciationConfig);
       }
       pronunciationConfig.applyTo(recognizer);

@@ -3,8 +3,9 @@ import { TrendingUp, Loader2 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { getUserProfile } from '@/api/user';
 import { getAssessmentResults } from '@/api/assessment';
+import { getMinigameSummary } from '@/api/minigames';
 import { LearningPathCard } from '@/components/learning';
-import type { AssessmentResults, UserProfile } from '@/types';
+import type { AssessmentResults, MinigameSummary, UserProfile } from '@/types';
 import { useLanguage } from '@/contexts/LanguageContext';
 
 const domainStyles: Record<string, string> = {
@@ -37,6 +38,7 @@ export function AppProgressPage() {
   const { t } = useLanguage();
   const [assessmentResults, setAssessmentResults] = useState<AssessmentResults | null>(null);
   const [profileSummary, setProfileSummary] = useState<UserProfile | null>(null);
+  const [minigameSummary, setMinigameSummary] = useState<MinigameSummary | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -58,6 +60,14 @@ export function AppProgressPage() {
             console.error('Failed to load assessment results:', err);
           }
         }
+
+        try {
+          const summary = await getMinigameSummary();
+          if (!isActive) return;
+          setMinigameSummary(summary);
+        } catch (err) {
+          console.error('Failed to load minigame summary:', err);
+        }
       } catch (err) {
         console.error('Failed to load profile summary:', err);
       } finally {
@@ -78,6 +88,12 @@ export function AppProgressPage() {
     const translated = t(key);
     if (translated !== key) return translated;
     return domain.replace(/_/g, ' ');
+  };
+
+  const getGameLabel = (gameType: string) => {
+    if (gameType === 'listening_quiz') return t('app.games.listeningQuiz') || 'Listening Quiz';
+    if (gameType === 'grammar_challenge') return t('app.games.grammarChallenge') || 'Grammar Challenge';
+    return gameType;
   };
 
   if (loading) {
@@ -154,14 +170,80 @@ export function AppProgressPage() {
         </div>
       )}
 
-      {/* Future Sections Placeholder */}
-      <div className="bg-card rounded-2xl border-3 border-border border-dashed p-8 text-center">
-        <p className="text-sm font-display font-bold text-muted-foreground">
-          {t('app.progress.comingSoon') || 'More coming soon'}
-        </p>
-        <p className="text-xs text-muted-foreground mt-1">
-          {t('app.progress.comingSoonDesc') || 'Curriculum progress, streak calendar, and learning analytics will appear here'}
-        </p>
+      {/* Minigame Performance */}
+      <div className="bg-card rounded-2xl border-3 border-foreground shadow-stamp p-6">
+        <h2 className="text-lg font-display font-bold text-foreground mb-4">
+          {t('app.progress.minigames.title') || 'Minigame Performance'}
+        </h2>
+
+        {!minigameSummary || minigameSummary.totalAttempts === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            {t('app.progress.minigames.empty') || 'Play games to see your performance stats here.'}
+          </p>
+        ) : (
+          <div className="space-y-6">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div className="rounded-xl border-2 border-border bg-secondary p-3">
+                <p className="text-xs text-muted-foreground">{t('app.progress.minigames.attempts') || 'Attempts'}</p>
+                <p className="text-2xl font-display font-bold text-foreground">{minigameSummary.totalAttempts}</p>
+              </div>
+              <div className="rounded-xl border-2 border-border bg-secondary p-3">
+                <p className="text-xs text-muted-foreground">{t('app.progress.minigames.accuracy') || 'Avg accuracy'}</p>
+                <p className="text-2xl font-display font-bold text-foreground">
+                  {Math.round(minigameSummary.averageAccuracy)}%
+                </p>
+              </div>
+              <div className="rounded-xl border-2 border-border bg-secondary p-3">
+                <p className="text-xs text-muted-foreground">{t('app.progress.minigames.bestScore') || 'Best score'}</p>
+                <p className="text-2xl font-display font-bold text-foreground">{minigameSummary.bestScore}</p>
+              </div>
+              <div className="rounded-xl border-2 border-border bg-secondary p-3">
+                <p className="text-xs text-muted-foreground">{t('app.progress.minigames.correct') || 'Correct answers'}</p>
+                <p className="text-2xl font-display font-bold text-foreground">{minigameSummary.totalCorrectAnswers}</p>
+              </div>
+            </div>
+
+            <div>
+              <h3 className="text-sm font-display font-bold text-foreground mb-3">
+                {t('app.progress.minigames.byGame') || 'By game'}
+              </h3>
+              <div className="space-y-2">
+                {Object.entries(minigameSummary.byGame).map(([gameType, stats]) => (
+                  <div key={gameType} className="rounded-xl border-2 border-border p-3">
+                    <div className="flex items-center justify-between">
+                      <p className="font-semibold text-foreground">{getGameLabel(gameType)}</p>
+                      <p className="text-sm text-muted-foreground">{stats.attempts} {t('app.progress.minigames.attempts') || 'attempts'}</p>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {t('app.progress.minigames.accuracy') || 'Avg accuracy'}: {Math.round(stats.averageAccuracy)}% · {t('app.progress.minigames.bestScore') || 'Best score'}: {stats.bestScore}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <h3 className="text-sm font-display font-bold text-foreground mb-3">
+                {t('app.progress.minigames.recent') || 'Recent attempts'}
+              </h3>
+              <div className="space-y-2">
+                {minigameSummary.recentAttempts.slice(0, 5).map((attempt) => (
+                  <div key={attempt.id || `${attempt.gameType}-${attempt.createdAt}`} className="rounded-xl border-2 border-border p-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="font-semibold text-foreground">{getGameLabel(attempt.gameType)}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {attempt.createdAt ? new Date(attempt.createdAt).toLocaleDateString() : ''}
+                      </p>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {attempt.correctAnswers}/{attempt.totalQuestions} · {Math.round(attempt.accuracy || 0)}% · {t('app.progress.minigames.score') || 'Score'}: {attempt.score}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

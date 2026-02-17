@@ -28,6 +28,7 @@ CORS(app, origins=['http://localhost:5173', 'http://localhost:3000'], supports_c
 firebase_app = None
 FIREBASE_PROJECT_ID = os.environ.get('GOOGLE_CLOUD_PROJECT', 'lingu-480600')
 ALLOWED_LEARNING_LOCALES = {'ko-KR', 'es-ES', 'fr-FR'}
+ALLOWED_MINIGAME_TYPES = {'listening_quiz', 'grammar_challenge'}
 
 try:
     # For production: use GOOGLE_APPLICATION_CREDENTIALS or default credentials
@@ -1102,6 +1103,84 @@ def api_update_categories():
 # ============================================
 # FLASHCARDFLIP
 # ============================================
+
+@app.route('/api/minigames/attempts', methods=['POST'])
+@login_required
+def api_save_minigame_attempt():
+    """Save a minigame attempt for progress reporting."""
+    uid = get_current_user_uid()
+    data = request.get_json() or {}
+
+    game_type = data.get('gameType')
+    locale = data.get('locale')
+    objective_id = data.get('objectiveId')
+    scenario_id = data.get('scenarioId')
+    score = data.get('score', 0)
+    correct_answers = data.get('correctAnswers')
+    total_questions = data.get('totalQuestions')
+    accuracy = data.get('accuracy')
+    duration_seconds = data.get('durationSeconds')
+    metadata = data.get('metadata', {})
+
+    if not game_type or game_type not in ALLOWED_MINIGAME_TYPES:
+        return jsonify({'success': False, 'error': 'Invalid gameType'}), 400
+    if not locale or locale not in ALLOWED_LEARNING_LOCALES:
+        return jsonify({'success': False, 'error': 'Invalid locale'}), 400
+    if correct_answers is None or total_questions is None:
+        return jsonify({'success': False, 'error': 'correctAnswers and totalQuestions are required'}), 400
+
+    try:
+        score_value = int(score)
+        correct_value = int(correct_answers)
+        total_value = int(total_questions)
+        if total_value <= 0:
+            return jsonify({'success': False, 'error': 'totalQuestions must be greater than 0'}), 400
+        if correct_value < 0 or correct_value > total_value:
+            return jsonify({'success': False, 'error': 'correctAnswers is out of range'}), 400
+
+        if accuracy is None:
+            accuracy_value = round((correct_value / total_value) * 100, 2)
+        else:
+            accuracy_value = float(accuracy)
+
+        duration_value = None if duration_seconds is None else int(duration_seconds)
+
+        attempt_id = db.add_minigame_attempt(uid, {
+            'game_type': game_type,
+            'locale': locale,
+            'objective_id': objective_id,
+            'scenario_id': scenario_id,
+            'score': score_value,
+            'correct_answers': correct_value,
+            'total_questions': total_value,
+            'accuracy': accuracy_value,
+            'duration_seconds': duration_value,
+            'metadata': metadata if isinstance(metadata, dict) else {}
+        })
+        return jsonify({'success': True, 'attemptId': attempt_id})
+    except ValueError:
+        return jsonify({'success': False, 'error': 'Invalid numeric field'}), 400
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/minigames/summary', methods=['GET'])
+@login_required
+def api_get_minigame_summary():
+    """Get aggregate minigame stats for the current user."""
+    uid = get_current_user_uid()
+    try:
+        limit = int(request.args.get('limit', 200))
+        limit = max(1, min(limit, 500))
+    except ValueError:
+        limit = 200
+
+    try:
+        summary = db.get_minigame_summary(uid, limit=limit)
+        return jsonify({'success': True, 'summary': summary})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 
 @app.route('/api/minigames/flashcards', methods=['POST'])
 @login_required

@@ -44,6 +44,19 @@ Schema:
         - role: str ('user' or 'assistant')
         - content: str
         - timestamp: str (ISO format)
+
+- users/{uid}/minigame_attempts/{attempt_id}
+    - game_type: str ('listening_quiz' | 'grammar_challenge')
+    - locale: str
+    - objective_id: str (optional)
+    - scenario_id: str (optional)
+    - score: int
+    - correct_answers: int
+    - total_questions: int
+    - accuracy: float
+    - duration_seconds: int (optional)
+    - metadata: dict (optional)
+    - created_at: timestamp
 """
 
 from firebase_admin import firestore
@@ -500,3 +513,116 @@ def get_pronunciation_attempts(uid, session_id, limit=50, objective_id=None):
             'createdAt': _timestamp_to_iso(data.get('created_at'))
         })
     return attempts
+
+
+# ============================================
+# MINIGAME FUNCTIONS
+# ============================================
+
+def get_minigame_attempts_collection(uid):
+    """Get reference to user's minigame attempts subcollection."""
+    return get_user_ref(uid).collection('minigame_attempts')
+
+
+def add_minigame_attempt(uid, attempt):
+    """Add a minigame attempt for progress tracking."""
+    attempts_ref = get_minigame_attempts_collection(uid).document()
+    attempt_data = {
+        'game_type': attempt.get('game_type'),
+        'locale': attempt.get('locale'),
+        'objective_id': attempt.get('objective_id'),
+        'scenario_id': attempt.get('scenario_id'),
+        'score': attempt.get('score', 0),
+        'correct_answers': attempt.get('correct_answers', 0),
+        'total_questions': attempt.get('total_questions', 0),
+        'accuracy': attempt.get('accuracy', 0),
+        'duration_seconds': attempt.get('duration_seconds'),
+        'metadata': attempt.get('metadata', {}),
+        'created_at': firestore.SERVER_TIMESTAMP
+    }
+    attempts_ref.set(attempt_data)
+    return attempts_ref.id
+
+
+def get_minigame_attempts(uid, limit=50):
+    """Get minigame attempts ordered by most recent."""
+    attempts_ref = get_minigame_attempts_collection(uid)
+    docs = attempts_ref.order_by('created_at', direction=firestore.Query.DESCENDING).limit(limit).stream()
+
+    attempts = []
+    for doc in docs:
+        data = doc.to_dict()
+        attempts.append({
+            'id': doc.id,
+            'gameType': data.get('game_type'),
+            'locale': data.get('locale'),
+            'objectiveId': data.get('objective_id'),
+            'scenarioId': data.get('scenario_id'),
+            'score': data.get('score', 0),
+            'correctAnswers': data.get('correct_answers', 0),
+            'totalQuestions': data.get('total_questions', 0),
+            'accuracy': data.get('accuracy', 0),
+            'durationSeconds': data.get('duration_seconds'),
+            'metadata': data.get('metadata', {}),
+            'createdAt': _timestamp_to_iso(data.get('created_at'))
+        })
+    return attempts
+
+
+def get_minigame_summary(uid, limit=200):
+    """Get aggregate summary of minigame performance."""
+    attempts = get_minigame_attempts(uid, limit=limit)
+    if not attempts:
+        return {
+            'totalAttempts': 0,
+            'averageAccuracy': 0,
+            'bestScore': 0,
+            'totalQuestions': 0,
+            'totalCorrectAnswers': 0,
+            'byGame': {},
+            'recentAttempts': []
+        }
+
+    total_attempts = len(attempts)
+    total_questions = sum(item.get('totalQuestions', 0) for item in attempts)
+    total_correct = sum(item.get('correctAnswers', 0) for item in attempts)
+    average_accuracy = (
+        sum(item.get('accuracy', 0) for item in attempts) / total_attempts
+        if total_attempts
+        else 0
+    )
+    best_score = max(item.get('score', 0) for item in attempts)
+
+    by_game = {}
+    for attempt in attempts:
+        game_type = attempt.get('gameType') or 'unknown'
+        if game_type not in by_game:
+            by_game[game_type] = {
+                'attempts': 0,
+                'totalAccuracy': 0,
+                'bestScore': 0
+            }
+        by_game[game_type]['attempts'] += 1
+        by_game[game_type]['totalAccuracy'] += attempt.get('accuracy', 0)
+        by_game[game_type]['bestScore'] = max(
+            by_game[game_type]['bestScore'],
+            attempt.get('score', 0)
+        )
+
+    for game_type, stats in by_game.items():
+        attempts_count = stats['attempts']
+        stats['averageAccuracy'] = (
+            stats['totalAccuracy'] / attempts_count if attempts_count else 0
+        )
+        del stats['totalAccuracy']
+        by_game[game_type] = stats
+
+    return {
+        'totalAttempts': total_attempts,
+        'averageAccuracy': average_accuracy,
+        'bestScore': best_score,
+        'totalQuestions': total_questions,
+        'totalCorrectAnswers': total_correct,
+        'byGame': by_game,
+        'recentAttempts': attempts[:10]
+    }
