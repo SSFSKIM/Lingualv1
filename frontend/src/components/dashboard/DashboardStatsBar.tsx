@@ -1,4 +1,5 @@
 import { Flame, Clock, Star, Trophy } from 'lucide-react';
+import { clsx } from 'clsx';
 
 interface DashboardStatsBarProps {
   stats: {
@@ -23,47 +24,61 @@ export function DashboardStatsBar({ stats, t }: DashboardStatsBarProps) {
       icon: <Flame size={20} strokeWidth={2.5} />,
       value: `${stats.streak}`,
       label: t('app.dashboard.stats.streak'),
-      color: 'bg-destructive/10 text-destructive border-destructive/20',
-      iconBg: 'bg-destructive text-white',
+      chip: 'border-destructive/35 bg-destructive/10 text-destructive',
+      iconBg: 'border-destructive/35 bg-destructive/15 text-destructive',
     },
     {
       icon: <Clock size={20} strokeWidth={2.5} />,
       value: formatMinutes(stats.weeklyMinutes),
       label: t('app.dashboard.stats.weeklyTime'),
-      color: 'bg-primary/10 text-primary border-primary/20',
-      iconBg: 'bg-primary text-primary-foreground',
+      chip: 'border-primary/35 bg-primary/10 text-primary',
+      iconBg: 'border-primary/35 bg-primary/15 text-primary',
     },
     {
       icon: <Star size={20} strokeWidth={2.5} />,
       value: `+${stats.weeklyXP}`,
       label: t('app.dashboard.stats.weeklyXP'),
-      color: 'bg-accent/10 text-accent border-accent/20',
-      iconBg: 'bg-accent text-accent-foreground',
+      chip: 'border-accent/40 bg-accent/20 text-accent-foreground',
+      iconBg: 'border-accent/35 bg-accent/25 text-accent-foreground',
     },
     {
       icon: <Trophy size={20} strokeWidth={2.5} />,
       value: `${stats.achievementCount}`,
       label: t('app.dashboard.stats.achievements'),
-      color: 'bg-success/10 text-success border-success/20',
-      iconBg: 'bg-success text-white',
+      chip: 'border-success/35 bg-success/15 text-success',
+      iconBg: 'border-success/35 bg-success/15 text-success',
     },
   ];
 
   return (
-    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+    <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
       {items.map((item) => (
-        <div
+        <article
           key={item.label}
-          className={`flex items-center gap-4 p-4 rounded-2xl border-2 ${item.color}`}
+          className="rounded-xl border-2 border-border bg-secondary/70 p-3 sm:p-4"
         >
-          <div className={`w-10 h-10 rounded-xl flex items-center justify-center border-2 border-foreground ${item.iconBg}`}>
-            {item.icon}
+          <div className="flex items-start justify-between gap-3">
+            <div
+              className={clsx(
+                'flex h-10 w-10 items-center justify-center rounded-xl border',
+                item.iconBg
+              )}
+            >
+              {item.icon}
+            </div>
+            <span
+              className={clsx(
+                'rounded-lg border px-2.5 py-0.5 text-[11px] font-semibold',
+                item.chip
+              )}
+            >
+              {item.label}
+            </span>
           </div>
-          <div>
-            <p className="text-lg font-display font-bold">{item.value}</p>
-            <p className="text-xs font-semibold opacity-70">{item.label}</p>
+          <div className="mt-3">
+            <p className="text-2xl font-display font-bold text-foreground">{item.value}</p>
           </div>
-        </div>
+        </article>
       ))}
     </div>
   );

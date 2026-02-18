@@ -16,7 +16,18 @@ import {
 import { generateFlashcards, type Flashcard } from '../api/minigames';
 import { FlashcardFlip, WordMatch } from '../components/minigames';
 // FLASHCARDFLIP
-import { Card, Alert, AlertDescription, Button } from '@/components/ui';
+import {
+  Card,
+  Alert,
+  AlertDescription,
+  Button,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui';
 import { AnimatedPage } from '@/components/layout/AnimatedPage';
 import { messageVariants } from '@/lib/animations';
 import {
@@ -51,6 +62,8 @@ export function ChatPage() {
   const [messages, setMessages] = useState<ChatMessageType[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [deleteDialogChatId, setDeleteDialogChatId] = useState<string | null>(null);
+  const [isDeletingChat, setIsDeletingChat] = useState(false);
 
   // FLASHCARDFLIP
   const [showFlashcards, setShowFlashcards] = useState(false);
@@ -205,14 +218,20 @@ export function ChatPage() {
     }
   };
 
-  const handleDeleteChat = async (chatId: string, e: React.MouseEvent) => {
+  const handleDeleteChat = (chatId: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!confirm(t('chat.deleteConfirm') || 'Are you sure you want to delete this chat?')) {
-      return;
-    }
+    setDeleteDialogChatId(chatId);
+  };
+
+  const handleConfirmDeleteChat = async () => {
+    if (!deleteDialogChatId || isDeletingChat) return;
+    const chatId = deleteDialogChatId;
+    setIsDeletingChat(true);
+
     try {
       await deleteChatSession(chatId);
-      setChatSessions((prev) => prev.filter((c) => c.id !== chatId));
+      const remainingChats = chatSessions.filter((c) => c.id !== chatId);
+      setChatSessions(remainingChats);
       if (currentChatId === chatId) {
         setCurrentChatId(null);
         setCurrentChat(null);
@@ -221,6 +240,9 @@ export function ChatPage() {
       }
     } catch (err) {
       console.error('Failed to delete chat:', err);
+    } finally {
+      setIsDeletingChat(false);
+      setDeleteDialogChatId(null);
     }
   };
 
@@ -335,6 +357,9 @@ export function ChatPage() {
       return date.toLocaleDateString();
     }
   };
+  const pendingDeleteChat = deleteDialogChatId
+    ? chatSessions.find((chat) => chat.id === deleteDialogChatId) ?? null
+    : null;
 
   // Chat List View
   if (view === 'list') {
@@ -659,6 +684,44 @@ export function ChatPage() {
           />
         </motion.div>
       </div>
+
+      <Dialog
+        open={Boolean(deleteDialogChatId)}
+        onOpenChange={(open) => {
+          if (!open && !isDeletingChat) {
+            setDeleteDialogChatId(null);
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-[420px]">
+          <DialogHeader>
+            <DialogTitle>{t('app.learn.sessions.deleteTitle')}</DialogTitle>
+            <DialogDescription>
+              {pendingDeleteChat?.title
+                ? `${pendingDeleteChat.title} — ${t('chat.deleteConfirm')}`
+                : t('chat.deleteConfirm')}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setDeleteDialogChatId(null)}
+              disabled={isDeletingChat}
+            >
+              {t('logout.cancel')}
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={handleConfirmDeleteChat}
+              loading={isDeletingChat}
+            >
+              {t('app.learn.sessions.deleteAction')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* FLASHCARDFLIP */}
       <AnimatePresence>

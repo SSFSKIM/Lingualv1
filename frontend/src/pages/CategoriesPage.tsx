@@ -51,19 +51,19 @@ export function CategoriesPage() {
   };
 
   return (
-    <AnimatedPage className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
-      <AnimatedCard className="p-8 max-w-lg w-full bg-white border border-slate-200 shadow-sm">
+    <AnimatedPage className="min-h-screen bg-background flex items-center justify-center p-6">
+      <AnimatedCard className="p-8 max-w-lg w-full bg-card border-3 border-foreground shadow-stamp">
         <motion.h1
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
-          className="text-2xl font-bold text-center text-slate-900 mb-3"
+          className="text-2xl font-display font-bold text-center text-foreground mb-3"
         >
           {t('categories.title')}
         </motion.h1>
         <motion.p
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          className="text-center text-sm text-slate-500 mb-8"
+          className="text-center text-sm text-muted-foreground mb-8"
         >
           Pick one or more focus areas so we can personalize your sessions.
         </motion.p>
@@ -84,7 +84,7 @@ export function CategoriesPage() {
           )}
         </AnimatePresence>
 
-        <div className="border-t border-slate-100 pt-6">
+        <div className="border-t border-border pt-6">
           <motion.div
             variants={staggerContainer}
             initial="initial"
@@ -97,7 +97,7 @@ export function CategoriesPage() {
                   variant="option"
                   selected={selectedCategories.includes(id)}
                   onClick={() => toggleCategory(id)}
-                  className="rounded-full px-5 border-slate-200 bg-white shadow-sm hover:border-purple-200 hover:text-purple-700"
+                  className="rounded-full px-5 border-border bg-card hover:border-primary hover:text-foreground"
                 >
                   {t(labelKey)}
                 </Button>

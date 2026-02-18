@@ -77,23 +77,25 @@ export function AppSettingsPage() {
   };
 
   return (
-    <div className="max-w-4xl mx-auto">
-      {/* Header */}
-      <div className="flex items-center gap-4 mb-8">
-        <div className="w-14 h-14 rounded-2xl bg-primary text-primary-foreground border-3 border-foreground flex items-center justify-center shadow-stamp">
-          <Settings size={28} strokeWidth={2.5} />
+    <div className="mx-auto max-w-5xl space-y-6">
+      <header className="flex items-start gap-4">
+        <div className="flex h-12 w-12 items-center justify-center rounded-xl border-3 border-foreground bg-primary text-primary-foreground shadow-stamp-sm">
+          <Settings size={24} strokeWidth={2.5} />
         </div>
-        <div>
-          <p className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">
-            Preferences
+        <div className="space-y-1">
+          <p className="text-xs font-bold uppercase tracking-[0.16em] text-primary">
+            {t('nav.settings')}
           </p>
           <h1 className="text-3xl font-display font-bold text-foreground">
             {t('app.settings.title')}
           </h1>
+          <p className="text-sm text-muted-foreground">
+            {t('app.settings.account.subtitle')}
+          </p>
         </div>
-      </div>
+      </header>
 
-      <Tabs.Root defaultValue="account" className="flex flex-col md:flex-row gap-6">
+      <Tabs.Root defaultValue="account" className="flex flex-col gap-6 md:flex-row">
         {/* Tab Navigation */}
         <Tabs.List className="flex flex-col space-y-2 md:w-64 flex-shrink-0">
           {[
@@ -107,7 +109,7 @@ export function AppSettingsPage() {
               key={tab.value}
               value={tab.value}
               className={clsx(
-                'group flex items-center space-x-3 px-4 py-3 rounded-xl text-left transition-all border-2',
+                'group flex min-h-11 items-center space-x-3 rounded-xl border-2 px-4 text-left transition-all',
                 'data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:border-foreground data-[state=active]:shadow-stamp',
                 'text-muted-foreground hover:text-foreground hover:bg-secondary border-transparent data-[state=inactive]:hover:border-border'
               )}
@@ -119,14 +121,14 @@ export function AppSettingsPage() {
         </Tabs.List>
 
         {/* Content Panel */}
-        <div className="flex-1 bg-card rounded-2xl border-3 border-foreground shadow-stamp p-8 min-h-[500px]">
+        <div className="flex-1 min-h-[500px] rounded-2xl border-3 border-foreground bg-card p-6 shadow-stamp">
           {/* Account Tab */}
           <Tabs.Content
             value="account"
-            className="space-y-8 outline-none animate-in fade-in slide-in-from-right-4 duration-300"
+            className="space-y-6 outline-none animate-in fade-in slide-in-from-right-4 duration-300"
           >
             <div>
-              <h2 className="text-xl font-display font-bold text-foreground mb-1">
+              <h2 className="mb-2 text-lg font-display font-bold text-foreground">
                 {t('app.settings.account.title')}
               </h2>
               <p className="text-muted-foreground text-sm">
@@ -185,7 +187,7 @@ export function AppSettingsPage() {
                   value={selectedLocale}
                   onChange={(event) => setSelectedLocale(event.target.value as LearningLocale)}
                   disabled={isLoading}
-                  className="w-full px-4 py-3 rounded-xl border-2 border-border bg-card text-foreground font-medium focus:border-primary focus:outline-none transition-all disabled:bg-secondary disabled:text-muted-foreground"
+                  className="h-11 w-full rounded-xl border-2 border-border bg-card px-4 text-foreground font-medium focus:border-primary focus:outline-none transition-all disabled:bg-secondary disabled:text-muted-foreground"
                 >
                   {LEARNING_LOCALES.map((locale) => (
                     <option key={locale.value} value={locale.value}>
@@ -200,9 +202,10 @@ export function AppSettingsPage() {
 
               <div className="pt-4 flex justify-end">
                 <button
+                  type="button"
                   onClick={handleSave}
                   disabled={isLoading || isSaving}
-                  className="bg-primary hover:bg-primary/90 text-primary-foreground font-bold py-3 px-6 rounded-xl border-2 border-foreground shadow-stamp hover:shadow-[6px_6px_0_0_var(--foreground)] hover:-translate-y-0.5 active:translate-y-0.5 active:shadow-[2px_2px_0_0_var(--foreground)] transition-all disabled:opacity-60 disabled:cursor-not-allowed disabled:shadow-none disabled:hover:translate-y-0"
+                  className="min-h-11 rounded-xl border-2 border-foreground bg-primary px-6 text-primary-foreground font-bold shadow-stamp transition-all hover:bg-primary/90 hover:-translate-y-0.5 hover:shadow-[6px_6px_0_0_var(--foreground)] active:translate-y-0.5 active:shadow-[2px_2px_0_0_var(--foreground)] disabled:opacity-60 disabled:cursor-not-allowed disabled:shadow-none disabled:hover:translate-y-0"
                 >
                   {isSaving ? t('app.settings.account.saving') : t('app.settings.account.save')}
                 </button>
@@ -213,10 +216,10 @@ export function AppSettingsPage() {
           {/* Notifications Tab */}
           <Tabs.Content
             value="notifications"
-            className="space-y-8 outline-none animate-in fade-in slide-in-from-right-4 duration-300"
+            className="space-y-6 outline-none animate-in fade-in slide-in-from-right-4 duration-300"
           >
             <div>
-              <h2 className="text-xl font-display font-bold text-foreground mb-1">
+              <h2 className="mb-2 text-lg font-display font-bold text-foreground">
                 {t('app.settings.notifications.title')}
               </h2>
               <p className="text-muted-foreground text-sm">
@@ -251,10 +254,10 @@ export function AppSettingsPage() {
           {/* Privacy Tab */}
           <Tabs.Content
             value="privacy"
-            className="space-y-8 outline-none animate-in fade-in slide-in-from-right-4 duration-300"
+            className="space-y-6 outline-none animate-in fade-in slide-in-from-right-4 duration-300"
           >
             <div>
-              <h2 className="text-xl font-display font-bold text-foreground mb-1">
+              <h2 className="mb-2 text-lg font-display font-bold text-foreground">
                 {t('app.settings.privacy.title')}
               </h2>
               <p className="text-muted-foreground text-sm">{t('app.settings.privacy.subtitle')}</p>
@@ -281,10 +284,13 @@ export function AppSettingsPage() {
               </div>
 
               <div className="pt-8 border-t-2 border-border">
-                <h3 className="font-display font-bold text-foreground mb-4">
+                <h3 className="mb-3 text-lg font-display font-bold text-foreground">
                   {t('app.settings.privacy.danger')}
                 </h3>
-                <button className="text-destructive font-bold border-2 border-destructive bg-destructive/10 hover:bg-destructive/20 px-4 py-3 rounded-xl transition-colors">
+                <button
+                  type="button"
+                  className="min-h-11 rounded-xl border-2 border-destructive bg-destructive/10 px-4 text-destructive font-bold transition-colors hover:bg-destructive/20"
+                >
                   {t('app.settings.privacy.delete')}
                 </button>
               </div>

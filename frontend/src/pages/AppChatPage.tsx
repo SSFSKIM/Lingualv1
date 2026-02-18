@@ -20,6 +20,15 @@ import { ChatInput } from '@/components/chat';
 import { getUserProfile } from '@/api/user';
 import { getAssessmentResults } from '@/api/assessment';
 import { LearningPathCard, ChatSessionsSidebar } from '@/components/learning';
+import {
+  Button,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui';
 import type { ChatMessage, ChatSession, AssessmentResults, UserProfile } from '@/types';
 import { useLanguage } from '@/contexts/LanguageContext';
 
@@ -52,6 +61,8 @@ export function AppChatPage() {
   const [mode, setMode] = useState<Mode>('realtime');
   const [inputValue, setInputValue] = useState('');
   const [isSendingText, setIsSendingText] = useState(false);
+  const [deleteDialogChatId, setDeleteDialogChatId] = useState<string | null>(null);
+  const [isDeletingChat, setIsDeletingChat] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const currentChatIdRef = useRef<string | null>(null);
@@ -341,29 +352,38 @@ export function AppChatPage() {
     }
   };
 
-  const handleDeleteChat = async (chatId: string, e: React.MouseEvent) => {
+  const handleDeleteChat = (chatId: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!confirm(t('chat.deleteConfirm') || 'Are you sure you want to delete this chat?')) {
-      return;
-    }
+    setDeleteDialogChatId(chatId);
+  };
+
+  const handleConfirmDeleteChat = async () => {
+    if (!deleteDialogChatId || isDeletingChat) return;
+    const chatId = deleteDialogChatId;
+    setIsDeletingChat(true);
+
     try {
       await deleteChatSession(chatId);
-      setSessions((prev) => prev.filter((s) => s.id !== chatId));
+      const remaining = sessions.filter((s) => s.id !== chatId);
+      setSessions(remaining);
+
       if (currentChatId === chatId) {
         setCurrentChatId(null);
         setHistoryMessages([]);
         clearMessages();
         disconnect();
-        const remaining = sessions.filter((s) => s.id !== chatId);
         if (remaining.length > 0) {
-          loadChat(remaining[0].id);
+          await loadChat(remaining[0].id);
         } else {
-          createNewChat();
+          await createNewChat();
         }
       }
     } catch (err) {
       console.error('Failed to delete chat:', err);
       setError('Failed to delete chat');
+    } finally {
+      setIsDeletingChat(false);
+      setDeleteDialogChatId(null);
     }
   };
 
@@ -373,6 +393,9 @@ export function AppChatPage() {
     Boolean(currentChatId) &&
     Boolean(mostRecentSession) &&
     mostRecentSession?.id !== currentChatId;
+  const pendingDeleteSession = deleteDialogChatId
+    ? sessions.find((session) => session.id === deleteDialogChatId) ?? null
+    : null;
 
   const focusAreas = profileSummary?.selectedCategories ?? [];
   const domainEntries = assessmentResults?.domainBands
@@ -404,8 +427,8 @@ export function AppChatPage() {
   }, [currentChatId, historyMessages.length, scheduleRefreshSessions]);
 
   return (
-    <div className="grid lg:grid-cols-12 gap-6 h-[calc(100vh-8rem)]">
-      <div className="lg:col-span-4 flex flex-col h-full gap-6">
+    <div className="grid h-[calc(100vh-8rem)] gap-6 lg:grid-cols-12">
+      <div className="flex h-full flex-col gap-6 lg:col-span-4">
         {/* Learning Path Card */}
         <LearningPathCard
           assessmentResults={assessmentResults}
@@ -428,8 +451,8 @@ export function AppChatPage() {
       </div>
 
       {/* Main Chat Panel */}
-      <div className="lg:col-span-8 flex flex-col h-full bg-card rounded-2xl border-3 border-foreground shadow-stamp overflow-hidden relative">
-        <div className="p-4 border-b-3 border-foreground flex justify-between items-center bg-card z-10">
+      <div className="relative flex h-full flex-col overflow-hidden rounded-2xl border-3 border-foreground bg-card shadow-stamp lg:col-span-8">
+        <div className="z-10 flex items-center justify-between border-b-3 border-foreground bg-card p-4">
           <div>
             <div className="flex items-center space-x-2 text-sm text-primary font-bold mb-0.5">
               <MessageSquare size={16} strokeWidth={2.5} />
@@ -468,7 +491,7 @@ export function AppChatPage() {
                 type="button"
                 onClick={() => handleModeChange('text')}
                 className={clsx(
-                  'px-3 py-1.5 rounded-lg text-sm font-bold transition-colors',
+                  'h-10 px-3 rounded-lg text-sm font-bold transition-colors',
                   mode === 'text'
                     ? 'bg-card text-primary border-2 border-foreground shadow-stamp-sm'
                     : 'text-muted-foreground hover:text-foreground border-2 border-transparent'
@@ -480,7 +503,7 @@ export function AppChatPage() {
                 type="button"
                 onClick={() => handleModeChange('realtime')}
                 className={clsx(
-                  'px-3 py-1.5 rounded-lg text-sm font-bold transition-colors',
+                  'h-10 px-3 rounded-lg text-sm font-bold transition-colors',
                   mode === 'realtime'
                     ? 'bg-card text-primary border-2 border-foreground shadow-stamp-sm'
                     : 'text-muted-foreground hover:text-foreground border-2 border-transparent'
@@ -496,10 +519,11 @@ export function AppChatPage() {
               </div>
             )}
             <button
+              type="button"
               onClick={createNewChat}
               aria-label={t('app.learn.sessions.newChatTitle')}
               title={t('app.learn.sessions.newChatTitle')}
-              className="p-2 text-muted-foreground hover:text-foreground hover:bg-secondary rounded-xl border-2 border-transparent hover:border-border transition-colors"
+              className="h-10 w-10 text-muted-foreground hover:text-foreground hover:bg-secondary rounded-xl border-2 border-transparent hover:border-border transition-colors"
             >
               <RefreshCcw size={20} strokeWidth={2.5} />
             </button>
@@ -585,6 +609,7 @@ export function AppChatPage() {
                     : t('app.learn.chat.input.disconnected')}
                 </div>
                 <button
+                  type="button"
                   onClick={handleRecordToggle}
                   disabled={!currentChatId || isConnecting}
                   aria-label={micButtonLabel}
@@ -609,6 +634,46 @@ export function AppChatPage() {
           </AnimatePresence>
         </div>
       </div>
+
+      <Dialog
+        open={Boolean(deleteDialogChatId)}
+        onOpenChange={(open) => {
+          if (!open && !isDeletingChat) {
+            setDeleteDialogChatId(null);
+          }
+        }}
+      >
+        <DialogContent className="max-w-[420px] rounded-2xl border-3 border-foreground bg-card shadow-stamp">
+          <DialogHeader>
+            <DialogTitle className="font-display text-xl text-foreground">
+              {t('app.learn.sessions.deleteTitle') || 'Delete conversation?'}
+            </DialogTitle>
+            <DialogDescription className="text-sm text-muted-foreground">
+              {pendingDeleteSession?.title
+                ? `${pendingDeleteSession.title} — ${t('chat.deleteConfirm') || 'Are you sure you want to delete this chat?'}`
+                : t('chat.deleteConfirm') || 'Are you sure you want to delete this chat?'}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setDeleteDialogChatId(null)}
+              disabled={isDeletingChat}
+            >
+              {t('logout.cancel') || 'Cancel'}
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={handleConfirmDeleteChat}
+              loading={isDeletingChat}
+            >
+              {t('app.learn.sessions.deleteAction') || 'Delete chat'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

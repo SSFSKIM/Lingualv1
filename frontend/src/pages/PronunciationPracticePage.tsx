@@ -283,22 +283,25 @@ export function PronunciationPracticePage() {
   const isBusy = status !== 'idle' || isSaving;
 
   return (
-    <div className="max-w-4xl mx-auto space-y-8">
-      <div className="flex items-center gap-4">
-        <div className="w-14 h-14 rounded-2xl bg-primary text-primary-foreground border-3 border-foreground flex items-center justify-center shadow-stamp">
-          <Mic size={28} strokeWidth={2.5} />
+    <div className="mx-auto max-w-5xl space-y-6">
+      <header className="flex items-start gap-4">
+        <div className="flex h-12 w-12 items-center justify-center rounded-xl border-3 border-foreground bg-primary text-primary-foreground shadow-stamp-sm">
+          <Mic size={24} strokeWidth={2.5} />
         </div>
-        <div>
-          <p className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">
-            {t('app.practice.subtitle')}
+        <div className="space-y-1">
+          <p className="text-xs font-bold uppercase tracking-[0.16em] text-primary">
+            {t('app.layout.nav.practice') || 'Pronunciation'}
           </p>
           <h1 className="text-3xl font-display font-bold text-foreground">
             {t('app.practice.title')}
           </h1>
+          <p className="text-sm text-muted-foreground">
+            {t('app.practice.subtitle')}
+          </p>
         </div>
-      </div>
+      </header>
 
-      <div className="bg-card rounded-2xl border-3 border-foreground shadow-stamp p-8 space-y-6">
+      <div className="rounded-2xl border-3 border-foreground bg-card p-6 shadow-stamp space-y-6">
         {curriculumMatchesLocale && scenarios.length > 0 && (
           <div className="space-y-4">
             <div className="flex items-center justify-between flex-wrap gap-2">
@@ -336,7 +339,7 @@ export function PronunciationPracticePage() {
                   setSelectedScenarioId(nextScenarios.length ? nextScenarios[0].id : null);
                   setCurrentIndex(0);
                 }}
-                className="px-3 py-2 rounded-xl border-2 border-border bg-card text-foreground text-sm font-semibold"
+                className="h-11 px-4 rounded-xl border-2 border-border bg-card text-foreground text-sm font-semibold"
               >
                 <option value="">{t('app.practice.scenario.objectiveAll')}</option>
                 {curriculum.objectives.map((objective) => (
@@ -389,7 +392,7 @@ export function PronunciationPracticePage() {
                     {selectedObjective.skills.map((skill) => (
                       <span
                         key={skill}
-                        className="px-2.5 py-1 rounded-full border border-border text-xs font-semibold text-foreground bg-card"
+                        className="px-2.5 py-1 rounded-lg border border-border text-xs font-semibold text-foreground bg-card"
                       >
                         {skill}
                       </span>
@@ -425,7 +428,7 @@ export function PronunciationPracticePage() {
                 {currentPrompt?.text || ''}
               </h2>
               {selectedObjective?.title ? (
-                <span className="px-2.5 py-1 rounded-full border border-border text-xs font-semibold text-foreground bg-secondary/40">
+                <span className="px-2.5 py-1 rounded-lg border border-border text-xs font-semibold text-foreground bg-secondary/40">
                   {selectedObjective.title}
                 </span>
               ) : null}
@@ -437,7 +440,7 @@ export function PronunciationPracticePage() {
               onClick={handlePractice}
               disabled={isBusy}
               className={clsx(
-                'flex items-center gap-2 px-5 py-3 rounded-xl border-2 border-foreground font-bold shadow-stamp transition-all',
+                'flex h-11 items-center gap-2 px-5 rounded-xl border-2 border-foreground font-bold shadow-stamp transition-all',
                 'bg-primary text-primary-foreground hover:-translate-y-0.5 hover:shadow-[6px_6px_0_0_var(--foreground)]',
                 'disabled:opacity-60 disabled:cursor-not-allowed disabled:shadow-none disabled:hover:translate-y-0'
               )}
@@ -463,7 +466,7 @@ export function PronunciationPracticePage() {
               type="button"
               onClick={nextPrompt}
               disabled={isBusy}
-              className="flex items-center gap-2 px-4 py-3 rounded-xl border-2 border-border text-muted-foreground font-bold hover:text-foreground hover:border-foreground transition-all"
+              className="flex min-h-11 items-center gap-2 px-4 rounded-xl border-2 border-border text-muted-foreground font-bold hover:text-foreground hover:border-foreground transition-all"
             >
               <SkipForward size={18} />
               {t('app.practice.next')}
@@ -481,7 +484,9 @@ export function PronunciationPracticePage() {
           <div className="space-y-6">
             <div className="bg-secondary/40 border-2 border-border rounded-2xl p-5 space-y-4">
               <div className="flex items-center justify-between">
-                <h3 className="font-display font-bold text-foreground">{t('app.practice.scores.title')}</h3>
+                <h3 className="text-lg font-display font-bold text-foreground">
+                  {t('app.practice.scores.title')}
+                </h3>
                 <button
                   type="button"
                   onClick={resetSession}
@@ -522,7 +527,9 @@ export function PronunciationPracticePage() {
             </div>
 
             <div className="bg-card border-2 border-border rounded-2xl p-5 space-y-4">
-              <h3 className="font-display font-bold text-foreground">{t('app.practice.recording.title')}</h3>
+              <h3 className="text-lg font-display font-bold text-foreground">
+                {t('app.practice.recording.title')}
+              </h3>
               {!latestAttempt?.audioUrl ? (
                 <p className="text-sm text-muted-foreground">{t('app.practice.recording.empty')}</p>
               ) : (
@@ -536,7 +543,9 @@ export function PronunciationPracticePage() {
             </div>
 
             <div className="bg-card border-2 border-border rounded-2xl p-5 space-y-4">
-              <h3 className="font-display font-bold text-foreground">{t('app.practice.words.title')}</h3>
+              <h3 className="text-lg font-display font-bold text-foreground">
+                {t('app.practice.words.title')}
+              </h3>
               {!latestAttempt?.words?.length ? (
                 <p className="text-sm text-muted-foreground">{t('app.practice.words.empty')}</p>
               ) : (
@@ -551,7 +560,7 @@ export function PronunciationPracticePage() {
                           onClick={() => setSelectedWordIndex(index)}
                           aria-pressed={isSelected}
                           className={clsx(
-                            'px-3 py-1 rounded-full border-2 text-sm font-semibold transition-all',
+                            'px-3 py-1 rounded-lg border-2 text-sm font-semibold transition-all',
                             isSelected
                               ? 'border-foreground bg-foreground text-background shadow-stamp'
                               : 'border-border text-foreground bg-secondary/40 hover:border-foreground hover:-translate-y-0.5'
@@ -584,7 +593,7 @@ export function PronunciationPracticePage() {
                           <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
                             {t('app.practice.words.errorType.label')}
                           </span>
-                          <span className="px-3 py-1 rounded-full border-2 border-border bg-card text-xs font-bold text-foreground">
+                          <span className="px-3 py-1 rounded-lg border-2 border-border bg-card text-xs font-bold text-foreground">
                             {formatErrorType(selectedWord.errorType)}
                           </span>
                         </div>
@@ -610,7 +619,7 @@ export function PronunciationPracticePage() {
                                 <span
                                   key={`${phoneme.phoneme}-${index}`}
                                   className={clsx(
-                                    'px-2.5 py-1 rounded-full border-2 text-xs font-bold',
+                                    'px-2.5 py-1 rounded-lg border-2 text-xs font-bold',
                                     isLow
                                       ? 'border-destructive/30 bg-destructive/10 text-destructive'
                                       : 'border-border bg-card text-foreground'
@@ -640,7 +649,9 @@ export function PronunciationPracticePage() {
 
           <div className="space-y-6">
             <div className="bg-card border-2 border-border rounded-2xl p-5 space-y-4">
-              <h3 className="font-display font-bold text-foreground">{t('app.practice.objectives.title')}</h3>
+              <h3 className="text-lg font-display font-bold text-foreground">
+                {t('app.practice.objectives.title')}
+              </h3>
               {!objectiveStats.length ? (
                 <p className="text-sm text-muted-foreground">{t('app.practice.objectives.empty')}</p>
               ) : (

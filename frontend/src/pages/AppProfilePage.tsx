@@ -2,9 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import {
   Camera,
   MapPin,
-  Mail,
   School,
-  GraduationCap,
   Globe,
   Github,
   Facebook,
@@ -12,10 +10,12 @@ import {
   Youtube,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
+import { clsx } from 'clsx';
 import { toast } from 'sonner';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuth } from '@/hooks/useAuth';
 import { getUserProfile, updateProfile } from '@/api/user';
+import { Button, Input } from '@/components/ui';
 import type { UserProfile } from '@/types';
 
 const USER_AVATAR = '/imgs/landing/student.jpg';
@@ -278,28 +278,33 @@ export function AppProfilePage() {
   ];
 
   return (
-    <div className="max-w-4xl mx-auto">
-      <h1 className="text-3xl font-bold text-slate-900 mb-8">
-        {t('app.profile.title')}
-      </h1>
+    <div className="mx-auto max-w-5xl space-y-6">
+      <header className="space-y-1">
+        <p className="text-xs font-bold uppercase tracking-[0.16em] text-primary">
+          {studentLabel}
+        </p>
+        <h1 className="text-3xl font-display font-bold text-foreground">
+          {t('app.profile.title')}
+        </h1>
+      </header>
 
-      <div className="grid md:grid-cols-3 gap-8">
-        <div className="md:col-span-1 space-y-6">
-          <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200 text-center">
-            <div className="relative inline-block mb-4">
+      <div className="grid gap-6 md:grid-cols-3">
+        <div className="space-y-6 md:col-span-1">
+          <section className="rounded-2xl border-3 border-foreground bg-card p-6 text-center shadow-stamp">
+            <div className="relative mx-auto mb-4 inline-block">
               <img
                 src={avatarSrc}
                 alt={t('app.profile.photo') || 'Profile'}
-                className="w-32 h-32 rounded-full object-cover border-4 border-slate-50"
+                className="h-32 w-32 rounded-2xl border-3 border-foreground bg-secondary object-cover shadow-stamp-sm"
               />
               <button
                 type="button"
                 onClick={handleAvatarClick}
-                className="absolute bottom-0 right-0 p-2 bg-purple-600 text-white rounded-full hover:bg-purple-700 shadow-md border-2 border-white transition-colors"
+                className="absolute -bottom-1 -right-1 flex h-10 w-10 items-center justify-center rounded-xl border-2 border-foreground bg-primary text-primary-foreground shadow-stamp-sm transition-colors hover:bg-primary/90 disabled:opacity-60 disabled:cursor-not-allowed"
                 aria-label={t('app.profile.changePhoto') || 'Change profile photo'}
                 disabled={inputsDisabled}
               >
-                <Camera size={18} />
+                <Camera size={16} strokeWidth={2.5} />
               </button>
               <input
                 ref={fileInputRef}
@@ -309,153 +314,138 @@ export function AppProfilePage() {
                 onChange={handleAvatarChange}
               />
             </div>
-            <h2 className="text-xl font-bold text-slate-900">
+
+            <h2 className="text-xl font-display font-bold text-foreground">
               {formState.displayName || 'User'}
             </h2>
-            <p className="text-slate-500 mb-4">{gradeSummary}</p>
+            <p className="mt-1 text-sm font-medium text-muted-foreground">{gradeSummary}</p>
 
-            <div className="flex items-center justify-center space-x-2 text-sm text-slate-600 mb-2">
-              <MapPin size={16} />
-              <input
-                type="text"
-                value={formState.location}
-                onChange={(event) => handleFieldChange('location', event.target.value)}
-                placeholder={t('app.profile.location') || 'Location'}
-                className="w-full max-w-[180px] bg-slate-50 rounded-md px-2 py-1 text-center text-slate-600 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-purple-200"
-                aria-label={t('app.profile.location') || 'Location'}
-                disabled={inputsDisabled}
-              />
+            <div className="mt-5 space-y-2 text-sm">
+              <div className="inline-flex items-center gap-2 rounded-lg border border-border bg-secondary px-3 py-1.5 text-muted-foreground">
+                <MapPin size={14} />
+                <span>{formState.location || t('app.profile.location') || 'Location'}</span>
+              </div>
+              <div className="inline-flex items-center gap-2 rounded-lg border border-border bg-secondary px-3 py-1.5 text-muted-foreground">
+                <School size={14} />
+                <span>{formState.schoolName || t('app.profile.school') || 'School'}</span>
+              </div>
             </div>
-            <div className="flex items-center justify-center space-x-2 text-sm text-slate-600">
-              <School size={16} />
-              <input
-                type="text"
-                value={formState.schoolName}
-                onChange={(event) => handleFieldChange('schoolName', event.target.value)}
-                placeholder={t('app.profile.school') || 'School'}
-                className="w-full max-w-[180px] bg-slate-50 rounded-md px-2 py-1 text-center text-slate-600 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-purple-200"
-                aria-label={t('app.profile.school') || 'School'}
-                disabled={inputsDisabled}
-              />
-            </div>
-          </div>
+          </section>
 
-          <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200">
-            <h3 className="font-bold text-slate-900 mb-4 flex items-center gap-2">
-              <Globe size={18} className="text-purple-600" />
+          <section className="rounded-2xl border-3 border-foreground bg-card p-6 shadow-stamp">
+            <h3 className="mb-4 flex items-center gap-2 text-lg font-display font-bold text-foreground">
+              <Globe size={18} className="text-primary" strokeWidth={2.5} />
               {t('app.profile.languages')}
             </h3>
             <div className="space-y-4">
               <div>
-                <div className="flex justify-between text-sm mb-1">
-                  <span className="font-medium text-slate-700">Spanish</span>
-                  <span className="text-slate-500">{t('app.profile.level')} A2</span>
+                <div className="mb-1 flex items-center justify-between text-sm">
+                  <span className="font-semibold text-foreground">Spanish</span>
+                  <span className="text-muted-foreground">{t('app.profile.level')} A2</span>
                 </div>
-                <div className="w-full bg-slate-100 rounded-full h-2">
-                  <div className="bg-purple-600 h-2 rounded-full" style={{ width: '65%' }}></div>
+                <div className="h-2.5 rounded-full bg-secondary">
+                  <div
+                    className="h-full rounded-full"
+                    style={{ width: '65%', backgroundColor: 'var(--color-primary)' }}
+                  />
                 </div>
               </div>
               <div>
-                <div className="flex justify-between text-sm mb-1">
-                  <span className="font-medium text-slate-700">French</span>
-                  <span className="text-slate-500">{t('app.profile.level')} A1</span>
+                <div className="mb-1 flex items-center justify-between text-sm">
+                  <span className="font-semibold text-foreground">French</span>
+                  <span className="text-muted-foreground">{t('app.profile.level')} A1</span>
                 </div>
-                <div className="w-full bg-slate-100 rounded-full h-2">
-                  <div className="bg-blue-500 h-2 rounded-full" style={{ width: '20%' }}></div>
+                <div className="h-2.5 rounded-full bg-secondary">
+                  <div
+                    className="h-full rounded-full"
+                    style={{ width: '20%', backgroundColor: 'var(--color-chart-4)' }}
+                  />
                 </div>
               </div>
             </div>
-          </div>
+          </section>
         </div>
 
-        <div className="md:col-span-2 space-y-6">
-          <div className="bg-white rounded-2xl p-8 shadow-sm border border-slate-200">
-            <div className="flex items-center justify-between mb-6 border-b border-slate-100 pb-4">
-              <h3 className="text-xl font-bold text-slate-900">
+        <div className="space-y-6 md:col-span-2">
+          <section className="rounded-2xl border-3 border-foreground bg-card p-6 shadow-stamp">
+            <div className="mb-5 flex flex-col gap-3 border-b-2 border-border pb-4 sm:flex-row sm:items-center sm:justify-between">
+              <h3 className="text-xl font-display font-bold text-foreground">
                 {t('app.profile.personalInfo')}
               </h3>
-              <button
+              <Button
                 type="button"
                 onClick={handleSave}
                 disabled={inputsDisabled}
-                className="text-sm font-semibold text-white bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded-lg shadow-sm transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                className="min-w-[138px]"
               >
                 {isSaving
                   ? t('app.profile.saving') || 'Saving...'
                   : t('app.profile.save') || 'Save Changes'}
-              </button>
+              </Button>
             </div>
 
-            <div className="grid sm:grid-cols-2 gap-6">
-              <div className="space-y-1">
-                <label className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-                  {t('app.profile.fullName')}
-                </label>
-                <input
-                  type="text"
-                  value={formState.displayName}
-                  onChange={(event) => handleFieldChange('displayName', event.target.value)}
-                  placeholder={t('app.profile.fullName') || 'Full Name'}
-                  className="w-full p-3 bg-slate-50 rounded-lg text-slate-900 font-medium focus:outline-none focus:ring-2 focus:ring-purple-200"
-                  disabled={inputsDisabled}
-                />
-              </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Input
+                label={t('app.profile.fullName')}
+                type="text"
+                value={formState.displayName}
+                onChange={(event) => handleFieldChange('displayName', event.target.value)}
+                placeholder={t('app.profile.fullName') || 'Full Name'}
+                disabled={inputsDisabled}
+              />
 
-              <div className="space-y-1">
-                <label className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-                  {t('app.profile.email')}
-                </label>
-                <div className="relative">
-                  <input
-                    type="email"
-                    value={formState.contactEmail}
-                    onChange={(event) => handleFieldChange('contactEmail', event.target.value)}
-                    placeholder={t('app.profile.email') || 'Email Address'}
-                    className="w-full p-3 bg-slate-50 rounded-lg text-slate-900 font-medium focus:outline-none focus:ring-2 focus:ring-purple-200 pr-10"
-                    disabled={inputsDisabled}
-                  />
-                  <Mail size={16} className="absolute right-3 top-3.5 text-slate-400" />
-                </div>
-              </div>
+              <Input
+                label={t('app.profile.email')}
+                type="email"
+                value={formState.contactEmail}
+                onChange={(event) => handleFieldChange('contactEmail', event.target.value)}
+                placeholder={t('app.profile.email') || 'Email Address'}
+                disabled={inputsDisabled}
+              />
 
-              <div className="space-y-1">
-                <label className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-                  {t('app.profile.gradeLevel')}
-                </label>
-                <div className="relative">
-                  <input
-                    type="text"
-                    value={formState.gradeLevel}
-                    onChange={(event) => handleFieldChange('gradeLevel', event.target.value)}
-                    placeholder={t('app.profile.gradeLevel') || 'Grade Level'}
-                    className="w-full p-3 bg-slate-50 rounded-lg text-slate-900 font-medium focus:outline-none focus:ring-2 focus:ring-purple-200 pr-10"
-                    disabled={inputsDisabled}
-                  />
-                  <GraduationCap size={16} className="absolute right-3 top-3.5 text-slate-400" />
-                </div>
-              </div>
+              <Input
+                label={t('app.profile.gradeLevel')}
+                type="text"
+                value={formState.gradeLevel}
+                onChange={(event) => handleFieldChange('gradeLevel', event.target.value)}
+                placeholder={t('app.profile.gradeLevel') || 'Grade Level'}
+                disabled={inputsDisabled}
+              />
 
-              <div className="space-y-1">
-                <label className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-                  {t('app.profile.nativeLanguage')}
-                </label>
-                <input
-                  type="text"
-                  value={formState.nativeLanguage}
-                  onChange={(event) => handleFieldChange('nativeLanguage', event.target.value)}
-                  placeholder={t('app.profile.nativeLanguage') || 'Native Language'}
-                  className="w-full p-3 bg-slate-50 rounded-lg text-slate-900 font-medium focus:outline-none focus:ring-2 focus:ring-purple-200"
-                  disabled={inputsDisabled}
-                />
-              </div>
+              <Input
+                label={t('app.profile.nativeLanguage')}
+                type="text"
+                value={formState.nativeLanguage}
+                onChange={(event) => handleFieldChange('nativeLanguage', event.target.value)}
+                placeholder={t('app.profile.nativeLanguage') || 'Native Language'}
+                disabled={inputsDisabled}
+              />
+
+              <Input
+                label={t('app.profile.location')}
+                type="text"
+                value={formState.location}
+                onChange={(event) => handleFieldChange('location', event.target.value)}
+                placeholder={t('app.profile.location') || 'Location'}
+                disabled={inputsDisabled}
+              />
+
+              <Input
+                label={t('app.profile.school')}
+                type="text"
+                value={formState.schoolName}
+                onChange={(event) => handleFieldChange('schoolName', event.target.value)}
+                placeholder={t('app.profile.school') || 'School'}
+                disabled={inputsDisabled}
+              />
             </div>
-          </div>
+          </section>
 
-          <div className="bg-white rounded-2xl p-8 shadow-sm border border-slate-200">
-            <h3 className="text-xl font-bold text-slate-900 mb-6 border-b border-slate-100 pb-4">
+          <section className="rounded-2xl border-3 border-foreground bg-card p-6 shadow-stamp">
+            <h3 className="mb-5 border-b-2 border-border pb-4 text-xl font-display font-bold text-foreground">
               {t('app.profile.connectedAccounts')}
             </h3>
-            <div className="space-y-4">
+            <div className="space-y-3">
               {providers.map((provider) => {
                 const connected = provider.providerId
                   ? isProviderConnected(provider.providerId)
@@ -486,38 +476,41 @@ export function AppProfilePage() {
                 return (
                   <div
                     key={provider.key}
-                    className="flex items-center justify-between p-4 border border-slate-100 rounded-xl hover:bg-slate-50 transition-colors"
+                    className="flex flex-col gap-3 rounded-xl border-2 border-border bg-secondary/60 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
                   >
-                    <div className="flex items-center space-x-4">
+                    <div className="flex min-w-0 items-center gap-3">
                       <div
-                        className={`w-10 h-10 rounded-full flex items-center justify-center ${provider.iconClassName}`}
+                        className={`h-10 w-10 shrink-0 rounded-xl border border-border flex items-center justify-center ${provider.iconClassName}`}
                       >
                         {provider.iconType === 'image' ? (
                           <img
                             src={provider.iconSrc}
                             alt={provider.iconAlt}
-                            className="w-5 h-5"
+                            className="h-5 w-5"
                           />
                         ) : Icon ? (
-                          <Icon size={20} />
+                          <Icon size={18} />
                         ) : null}
                       </div>
-                      <div>
-                        <div className="font-bold text-slate-900">{provider.label}</div>
-                        <div className="text-sm text-slate-500">{statusLabel}</div>
+                      <div className="min-w-0">
+                        <p className="truncate font-semibold text-foreground">{provider.label}</p>
+                        <p className="truncate text-sm text-muted-foreground">{statusLabel}</p>
                       </div>
                     </div>
+
                     <button
                       type="button"
                       onClick={() => handleProviderAction(provider.key)}
-                      disabled={busy || !firebaseUser}
-                      className={`text-sm font-semibold transition-colors ${
+                      disabled={busy || !firebaseUser || provider.unsupported}
+                      className={clsx(
+                        'min-h-11 rounded-xl border-2 px-4 py-2 text-sm font-semibold transition-colors',
                         provider.unsupported
-                          ? 'text-slate-300 hover:text-slate-400'
+                          ? 'border-border bg-secondary text-muted-foreground'
                           : connected
-                          ? 'text-slate-400 hover:text-red-500'
-                          : 'text-purple-600 hover:text-purple-700'
-                      } disabled:opacity-50 disabled:cursor-not-allowed`}
+                          ? 'border-destructive/35 bg-destructive/10 text-destructive hover:bg-destructive/15'
+                          : 'border-primary/35 bg-primary/10 text-primary hover:bg-primary/20',
+                        (busy || !firebaseUser) && 'opacity-60 cursor-not-allowed'
+                      )}
                     >
                       {busy
                         ? connected
@@ -529,7 +522,7 @@ export function AppProfilePage() {
                 );
               })}
             </div>
-          </div>
+          </section>
         </div>
       </div>
     </div>

@@ -205,6 +205,8 @@
   "app.learn.sessions.empty": "아직 세션이 없습니다. 첫 세션을 만들어보세요.",
   "app.learn.sessions.noMessages": "메시지가 없습니다",
   "app.learn.sessions.newChatTitle": "새 대화",
+  "app.learn.sessions.deleteTitle": "대화를 삭제할까요?",
+  "app.learn.sessions.deleteAction": "대화 삭제",
   "app.learn.chat.label": "시나리오 연습",
   "app.learn.chat.title": "연습 세션",
   "app.learn.chat.status": "상태:",
@@ -227,7 +229,9 @@
 
   "app.dashboard.title": "학습 대시보드",
   "app.dashboard.subtitle": "학습 허브 — 이어서 학습하세요",
+  "app.dashboard.snapshot": "주간 요약",
   "app.dashboard.services": "학습 계속하기",
+  "app.dashboard.nextStep": "다음 연습 경로를 선택하세요.",
   "app.dashboard.stats.streak": "연속 학습",
   "app.dashboard.stats.weeklyTime": "주간 학습 시간",
   "app.dashboard.stats.weeklyXP": "주간 XP",
@@ -432,6 +436,9 @@
   "app.layout.role.learner": "학습자",
   "app.layout.language.korean": "한국어",
   "app.layout.nav.learning": "학습",
+  "app.layout.nav.chat": "채팅",
   "app.layout.nav.practice": "발음 연습",
+  "app.layout.nav.games": "게임",
+  "app.layout.nav.progress": "진행",
   "app.layout.nav.teacher": "교사 보기"
 }

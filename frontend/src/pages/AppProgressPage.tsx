@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { TrendingUp, Loader2 } from 'lucide-react';
+import { TrendingUp, Loader2, Gamepad2 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { getUserProfile } from '@/api/user';
 import { getAssessmentResults } from '@/api/assessment';
@@ -82,6 +82,7 @@ export function AppProgressPage() {
   const domainEntries = assessmentResults?.domainBands
     ? Object.entries(assessmentResults.domainBands).sort((a, b) => b[1] - a[1])
     : [];
+  const topDomain = domainEntries[0] ?? null;
 
   const getDomainLabel = (domain: string) => {
     const key = `profile.${domain}`;
@@ -96,6 +97,20 @@ export function AppProgressPage() {
     return gameType;
   };
 
+  const getScoreStatus = (score: number) => {
+    if (score >= 8) return t('app.progress.level.strong') || 'Strong';
+    if (score >= 5) return t('app.progress.level.developing') || 'Developing';
+    return t('app.progress.level.needsPractice') || 'Needs Practice';
+  };
+
+  const getScoreStatusClass = (score: number) => {
+    if (score >= 8) return 'border-success/35 bg-success/15 text-success';
+    if (score >= 5) return 'border-accent/35 bg-accent/20 text-accent-foreground';
+    return 'border-destructive/35 bg-destructive/10 text-destructive';
+  };
+
+  const surfaceClass = 'rounded-2xl border-3 border-foreground bg-card shadow-stamp';
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -105,13 +120,15 @@ export function AppProgressPage() {
   }
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6">
-      {/* Page Header */}
-      <div className="flex items-center gap-4">
-        <div className="w-12 h-12 rounded-xl bg-foreground text-background border-2 border-foreground flex items-center justify-center">
+    <div className="mx-auto max-w-5xl space-y-6">
+      <header className="flex items-start gap-4">
+        <div className="flex h-12 w-12 items-center justify-center rounded-xl border-3 border-foreground bg-foreground text-background shadow-stamp-sm">
           <TrendingUp size={24} strokeWidth={2.5} />
         </div>
-        <div>
+        <div className="space-y-1">
+          <p className="text-xs font-bold uppercase tracking-[0.16em] text-primary">
+            {t('app.layout.nav.progress') || 'Progress'}
+          </p>
           <h1 className="text-2xl font-display font-bold text-foreground">
             {t('app.progress.title') || 'Learning Progress'}
           </h1>
@@ -119,7 +136,44 @@ export function AppProgressPage() {
             {t('app.progress.subtitle') || 'Track your skills and learning journey'}
           </p>
         </div>
-      </div>
+      </header>
+
+      <section className={`${surfaceClass} p-4 sm:p-5`}>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div className="rounded-xl border-2 border-border bg-secondary/70 p-3">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              {t('app.learn.path.level') || 'Level'}
+            </p>
+            <p className="mt-1 text-xl font-display font-bold text-foreground">
+              {assessmentResults?.sklcLevel || '—'}
+            </p>
+          </div>
+          <div className="rounded-xl border-2 border-border bg-secondary/70 p-3">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              {t('app.progress.domainBreakdown') || 'Skill Breakdown'}
+            </p>
+            <p className="mt-1 text-xl font-display font-bold text-foreground">
+              {domainEntries.length}
+            </p>
+          </div>
+          <div className="rounded-xl border-2 border-border bg-secondary/70 p-3">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              {t('app.learn.chat.badges.strength') || 'Top strength'}
+            </p>
+            <p className="mt-1 truncate text-base font-semibold text-foreground">
+              {topDomain ? getDomainLabel(topDomain[0]) : '—'}
+            </p>
+          </div>
+          <div className="rounded-xl border-2 border-border bg-secondary/70 p-3">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              {t('app.progress.minigames.attempts') || 'Attempts'}
+            </p>
+            <p className="mt-1 text-xl font-display font-bold text-foreground">
+              {minigameSummary?.totalAttempts ?? 0}
+            </p>
+          </div>
+        </div>
+      </section>
 
       {/* Learning Path Card (shared component) */}
       <LearningPathCard
@@ -129,36 +183,37 @@ export function AppProgressPage() {
       />
 
       {/* Detailed Domain Breakdown */}
-      {domainEntries.length > 0 && (
-        <div className="bg-card rounded-2xl border-3 border-foreground shadow-stamp p-6">
-          <h2 className="text-lg font-display font-bold text-foreground mb-6">
+      {domainEntries.length > 0 ? (
+        <section className={`${surfaceClass} p-6`}>
+          <h2 className="mb-5 text-lg font-display font-bold text-foreground">
             {t('app.progress.domainBreakdown') || 'Skill Breakdown'}
           </h2>
-          <div className="space-y-5">
+          <div className="space-y-3">
             {domainEntries.map(([domain, score]) => (
-              <div key={domain} className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <span className="font-display font-bold text-foreground capitalize">
+              <div key={domain} className="rounded-xl border-2 border-border bg-secondary/50 p-4">
+                <div className="mb-2 flex items-center justify-between gap-3">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <span className="truncate font-display font-bold text-foreground capitalize">
                       {getDomainLabel(domain)}
                     </span>
                     <span className={clsx(
-                      'text-xs font-bold px-2.5 py-1 rounded-lg border',
+                      'rounded-lg border px-2.5 py-1 text-xs font-bold',
                       domainBadgeStyles[domain] || 'bg-secondary text-muted-foreground border-border'
                     )}>
                       {score}/10
                     </span>
                   </div>
-                  <span className="text-sm font-semibold text-muted-foreground">
-                    {score >= 8 ? t('app.progress.level.strong') || 'Strong' :
-                     score >= 5 ? t('app.progress.level.developing') || 'Developing' :
-                     t('app.progress.level.needsPractice') || 'Needs Practice'}
+                  <span className={clsx(
+                    'rounded-lg border px-2.5 py-1 text-[11px] font-semibold',
+                    getScoreStatusClass(score)
+                  )}>
+                    {getScoreStatus(score)}
                   </span>
                 </div>
-                <div className="h-3 w-full rounded-lg bg-secondary border border-border overflow-hidden">
+                <div className="h-3 w-full overflow-hidden rounded-lg border border-border bg-card">
                   <div
                     className={clsx(
-                      'h-full rounded-lg transition-all',
+                      'h-full rounded-lg transition-all duration-300',
                       domainStyles[domain] || 'bg-muted-foreground',
                       getScoreWidthClass(score)
                     )}
@@ -167,14 +222,31 @@ export function AppProgressPage() {
               </div>
             ))}
           </div>
-        </div>
+        </section>
+      ) : (
+        <section className={`${surfaceClass} p-6`}>
+          <h2 className="mb-2 text-lg font-display font-bold text-foreground">
+            {t('app.progress.domainBreakdown') || 'Skill Breakdown'}
+          </h2>
+          <p className="text-sm text-muted-foreground">
+            {t('app.progress.comingSoon') || 'More coming soon'}
+          </p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {t('app.progress.comingSoonDesc') || 'Curriculum progress, streak calendar, and learning analytics will appear here'}
+          </p>
+        </section>
       )}
 
       {/* Minigame Performance */}
-      <div className="bg-card rounded-2xl border-3 border-foreground shadow-stamp p-6">
-        <h2 className="text-lg font-display font-bold text-foreground mb-4">
-          {t('app.progress.minigames.title') || 'Minigame Performance'}
-        </h2>
+      <section className={`${surfaceClass} p-6`}>
+        <div className="mb-4 flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl border-2 border-foreground bg-secondary text-foreground">
+            <Gamepad2 size={18} strokeWidth={2.5} />
+          </div>
+          <h2 className="text-lg font-display font-bold text-foreground">
+            {t('app.progress.minigames.title') || 'Minigame Performance'}
+          </h2>
+        </div>
 
         {!minigameSummary || minigameSummary.totalAttempts === 0 ? (
           <p className="text-sm text-muted-foreground">
@@ -182,39 +254,39 @@ export function AppProgressPage() {
           </p>
         ) : (
           <div className="space-y-6">
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
               <div className="rounded-xl border-2 border-border bg-secondary p-3">
-                <p className="text-xs text-muted-foreground">{t('app.progress.minigames.attempts') || 'Attempts'}</p>
+                <p className="text-xs font-semibold text-muted-foreground">{t('app.progress.minigames.attempts') || 'Attempts'}</p>
                 <p className="text-2xl font-display font-bold text-foreground">{minigameSummary.totalAttempts}</p>
               </div>
               <div className="rounded-xl border-2 border-border bg-secondary p-3">
-                <p className="text-xs text-muted-foreground">{t('app.progress.minigames.accuracy') || 'Avg accuracy'}</p>
+                <p className="text-xs font-semibold text-muted-foreground">{t('app.progress.minigames.accuracy') || 'Avg accuracy'}</p>
                 <p className="text-2xl font-display font-bold text-foreground">
                   {Math.round(minigameSummary.averageAccuracy)}%
                 </p>
               </div>
               <div className="rounded-xl border-2 border-border bg-secondary p-3">
-                <p className="text-xs text-muted-foreground">{t('app.progress.minigames.bestScore') || 'Best score'}</p>
+                <p className="text-xs font-semibold text-muted-foreground">{t('app.progress.minigames.bestScore') || 'Best score'}</p>
                 <p className="text-2xl font-display font-bold text-foreground">{minigameSummary.bestScore}</p>
               </div>
               <div className="rounded-xl border-2 border-border bg-secondary p-3">
-                <p className="text-xs text-muted-foreground">{t('app.progress.minigames.correct') || 'Correct answers'}</p>
+                <p className="text-xs font-semibold text-muted-foreground">{t('app.progress.minigames.correct') || 'Correct answers'}</p>
                 <p className="text-2xl font-display font-bold text-foreground">{minigameSummary.totalCorrectAnswers}</p>
               </div>
             </div>
 
             <div>
-              <h3 className="text-sm font-display font-bold text-foreground mb-3">
+              <h3 className="mb-3 text-sm font-display font-bold text-foreground">
                 {t('app.progress.minigames.byGame') || 'By game'}
               </h3>
               <div className="space-y-2">
                 {Object.entries(minigameSummary.byGame).map(([gameType, stats]) => (
-                  <div key={gameType} className="rounded-xl border-2 border-border p-3">
+                  <div key={gameType} className="rounded-xl border-2 border-border bg-secondary/40 p-3">
                     <div className="flex items-center justify-between">
                       <p className="font-semibold text-foreground">{getGameLabel(gameType)}</p>
                       <p className="text-sm text-muted-foreground">{stats.attempts} {t('app.progress.minigames.attempts') || 'attempts'}</p>
                     </div>
-                    <p className="text-xs text-muted-foreground mt-1">
+                    <p className="mt-1 text-xs text-muted-foreground">
                       {t('app.progress.minigames.accuracy') || 'Avg accuracy'}: {Math.round(stats.averageAccuracy)}% · {t('app.progress.minigames.bestScore') || 'Best score'}: {stats.bestScore}
                     </p>
                   </div>
@@ -223,19 +295,19 @@ export function AppProgressPage() {
             </div>
 
             <div>
-              <h3 className="text-sm font-display font-bold text-foreground mb-3">
+              <h3 className="mb-3 text-sm font-display font-bold text-foreground">
                 {t('app.progress.minigames.recent') || 'Recent attempts'}
               </h3>
               <div className="space-y-2">
                 {minigameSummary.recentAttempts.slice(0, 5).map((attempt) => (
-                  <div key={attempt.id || `${attempt.gameType}-${attempt.createdAt}`} className="rounded-xl border-2 border-border p-3">
+                  <div key={attempt.id || `${attempt.gameType}-${attempt.createdAt}`} className="rounded-xl border-2 border-border bg-secondary/40 p-3">
                     <div className="flex items-center justify-between gap-3">
                       <p className="font-semibold text-foreground">{getGameLabel(attempt.gameType)}</p>
                       <p className="text-xs text-muted-foreground">
                         {attempt.createdAt ? new Date(attempt.createdAt).toLocaleDateString() : ''}
                       </p>
                     </div>
-                    <p className="text-xs text-muted-foreground mt-1">
+                    <p className="mt-1 text-xs text-muted-foreground">
                       {attempt.correctAnswers}/{attempt.totalQuestions} · {Math.round(attempt.accuracy || 0)}% · {t('app.progress.minigames.score') || 'Score'}: {attempt.score}
                     </p>
                   </div>
@@ -244,7 +316,7 @@ export function AppProgressPage() {
             </div>
           </div>
         )}
-      </div>
+      </section>
     </div>
   );
 }

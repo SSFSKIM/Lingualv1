@@ -43,22 +43,33 @@ export function ServiceNavigationCard({ title, description, icon, href, color }:
 
   return (
     <motion.button
+      type="button"
       onClick={() => navigate(href)}
       whileHover={{ y: -2 }}
       whileTap={{ scale: 0.98 }}
       className={clsx(
-        'w-full text-left p-6 rounded-2xl border-3 transition-all cursor-pointer',
+        'group w-full min-h-[188px] cursor-pointer rounded-xl border-2 p-5 text-left transition-all',
         styles.border,
         styles.bg,
         styles.hover,
-        'hover:shadow-stamp'
+        'hover:shadow-stamp-sm'
       )}
     >
-      <div className={clsx('w-12 h-12 rounded-xl flex items-center justify-center border-2 border-foreground mb-4', styles.iconBg)}>
-        {icon}
+      <div className="mb-4 flex items-center justify-between">
+        <div
+          className={clsx(
+            'flex h-11 w-11 items-center justify-center rounded-xl border',
+            styles.iconBg
+          )}
+        >
+          {icon}
+        </div>
+        <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          {href.replace('/app/', '')}
+        </span>
       </div>
       <h3 className="text-lg font-display font-bold text-foreground">{title}</h3>
-      <p className="text-sm text-muted-foreground mt-1">{description}</p>
+      <p className="mt-1 text-sm text-muted-foreground">{description}</p>
     </motion.button>
   );
 }

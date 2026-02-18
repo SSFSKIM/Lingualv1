@@ -184,12 +184,12 @@ export function GeneralPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+      <div className="min-h-screen bg-background flex items-center justify-center">
         <motion.div
           animate={{ rotate: 360 }}
           transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
         >
-          <Loader2 className="h-8 w-8 text-purple-600" />
+          <Loader2 className="h-8 w-8 text-primary" />
         </motion.div>
       </div>
     );
@@ -211,14 +211,14 @@ export function GeneralPage() {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ delay: 0.3 }}
-          className="text-slate-500"
+          className="text-muted-foreground"
         >
           {t('general.welcomeMessage') || "Let's get to know you!"}
         </motion.p>
       </div>
 
       <div className="space-y-2">
-        <Label htmlFor="name" className="text-slate-700">
+        <Label htmlFor="name" className="text-foreground">
           {t('general.nameLabel')} *
         </Label>
         <Input
@@ -228,7 +228,7 @@ export function GeneralPage() {
           value={formData.displayName}
           onChange={(e) => updateField('displayName', e.target.value)}
           autoFocus
-          className="bg-slate-50 border-slate-200 focus:border-purple-500 focus:ring-purple-200"
+          className="bg-card border-border focus:border-primary focus:ring-primary/20"
         />
       </div>
     </div>
@@ -237,13 +237,13 @@ export function GeneralPage() {
   const renderStep2 = () => (
     <div className="space-y-6">
       <div className="text-center mb-6">
-        <h2 className="text-xl font-semibold text-slate-900">
+        <h2 className="text-xl font-display font-semibold text-foreground">
           {t('general.aboutYou')}
         </h2>
       </div>
 
       <div className="space-y-2">
-        <Label htmlFor="age" className="text-slate-700">
+        <Label htmlFor="age" className="text-foreground">
           {t('general.ageLabel')} *
         </Label>
         <Input
@@ -257,12 +257,12 @@ export function GeneralPage() {
             updateField('age', e.target.value ? parseInt(e.target.value) : null)
           }
           autoFocus
-          className="bg-slate-50 border-slate-200 focus:border-purple-500 focus:ring-purple-200"
+          className="bg-card border-border focus:border-primary focus:ring-primary/20"
         />
       </div>
 
       <div className="space-y-2">
-        <Label className="text-slate-700">{t('general.genderLabel')} *</Label>
+        <Label className="text-foreground">{t('general.genderLabel')} *</Label>
         <div className="grid grid-cols-2 gap-2">
           {GENDER_OPTIONS.map(({ id, labelKey }) => (
             <motion.div key={id} whileHover={{ y: -2 }} whileTap={{ scale: 0.98 }}>
@@ -270,7 +270,7 @@ export function GeneralPage() {
                 variant="option"
                 selected={formData.gender === id}
                 onClick={() => updateField('gender', id)}
-                className="text-sm rounded-xl border-slate-200 bg-white shadow-sm hover:border-purple-200 hover:text-purple-700"
+                className="text-sm rounded-xl border-border bg-card hover:border-primary hover:text-foreground"
               >
                 {t(labelKey)}
               </Button>
@@ -284,10 +284,10 @@ export function GeneralPage() {
   const renderStep3 = () => (
     <div className="space-y-6">
       <div className="text-center mb-6">
-        <h2 className="text-xl font-semibold text-slate-900">
+        <h2 className="text-xl font-display font-semibold text-foreground">
           {t('general.rigorLabel')} *
         </h2>
-        <p className="text-sm text-slate-500 mt-2">
+        <p className="text-sm text-muted-foreground mt-2">
           {t('general.rigorDescription')}
         </p>
       </div>
@@ -299,10 +299,10 @@ export function GeneralPage() {
               variant="option"
               selected={formData.rigor === id}
               onClick={() => updateField('rigor', id)}
-              className="w-full justify-between h-auto py-4 px-4 rounded-2xl border-slate-200 bg-white shadow-sm hover:shadow-md hover:border-purple-200"
+              className="w-full justify-between h-auto py-4 px-4 rounded-2xl border-border bg-card hover:border-primary"
             >
               <span className="font-medium">{t(labelKey)}</span>
-              <span className="text-sm text-slate-500">{description}</span>
+              <span className="text-sm text-muted-foreground">{description}</span>
             </Button>
           </motion.div>
         ))}
@@ -313,16 +313,16 @@ export function GeneralPage() {
   const renderStep4 = () => (
     <div className="space-y-6">
       <div className="text-center mb-6">
-        <h2 className="text-xl font-semibold text-slate-900">
+        <h2 className="text-xl font-display font-semibold text-foreground">
           {t('general.frequencyLabel')} *
         </h2>
-        <p className="text-sm text-slate-500 mt-2">
+        <p className="text-sm text-muted-foreground mt-2">
           {t('general.frequencyDescription')}
         </p>
       </div>
 
       <div className="space-y-6">
-        <div className="px-4 py-4 rounded-2xl border border-slate-200 bg-slate-50">
+        <div className="px-4 py-4 rounded-2xl border-2 border-border bg-secondary">
           <Slider
             min={1}
             max={14}
@@ -339,7 +339,7 @@ export function GeneralPage() {
                 variant="option"
                 selected={formData.frequencyUnit === id}
                 onClick={() => updateField('frequencyUnit', id)}
-                className="rounded-full border-slate-200 bg-white shadow-sm hover:border-purple-200 hover:text-purple-700"
+                className="rounded-full border-border bg-card hover:border-primary hover:text-foreground"
               >
                 {t(labelKey)}
               </Button>
@@ -353,10 +353,10 @@ export function GeneralPage() {
   const renderStep5 = () => (
     <div className="space-y-6">
       <div className="text-center mb-6">
-        <h2 className="text-xl font-semibold text-slate-900">
+        <h2 className="text-xl font-display font-semibold text-foreground">
           {t('general.levelObjectiveLabel')}
         </h2>
-        <p className="text-sm text-slate-500 mt-2">
+        <p className="text-sm text-muted-foreground mt-2">
           {t('general.levelObjectiveDescription')}
         </p>
       </div>
@@ -369,11 +369,11 @@ export function GeneralPage() {
           value={formData.levelObjective}
           onChange={(e) => updateField('levelObjective', e.target.value)}
           autoFocus
-          className="bg-slate-50 border-slate-200 focus:border-purple-500 focus:ring-purple-200"
+          className="bg-card border-border focus:border-primary focus:ring-primary/20"
         />
       </div>
 
-      <p className="text-xs text-slate-500 text-center">
+      <p className="text-xs text-muted-foreground text-center">
         {t('general.optionalField') || 'This field is optional'}
       </p>
     </div>
@@ -397,24 +397,24 @@ export function GeneralPage() {
   };
 
   return (
-    <AnimatedPage className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
-      <AnimatedCard className="p-8 max-w-md w-full bg-white border border-slate-200 shadow-sm">
+    <AnimatedPage className="min-h-screen bg-background flex items-center justify-center p-6">
+      <AnimatedCard className="p-8 max-w-md w-full bg-card border-3 border-foreground shadow-stamp">
         {/* Progress indicator */}
         <div className="mb-8">
           <div className="flex justify-between items-center mb-3">
             <div>
-              <p className="text-xs uppercase tracking-wide text-slate-400">Profile Setup</p>
-              <p className="text-sm font-semibold text-slate-900">
+              <p className="text-xs uppercase tracking-wide text-muted-foreground">Profile Setup</p>
+              <p className="text-sm font-semibold text-foreground">
                 Step {currentStep} of {TOTAL_STEPS}
               </p>
             </div>
             {isEditMode && (
-              <span className="text-xs text-purple-600 font-medium">
+              <span className="text-xs text-primary font-medium">
                 {t('general.editMode') || 'Edit Mode'}
               </span>
             )}
           </div>
-          <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+          <div className="h-2 bg-secondary rounded-full overflow-hidden">
             <motion.div
               className="h-full bg-primary rounded-full"
               initial={{ width: 0 }}
@@ -432,17 +432,17 @@ export function GeneralPage() {
                   <div
                     className={`h-8 w-8 rounded-full flex items-center justify-center text-xs font-semibold transition-all ${
                       isComplete
-                        ? 'bg-purple-600 text-white'
+                        ? 'bg-primary text-primary-foreground border-2 border-foreground'
                         : isActive
-                        ? 'bg-purple-50 text-purple-700 ring-2 ring-purple-200'
-                        : 'bg-slate-100 text-slate-400'
+                        ? 'bg-accent/20 text-foreground ring-2 ring-accent/40 border border-accent/40'
+                        : 'bg-secondary text-muted-foreground border border-border'
                     }`}
                   >
                     {isComplete ? <Check size={14} /> : step}
                   </div>
                   <span
                     className={`text-[10px] uppercase tracking-wide ${
-                      isActive ? 'text-purple-600' : 'text-slate-400'
+                      isActive ? 'text-primary' : 'text-muted-foreground'
                     }`}
                   >
                     Step {step}
@@ -453,7 +453,7 @@ export function GeneralPage() {
           </div>
         </div>
 
-        <div className="border-t border-slate-100 pt-6">
+        <div className="border-t border-border pt-6">
           {/* Error message */}
           <AnimatePresence mode="wait">
             {error && (
@@ -490,12 +490,12 @@ export function GeneralPage() {
         </div>
 
         {/* Navigation buttons */}
-        <div className="border-t border-slate-100 pt-6 flex gap-3 mt-8">
+        <div className="border-t border-border pt-6 flex gap-3 mt-8">
           {currentStep > 1 && (
             <Button
               variant="outline"
               onClick={goToPrevStep}
-              className="flex-1 rounded-xl border-slate-200"
+              className="flex-1 rounded-xl"
             >
               <ChevronLeft className="h-4 w-4 mr-1" />
               {t('general.back') || 'Back'}

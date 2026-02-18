@@ -26,13 +26,13 @@ export function AudioQuestion({
   return (
     <div className="space-y-4">
       {wordList && wordList.length > 0 && (
-        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-          <p className="text-xs uppercase tracking-wide text-slate-400 mb-3">Warm-up words</p>
+        <div className="rounded-2xl border-2 border-border bg-secondary p-4">
+          <p className="text-xs uppercase tracking-wide text-muted-foreground mb-3">Warm-up words</p>
           <div className="flex flex-wrap gap-2">
             {wordList.map((word, index) => (
               <span
                 key={index}
-                className="px-3 py-1 bg-white rounded-full text-slate-700 text-sm border border-slate-200"
+                className="px-3 py-1 bg-card rounded-full text-foreground text-sm border border-border"
               >
                 {word}
               </span>
@@ -42,11 +42,11 @@ export function AudioQuestion({
       )}
 
       {sentences && sentences.length > 0 && (
-        <div className="rounded-2xl border border-slate-200 bg-white p-4">
-          <p className="text-xs uppercase tracking-wide text-slate-400 mb-3">Read aloud</p>
+        <div className="rounded-2xl border-2 border-border bg-card p-4">
+          <p className="text-xs uppercase tracking-wide text-muted-foreground mb-3">Read aloud</p>
           <div className="space-y-2">
             {sentences.map((sentence, index) => (
-              <p key={index} className="text-slate-900 text-lg">
+              <p key={index} className="text-foreground text-lg">
                 {sentence}
               </p>
             ))}
@@ -55,7 +55,7 @@ export function AudioQuestion({
       )}
 
       {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl">
+        <div className="bg-destructive/10 border-2 border-destructive/30 text-destructive px-4 py-3 rounded-xl">
           {error}
         </div>
       )}
@@ -65,14 +65,15 @@ export function AudioQuestion({
           type="button"
           onClick={handleToggleRecording}
           aria-pressed={isRecording}
-          className={`w-16 h-16 flex items-center justify-center rounded-full transition-all shadow-lg ring-4 ${
+          aria-label={isRecording ? 'Stop recording' : 'Start recording'}
+          className={`w-16 h-16 flex items-center justify-center rounded-full border-2 border-foreground transition-all shadow-stamp-sm focus:outline-none focus:ring-2 focus:ring-primary/30 ${
             isRecording
-              ? 'bg-red-500 ring-red-100 animate-pulse-recording'
-              : 'bg-purple-600 ring-purple-100 hover:bg-purple-700'
+              ? 'bg-destructive text-destructive-foreground animate-pulse-recording'
+              : 'bg-primary text-primary-foreground hover:bg-primary/90'
           }`}
         >
           <svg
-            className="w-8 h-8 text-white"
+            className="w-8 h-8"
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"
@@ -91,10 +92,10 @@ export function AudioQuestion({
         </button>
 
         <div className="text-center">
-          <p className="text-sm font-semibold text-slate-700">
+          <p className="text-sm font-semibold text-foreground">
             {isRecording ? 'Recording…' : 'Record your response'}
           </p>
-          <p className="text-xs text-slate-500">
+          <p className="text-xs text-muted-foreground">
             {isRecording ? 'Click to stop and save.' : 'Tap to start recording.'}
           </p>
         </div>

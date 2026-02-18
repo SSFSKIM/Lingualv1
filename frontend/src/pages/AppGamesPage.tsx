@@ -259,13 +259,21 @@ export function AppGamesPage() {
     }
   }, [selectedChatSessionId, t]);
 
+  const surfaceClass = 'rounded-2xl border-3 border-foreground bg-card shadow-stamp';
+  const selectClass =
+    'h-11 w-full rounded-xl border-2 border-border bg-card px-4 text-sm font-medium text-foreground focus:border-primary focus:outline-none md:w-[420px]';
+  const disabledCardClass = 'opacity-55 cursor-not-allowed';
+
   return (
-    <div className="max-w-5xl mx-auto space-y-6">
-      <div className="flex items-center gap-4">
-        <div className="w-12 h-12 rounded-xl bg-accent text-accent-foreground border-2 border-foreground flex items-center justify-center">
+    <div className="mx-auto max-w-6xl space-y-6">
+      <header className="flex items-start gap-4">
+        <div className="flex h-12 w-12 items-center justify-center rounded-xl border-3 border-foreground bg-accent text-accent-foreground shadow-stamp-sm">
           <Gamepad2 size={24} strokeWidth={2.5} />
         </div>
-        <div>
+        <div className="space-y-1">
+          <p className="text-xs font-bold uppercase tracking-[0.16em] text-primary">
+            {t('app.dashboard.services') || 'Continue Learning'}
+          </p>
           <h1 className="text-2xl font-display font-bold text-foreground">
             {t('app.games.title') || 'Practice Games'}
           </h1>
@@ -273,48 +281,56 @@ export function AppGamesPage() {
             {t('app.games.subtitle') || 'Select an objective and scenario, then practice through games'}
           </p>
         </div>
-      </div>
+      </header>
 
       {error && (
-        <div className="p-4 rounded-xl border-2 border-destructive bg-destructive/10 text-sm text-destructive font-medium">
+        <div
+          role="alert"
+          className="rounded-xl border-2 border-destructive bg-destructive/10 p-4 text-sm font-medium text-destructive"
+        >
           {error}
         </div>
       )}
 
       {statusMessage && (
         <div
+          role="status"
           className={clsx(
-            'p-4 rounded-xl border-2 text-sm font-medium',
+            'flex items-center gap-2 rounded-xl border-2 p-4 text-sm font-medium',
             savingResult
               ? 'border-primary bg-primary/10 text-primary'
               : 'border-success bg-success/10 text-success'
           )}
         >
-          {savingResult ? <Loader2 className="inline h-4 w-4 mr-2 animate-spin" /> : null}
-          {statusMessage}
+          {savingResult ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Gamepad2 className="h-4 w-4" />
+          )}
+          <span>{statusMessage}</span>
         </div>
       )}
 
       {!curriculumMatchesLocale ? (
-        <div className="bg-card rounded-2xl border-3 border-foreground shadow-stamp p-8 text-center">
+        <section className={`${surfaceClass} p-8 text-center`}>
           <p className="text-lg font-display font-bold text-foreground">
             {t('app.games.noCurriculum') || 'No game curriculum available for this locale yet'}
           </p>
           <p className="text-sm text-muted-foreground mt-2">
             {t('app.games.noCurriculumDesc') || 'Switch to Korean to play objective-based games for now'}
           </p>
-        </div>
+        </section>
       ) : (
         <>
-          <div className="bg-card rounded-2xl border-3 border-foreground shadow-stamp p-6 space-y-5">
+          <section className={`${surfaceClass} space-y-5 p-6`}>
             <div>
-              <label className="text-sm font-semibold text-foreground block mb-2">
+              <label className="mb-2 block text-sm font-semibold text-foreground">
                 {t('app.games.objectiveLabel') || 'Learning objective'}
               </label>
               <select
                 value={selectedObjectiveId || ''}
                 onChange={(event) => setSelectedObjectiveId(event.target.value)}
-                className="w-full md:w-[420px] bg-card border-2 border-border rounded-xl px-4 py-3 text-foreground font-medium focus:outline-none focus:border-primary"
+                className={selectClass}
               >
                 {objectives.map((objective) => (
                   <option key={objective.id} value={objective.id}>
@@ -325,13 +341,14 @@ export function AppGamesPage() {
             </div>
 
             <div>
-              <h2 className="text-sm font-semibold text-foreground mb-3">
+              <h2 className="mb-3 text-sm font-semibold text-foreground">
                 {t('app.games.scenarioLabel') || 'Choose a scenario'}
               </h2>
               {filteredScenarios.length ? (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                   {filteredScenarios.map((scenario) => (
                     <button
+                      type="button"
                       key={scenario.id}
                       onClick={() => setSelectedScenarioId(scenario.id)}
                       className={clsx(
@@ -341,11 +358,16 @@ export function AppGamesPage() {
                           : 'border-border bg-card hover:border-foreground hover:shadow-stamp-sm'
                       )}
                     >
-                      <p className="font-display font-bold text-foreground">{scenario.title}</p>
-                      <p className="text-sm text-muted-foreground mt-1">{scenario.setting}</p>
-                      <p className="text-xs text-muted-foreground mt-2">
+                      <div className="mb-2 flex items-start justify-between gap-3">
+                        <p className="font-display font-bold text-foreground">{scenario.title}</p>
+                        <span className="rounded-lg border border-border bg-secondary px-2 py-0.5 text-[11px] font-semibold text-muted-foreground capitalize">
+                          {scenario.difficulty}
+                        </span>
+                      </div>
+                      <p className="text-sm text-muted-foreground">{scenario.setting}</p>
+                      <div className="mt-3 inline-flex rounded-lg border border-primary/20 bg-primary/10 px-2.5 py-1 text-xs font-semibold text-primary">
                         {t('app.games.targetPhrases') || 'Target phrases'}: {scenario.target_phrases.length}
-                      </p>
+                      </div>
                     </button>
                   ))}
                 </div>
@@ -355,24 +377,27 @@ export function AppGamesPage() {
                 </p>
               )}
             </div>
-          </div>
+          </section>
 
-          <div className="bg-card rounded-2xl border-3 border-foreground shadow-stamp p-6">
-            <h2 className="text-lg font-display font-bold text-foreground mb-4">
+          <section className={`${surfaceClass} p-6`}>
+            <h2 className="mb-4 text-lg font-display font-bold text-foreground">
               {t('app.games.chooseGame') || 'Choose a game'}
             </h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               <button
+                type="button"
                 onClick={launchListeningQuiz}
                 disabled={!selectedScenario}
                 className={clsx(
-                  'p-6 rounded-xl border-2 transition-all text-left',
+                  'rounded-xl border-2 p-5 text-left transition-all',
                   'border-accent/30 bg-accent/5 hover:bg-accent/10 hover:border-accent hover:shadow-stamp-sm',
-                  !selectedScenario && 'opacity-50 cursor-not-allowed'
+                  !selectedScenario && disabledCardClass
                 )}
               >
-                <div className="flex items-center gap-3 mb-3">
-                  <Headphones size={20} />
+                <div className="mb-3 flex items-center gap-3">
+                  <span className="flex h-10 w-10 items-center justify-center rounded-xl border border-accent/30 bg-accent/20 text-accent-foreground">
+                    <Headphones size={18} strokeWidth={2.5} />
+                  </span>
                   <span className="text-lg font-display font-bold text-foreground">
                     {t('app.games.listeningQuiz') || 'Listening Quiz'}
                   </span>
@@ -383,16 +408,19 @@ export function AppGamesPage() {
               </button>
 
               <button
+                type="button"
                 onClick={launchGrammarChallenge}
                 disabled={!selectedScenario}
                 className={clsx(
-                  'p-6 rounded-xl border-2 transition-all text-left',
+                  'rounded-xl border-2 p-5 text-left transition-all',
                   'border-primary/30 bg-primary/5 hover:bg-primary/10 hover:border-primary hover:shadow-stamp-sm',
-                  !selectedScenario && 'opacity-50 cursor-not-allowed'
+                  !selectedScenario && disabledCardClass
                 )}
               >
-                <div className="flex items-center gap-3 mb-3">
-                  <Puzzle size={20} />
+                <div className="mb-3 flex items-center gap-3">
+                  <span className="flex h-10 w-10 items-center justify-center rounded-xl border border-primary/30 bg-primary/20 text-primary">
+                    <Puzzle size={18} strokeWidth={2.5} />
+                  </span>
                   <span className="text-lg font-display font-bold text-foreground">
                     {t('app.games.grammarChallenge') || 'Grammar Challenge'}
                   </span>
@@ -402,14 +430,14 @@ export function AppGamesPage() {
                 </p>
               </button>
             </div>
-          </div>
+          </section>
         </>
       )}
 
-      <div className="bg-card rounded-2xl border-3 border-foreground shadow-stamp p-6">
-        <div className="flex items-center gap-3 mb-4">
-          <div className="w-10 h-10 rounded-xl bg-secondary text-foreground border-2 border-foreground flex items-center justify-center">
-            <MessageSquare size={18} />
+      <section className={`${surfaceClass} p-6`}>
+        <div className="mb-4 flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl border-2 border-foreground bg-secondary text-foreground">
+            <MessageSquare size={18} strokeWidth={2.5} />
           </div>
           <div>
             <h2 className="text-lg font-display font-bold text-foreground">
@@ -422,7 +450,7 @@ export function AppGamesPage() {
         </div>
 
         {loadingChatSessions ? (
-          <div className="flex items-center justify-center h-24">
+          <div className="flex h-24 items-center justify-center">
             <Loader2 className="h-6 w-6 animate-spin text-primary" />
           </div>
         ) : chatSessions.length === 0 ? (
@@ -437,13 +465,13 @@ export function AppGamesPage() {
         ) : (
           <div className="space-y-4">
             <div>
-              <label className="text-sm font-semibold text-foreground block mb-2">
+              <label className="mb-2 block text-sm font-semibold text-foreground">
                 {t('app.games.selectSession') || 'Select a conversation'}
               </label>
               <select
                 value={selectedChatSessionId || ''}
                 onChange={(event) => setSelectedChatSessionId(event.target.value)}
-                className="w-full md:w-[420px] bg-card border-2 border-border rounded-xl px-4 py-3 text-foreground font-medium focus:outline-none focus:border-primary"
+                className={selectClass}
               >
                 {chatSessions.map((session) => (
                   <option key={session.id} value={session.id}>
@@ -453,17 +481,17 @@ export function AppGamesPage() {
               </select>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               <button
+                type="button"
                 onClick={launchFlashcardFlip}
                 disabled={!selectedChatSessionId || loadingFlashcards}
                 className={clsx(
-                  'p-6 rounded-xl border-2 transition-all text-left',
+                  'rounded-xl border-2 p-5 text-left transition-all',
                   'border-primary/30 bg-primary/5 hover:bg-primary/10 hover:border-primary hover:shadow-stamp-sm',
-                  (!selectedChatSessionId || loadingFlashcards) && 'opacity-50 cursor-not-allowed'
+                  (!selectedChatSessionId || loadingFlashcards) && disabledCardClass
                 )}
               >
-                <span className="text-3xl mb-3 block">{loadingFlashcards ? '' : '🃏'}</span>
                 {loadingFlashcards ? (
                   <div className="flex items-center gap-2">
                     <Loader2 className="h-5 w-5 animate-spin text-primary" />
@@ -473,6 +501,9 @@ export function AppGamesPage() {
                   </div>
                 ) : (
                   <>
+                    <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-xl border border-primary/30 bg-primary/20 text-primary">
+                      <Gamepad2 size={18} strokeWidth={2.5} />
+                    </div>
                     <span className="text-lg font-display font-bold text-foreground">
                       {t('app.learn.minigames.flashcards') || 'Flashcard Flip'}
                     </span>
@@ -484,15 +515,15 @@ export function AppGamesPage() {
               </button>
 
               <button
+                type="button"
                 onClick={launchWordMatch}
                 disabled={!selectedChatSessionId || loadingWordMatch}
                 className={clsx(
-                  'p-6 rounded-xl border-2 transition-all text-left',
+                  'rounded-xl border-2 p-5 text-left transition-all',
                   'border-accent/30 bg-accent/5 hover:bg-accent/10 hover:border-accent hover:shadow-stamp-sm',
-                  (!selectedChatSessionId || loadingWordMatch) && 'opacity-50 cursor-not-allowed'
+                  (!selectedChatSessionId || loadingWordMatch) && disabledCardClass
                 )}
               >
-                <span className="text-3xl mb-3 block">{loadingWordMatch ? '' : '🔗'}</span>
                 {loadingWordMatch ? (
                   <div className="flex items-center gap-2">
                     <Loader2 className="h-5 w-5 animate-spin text-accent" />
@@ -502,6 +533,9 @@ export function AppGamesPage() {
                   </div>
                 ) : (
                   <>
+                    <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-xl border border-accent/30 bg-accent/20 text-accent-foreground">
+                      <Puzzle size={18} strokeWidth={2.5} />
+                    </div>
                     <span className="text-lg font-display font-bold text-foreground">
                       {t('app.learn.minigames.wordMatch') || 'Word Match'}
                     </span>
@@ -514,7 +548,7 @@ export function AppGamesPage() {
             </div>
           </div>
         )}
-      </div>
+      </section>
 
       <AnimatePresence>
         {showListeningQuiz && listeningQuestions.length > 0 && activeGameContext && (

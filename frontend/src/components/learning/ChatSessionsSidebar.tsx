@@ -106,8 +106,9 @@ export function ChatSessionsSidebar({
           </p>
         </div>
         <button
+          type="button"
           onClick={onCreateNew}
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold text-primary bg-card border-2 border-primary hover:bg-primary/5 transition-colors"
+          className="inline-flex min-h-11 items-center gap-2 rounded-xl border-2 border-primary bg-card px-4 text-sm font-bold text-primary transition-colors hover:bg-primary/5"
         >
           <Plus size={16} strokeWidth={2.5} />
           {t('app.learn.sessions.new')}
