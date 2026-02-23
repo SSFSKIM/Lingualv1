@@ -358,35 +358,19 @@ def verify_auth():
 def get_user_proficiency_context():
     uid = get_current_user_uid()
 
-    # Try to get from database first, fall back to session
+    # Get profile context from database
     if uid:
-        profile_context = db.get_user_profile_context(uid)
-        if profile_context:
-            results = profile_context.get('results') or {}
-            display_name = profile_context.get('display_name', '')
-            age = profile_context.get('age')
-            rigor = profile_context.get('rigor', '')
-            frequency = profile_context.get('frequency')
-            frequency_unit = profile_context.get('frequency_unit', '')
-            level_objective = profile_context.get('level_objective', '')
-        else:
-            results = session.get('assessment_results', {})
-            user_profile = session.get('user_profile', {})
-            display_name = user_profile.get('display_name', '')
-            age = user_profile.get('age')
-            rigor = user_profile.get('rigor', '')
-            frequency = user_profile.get('frequency')
-            frequency_unit = user_profile.get('frequency_unit', '')
-            level_objective = user_profile.get('level_objective', '')
+        profile_context = db.get_user_profile_context(uid) or {}
     else:
-        results = session.get('assessment_results', {})
-        user_profile = session.get('user_profile', {})
-        display_name = user_profile.get('display_name', '')
-        age = user_profile.get('age')
-        rigor = user_profile.get('rigor', '')
-        frequency = user_profile.get('frequency')
-        frequency_unit = user_profile.get('frequency_unit', '')
-        level_objective = user_profile.get('level_objective', '')
+        profile_context = {}
+
+    results = profile_context.get('results') or {}
+    display_name = profile_context.get('display_name', '')
+    age = profile_context.get('age')
+    rigor = profile_context.get('rigor', '')
+    frequency = profile_context.get('frequency')
+    frequency_unit = profile_context.get('frequency_unit', '')
+    level_objective = profile_context.get('level_objective', '')
 
     if not results:
         return "The user has not completed their assessment yet. Assume beginner level."
@@ -1070,12 +1054,15 @@ def api_user_profile():
 
 
 @app.route('/api/assessment/status')
+@login_required
 def api_assessment_status():
+    uid = get_current_user_uid()
     assessment_data = get_assessment()
+    assessment_state = db.get_assessment_state(uid) or {}
     return jsonify({
-        'current_index': session.get('current_item_index', 0),
+        'current_index': assessment_state.get('current_item_index', 0),
         'total_items': len(assessment_data['items']),
-        'responses_count': len(session.get('assessment_responses', {}))
+        'responses_count': len(assessment_state.get('responses', {}))
     })
 
 
@@ -1148,27 +1135,8 @@ def api_update_profile():
     # Only reset assessment if this is NOT an edit (first time setup)
     if not is_edit:
         db.reset_assessment(uid)
-        session.pop('assessment_responses', None)
-        session.pop('current_item_index', None)
-        session.pop('assessment_results', None)
 
-    # Keep session for quick access
-    session['user_profile'] = {
-        'display_name': display_name,
-        'age': age,
-        'gender': gender,
-        'rigor': rigor,
-        'frequency': frequency,
-        'frequency_unit': frequency_unit,
-        'level_objective': level_objective,
-        'avatar_url': avatar_url,
-        'contact_email': contact_email,
-        'grade_level': grade_level,
-        'native_language': native_language,
-        'learning_locale': learning_locale or 'ko-KR',
-        'location': location,
-        'school_name': school_name
-    }
+    # Profile data is stored in Firestore — no longer duplicating in session cookie
 
     return jsonify({
         'success': True,
@@ -1199,13 +1167,9 @@ def api_assessment_items():
     assessment_data = get_assessment()
 
     # Load assessment state from database
-    assessment_state = db.get_assessment_state(uid)
-    if assessment_state:
-        current_index = assessment_state.get('current_item_index', 0)
-        responses = assessment_state.get('responses', {})
-    else:
-        current_index = session.get('current_item_index', 0)
-        responses = session.get('assessment_responses', {})
+    assessment_state = db.get_assessment_state(uid) or {}
+    current_index = assessment_state.get('current_item_index', 0)
+    responses = assessment_state.get('responses', {})
 
     return jsonify({
         'items': assessment_data['items'],
@@ -1241,13 +1205,7 @@ def api_assessment_submit_json():
     if current_index is None:
         return jsonify({'success': False, 'error': 'Invalid item ID'}), 400
 
-    # Save response
-    responses = session.get('assessment_responses', {})
-    responses[item_id] = response
-    session['assessment_responses'] = responses
-    session['current_item_index'] = current_index + 1
-
-    # Save to database
+    # Save to database (no longer storing in session to avoid cookie size limits)
     db.update_assessment_response(uid, item_id, response, current_index + 1)
 
     is_complete = (current_index + 1) >= len(items)
@@ -1283,13 +1241,7 @@ def api_assessment_skip_json():
     if current_index is None:
         return jsonify({'success': False, 'error': 'Invalid item ID'}), 400
 
-    # Save empty response
-    responses = session.get('assessment_responses', {})
-    responses[item_id] = ''
-    session['assessment_responses'] = responses
-    session['current_item_index'] = current_index + 1
-
-    # Save to database
+    # Save to database (no longer storing in session to avoid cookie size limits)
     db.update_assessment_response(uid, item_id, '', current_index + 1)
 
     is_complete = (current_index + 1) >= len(items)
@@ -1307,24 +1259,18 @@ def api_assessment_results_json():
     """Get computed assessment results (JSON API)."""
     uid = get_current_user_uid()
 
-    # Try to get results from session or database
-    results = session.get('assessment_results')
-    if not results:
-        results = db.get_assessment_results(uid)
+    # Get results from database
+    results = db.get_assessment_results(uid)
 
     # Compute results if we have responses but no results
     if not results:
-        responses = session.get('assessment_responses', {})
-        if not responses:
-            assessment_state = db.get_assessment_state(uid)
-            if assessment_state:
-                responses = assessment_state.get('responses', {})
-
-        if responses:
-            assessment_data = get_assessment()
-            results = compute_results(assessment_data, responses)
-            session['assessment_results'] = results
-            db.save_assessment_results(uid, results)
+        assessment_state = db.get_assessment_state(uid)
+        if assessment_state:
+            responses = assessment_state.get('responses', {})
+            if responses:
+                assessment_data = get_assessment()
+                results = compute_results(assessment_data, responses)
+                db.save_assessment_results(uid, results)
 
     if results:
         global_stage = results.get('global_stage', 0)
@@ -1349,10 +1295,6 @@ def api_assessment_reset_json():
     """Reset assessment progress (JSON API)."""
     uid = get_current_user_uid()
 
-    session.pop('assessment_responses', None)
-    session.pop('current_item_index', None)
-    session.pop('assessment_results', None)
-
     # Reset in database
     db.reset_assessment(uid)
 
@@ -1367,19 +1309,16 @@ def api_update_categories():
     data = request.get_json()
 
     categories = data.get('categories', [])
-    session['selected_categories'] = categories
 
     # Compute and save results if not already done
-    if 'assessment_results' not in session:
-        db_results = db.get_assessment_results(uid)
-        if db_results:
-            session['assessment_results'] = db_results
-        elif 'assessment_responses' in session:
-            assessment_data = get_assessment()
-            responses = session.get('assessment_responses', {})
+    db_results = db.get_assessment_results(uid)
+    if not db_results:
+        assessment_state = db.get_assessment_state(uid)
+        if assessment_state:
+            responses = assessment_state.get('responses', {})
             if responses:
+                assessment_data = get_assessment()
                 results = compute_results(assessment_data, responses)
-                session['assessment_results'] = results
                 db.save_assessment_results(uid, results)
 
     # Save to database
