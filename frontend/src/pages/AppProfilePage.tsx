@@ -17,6 +17,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { getUserProfile, updateProfile } from '@/api/user';
 import { Button, Input } from '@/components/ui';
 import type { UserProfile } from '@/types';
+import { GraduationCap } from "lucide-react";
 
 const USER_AVATAR = '/imgs/landing/student.jpg';
 
@@ -237,10 +238,10 @@ export function AppProfilePage() {
       key: 'google' as ProviderKey,
       label: 'Google Classroom',
       providerId: 'google.com',
-      iconType: 'image' as const,
-      iconSrc: '/imgs/branding/google-g.svg',
+      iconType: 'icon' as const,
+      icon: GraduationCap,
       iconAlt: 'Google',
-      iconClassName: 'bg-slate-100',
+      iconClassName: 'bg-[#0F9D58] text-white',
     },
     {
       key: 'github' as ProviderKey,
