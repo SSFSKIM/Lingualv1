@@ -158,6 +158,13 @@ export function AppProfilePage() {
     }
   };
 
+  const gradeOptions = [
+  'Kindergarten',
+  ...Array.from({ length: 12 }, (_, i) => `Grade ${i + 1}`),
+  'College',
+  'Out of School',
+]
+
   const providerData = firebaseUser?.providerData ?? [];
   const connectionEmail = formState.contactEmail || user?.email || '';
 
@@ -230,7 +237,7 @@ export function AppProfilePage() {
   const inputsDisabled = isLoading || !profile || isSaving;
   const studentLabel = t('app.profile.student') || 'Student';
   const gradeSummary = formState.gradeLevel
-    ? `${studentLabel} - ${formState.gradeLevel}`
+    ? `${formState.gradeLevel}`
     : studentLabel;
 
   const providers: ProviderConfig[] = [
@@ -398,15 +405,18 @@ export function AppProfilePage() {
                 placeholder={t('app.profile.email') || 'Email Address'}
                 disabled={inputsDisabled}
               />
-
-              <Input
-                label={t('app.profile.gradeLevel')}
-                type="text"
+              <select
                 value={formState.gradeLevel}
-                onChange={(event) => handleFieldChange('gradeLevel', event.target.value)}
-                placeholder={t('app.profile.gradeLevel') || 'Grade Level'}
+                onChange={(e) => handleFieldChange('gradeLevel', e.target.value)}
                 disabled={inputsDisabled}
-              />
+              >
+                <option value="">Select Education Level</option>
+                {gradeOptions.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </select>
 
               <Input
                 label={t('app.profile.nativeLanguage')}
