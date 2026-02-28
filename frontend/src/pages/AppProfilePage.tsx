@@ -284,6 +284,119 @@ const countries = [
   "Zimbabwe",
 ].sort();
 
+const languages = [
+  "Afrikaans",
+  "Albanian",
+  "Amharic",
+  "Arabic",
+  "Armenian",
+  "Azerbaijani",
+  "Basque",
+  "Belarusian",
+  "Bengali",
+  "Bosnian",
+  "Bulgarian",
+  "Burmese",
+  "Catalan",
+  "Cebuano",
+  "Chinese (Cantonese)",
+  "Chinese (Mandarin)",
+  "Corsican",
+  "Croatian",
+  "Czech",
+  "Danish",
+  "Dutch",
+  "English",
+  "Esperanto",
+  "Estonian",
+  "Filipino",
+  "Finnish",
+  "French",
+  "Frisian",
+  "Galician",
+  "Georgian",
+  "German",
+  "Greek",
+  "Gujarati",
+  "Haitian Creole",
+  "Hausa",
+  "Hawaiian",
+  "Hebrew",
+  "Hindi",
+  "Hmong",
+  "Hungarian",
+  "Icelandic",
+  "Igbo",
+  "Indonesian",
+  "Irish",
+  "Italian",
+  "Japanese",
+  "Javanese",
+  "Kannada",
+  "Kazakh",
+  "Khmer",
+  "Kinyarwanda",
+  "Korean",
+  "Kurdish",
+  "Kyrgyz",
+  "Lao",
+  "Latin",
+  "Latvian",
+  "Lithuanian",
+  "Luxembourgish",
+  "Macedonian",
+  "Malagasy",
+  "Malay",
+  "Malayalam",
+  "Maltese",
+  "Maori",
+  "Marathi",
+  "Mongolian",
+  "Nepali",
+  "Norwegian",
+  "Nyanja",
+  "Odia",
+  "Pashto",
+  "Persian",
+  "Polish",
+  "Portuguese",
+  "Punjabi",
+  "Romanian",
+  "Russian",
+  "Samoan",
+  "Scots Gaelic",
+  "Serbian",
+  "Sesotho",
+  "Shona",
+  "Sindhi",
+  "Sinhala",
+  "Slovak",
+  "Slovenian",
+  "Somali",
+  "Spanish",
+  "Sundanese",
+  "Swahili",
+  "Swedish",
+  "Tagalog",
+  "Tajik",
+  "Tamil",
+  "Tatar",
+  "Telugu",
+  "Thai",
+  "Turkish",
+  "Turkmen",
+  "Ukrainian",
+  "Urdu",
+  "Uyghur",
+  "Uzbek",
+  "Vietnamese",
+  "Welsh",
+  "Xhosa",
+  "Yiddish",
+  "Yoruba",
+  "Zulu",
+].sort();
+
   const handleAvatarClick = () => {
     fileInputRef.current?.click();
   };
@@ -626,14 +739,25 @@ const countries = [
               </select>
               </div>
 
-              <Input
-                label={t('app.profile.nativeLanguage')}
-                type="text"
+              <div className="flex flex-col gap-2">
+              <label className="text-base font-medium">
+                {t('app.profile.nativeLanguage') || 'Native Language'}
+              </label>
+
+              <select
                 value={formState.nativeLanguage}
-                onChange={(event) => handleFieldChange('nativeLanguage', event.target.value)}
-                placeholder={t('app.profile.nativeLanguage') || 'Native Language'}
+                onChange={(e) => handleFieldChange('nativeLanguage', e.target.value)}
                 disabled={inputsDisabled}
-              />
+                className="h-11 rounded-xl border-2 border-border bg-background pl-3 px-3 text-sm focus:border-primary focus:outline-none"
+              >
+                <option value="">Select Native Language</option>
+                {languages.map((language) => (
+                  <option key={language} value={language}>
+                    {language}
+                  </option>
+                ))}
+              </select>
+            </div>
 
              <div className="flex flex-col gap-2">
               <label className="text-base font-medium">
