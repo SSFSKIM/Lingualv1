@@ -30,7 +30,7 @@ const FALLBACK_AVATAR = '/imgs/landing/student.jpg';
 
 export function AppLayout() {
   const navigate = useNavigate();
-  const { user, logout } = useAuth();
+  const { user, logout, avatarUrl, updateAvatarUrl } = useAuth();
   const { t } = useLanguage();
   const { learningLocale } = useLearningLocale();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -38,11 +38,14 @@ export function AppLayout() {
 
   useEffect(() => {
     if (!user) return;
-    getUserProfile().then(setProfile).catch(() => {});
-  }, [user]);
+    getUserProfile().then((p) => {
+      setProfile(p);
+      if (p.avatarUrl) updateAvatarUrl(p.avatarUrl);
+    }).catch(() => {});
+  }, [user, updateAvatarUrl]);
 
   const displayName = profile?.displayName || user?.name || 'Student';
-  const userAvatar = profile?.avatarUrl || FALLBACK_AVATAR;
+  const userAvatar = avatarUrl || profile?.avatarUrl || FALLBACK_AVATAR;
   const roleLabel = profile?.gradeLevel
     ? `${t('app.layout.role.learner')} · ${profile.gradeLevel}`
     : t('app.layout.role.learner');

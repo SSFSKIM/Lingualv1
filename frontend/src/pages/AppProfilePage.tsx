@@ -43,6 +43,7 @@ export function AppProfilePage() {
     linkWithGithub,
     linkWithFacebook,
     unlinkProvider,
+    updateAvatarUrl,
   } = useAuth();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
@@ -148,6 +149,7 @@ export function AppProfilePage() {
         schoolName: refreshed.schoolName || '',
         avatarUrl: refreshed.avatarUrl || '',
       });
+      if (refreshed.avatarUrl) updateAvatarUrl(refreshed.avatarUrl);
       toast.success(t('app.profile.toast.saved') || 'Profile updated.');
     } catch (error) {
       console.error('Failed to save profile:', error);

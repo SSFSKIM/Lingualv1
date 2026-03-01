@@ -34,9 +34,9 @@ steps:
       - 'managed'
       - '--allow-unauthenticated'
       - '--set-env-vars'
-      - 'FLASK_ENV=production'
+      - 'FLASK_ENV=production,AZURE_SPEECH_REGION=${_AZURE_SPEECH_REGION}'
       - '--set-secrets'
-      - 'OPENAI_API_KEY=${_SECRET_NAME}:latest,SECRET_KEY=flask-secret-key:latest'
+      - 'OPENAI_API_KEY=${_SECRET_NAME}:latest,SECRET_KEY=flask-secret-key:latest,AZURE_SPEECH_KEY=azure-speech-key:latest'
 
 # Substitution variables (can be overridden at build time)
 substitutions:
@@ -45,6 +45,7 @@ substitutions:
   _ARTIFACT_REPO: lingual-repo
   _SECRET_NAME: openai-api-key
   _IMAGE_TAG: manual
+  _AZURE_SPEECH_REGION: eastus
 
 # Store images in Artifact Registry
 images:

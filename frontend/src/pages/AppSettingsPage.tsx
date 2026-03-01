@@ -297,17 +297,6 @@ export function AppSettingsPage() {
                 </p>
               </div>
 
-              <div className="pt-8 border-t-2 border-border">
-                <h3 className="mb-3 text-lg font-display font-bold text-foreground">
-                  {t('app.settings.privacy.danger')}
-                </h3>
-                <button
-                  type="button"
-                  className="min-h-11 rounded-xl border-2 border-destructive bg-destructive/10 px-4 text-destructive font-bold transition-colors hover:bg-destructive/20"
-                >
-                  {t('app.settings.privacy.delete')}
-                </button>
-              </div>
             </div>
           </Tabs.Content>
 

@@ -32,8 +32,9 @@ import {
 } from '@/components/ui';
 import type { ChatMessage, ChatSession, AssessmentResults, UserProfile } from '@/types';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { useAuth } from '@/hooks/useAuth';
 
-const USER_AVATAR = '/imgs/landing/student.jpg';
+const FALLBACK_AVATAR = '/imgs/landing/student.jpg';
 const AI_AVATAR = '/imgs/avatars/ai.svg';
 
 const domainBadgeStyles: Record<string, string> = {
@@ -46,6 +47,8 @@ const domainBadgeStyles: Record<string, string> = {
 
 export function AppChatPage() {
   const { t } = useLanguage();
+  const { avatarUrl } = useAuth();
+  const userAvatar = avatarUrl || FALLBACK_AVATAR;
   const [searchParams] = useSearchParams();
   const requestedChatId = searchParams.get('chatId');
   const [sessions, setSessions] = useState<ChatSession[]>([]);
@@ -437,7 +440,7 @@ export function AppChatPage() {
 
   return (
     <div className="grid h-[calc(100vh-8rem)] gap-6 lg:grid-cols-12">
-      <div className="flex h-full flex-col gap-6 lg:col-span-4">
+      <div className="flex h-full min-h-0 flex-col gap-6 lg:col-span-4">
         {/* Learning Path Card */}
         <LearningPathCard
           assessmentResults={assessmentResults}
@@ -565,7 +568,7 @@ export function AppChatPage() {
                     className={clsx('flex gap-4', isUser ? 'flex-row-reverse' : 'flex-row')}
                   >
                     <img
-                      src={isUser ? USER_AVATAR : AI_AVATAR}
+                      src={isUser ? userAvatar : AI_AVATAR}
                       alt={isUser ? 'You' : 'Lingual AI'}
                       className="w-10 h-10 rounded-xl bg-card border-2 border-foreground"
                     />

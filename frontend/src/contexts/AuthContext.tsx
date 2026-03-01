@@ -20,6 +20,8 @@ interface AuthContextType {
   firebaseUser: FirebaseUser | null;
   loading: boolean;
   error: string | null;
+  avatarUrl: string | null;
+  updateAvatarUrl: (url: string) => void;
   signInWithEmail: (email: string, password: string) => Promise<void>;
   signUpWithEmail: (email: string, password: string) => Promise<void>;
   signInWithGoogle: () => Promise<void>;
@@ -38,6 +40,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+
+  const updateAvatarUrl = (url: string) => setAvatarUrl(url);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
@@ -185,6 +190,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         firebaseUser,
         loading,
         error,
+        avatarUrl,
+        updateAvatarUrl,
         signInWithEmail,
         signUpWithEmail,
         signInWithGoogle,

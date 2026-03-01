@@ -627,19 +627,46 @@ def api_chat_reset():
 @login_required
 def api_speech_token():
     """Issue a short-lived Azure Speech token for the browser SDK."""
-    speech_key = os.environ.get('AZURE_SPEECH_KEY')
-    speech_region = os.environ.get('AZURE_SPEECH_REGION')
+    speech_key = (
+        os.environ.get('AZURE_SPEECH_KEY')
+        or os.environ.get('SPEECH_KEY')
+        or ''
+    ).strip()
+    speech_region = (
+        os.environ.get('AZURE_SPEECH_REGION')
+        or os.environ.get('SPEECH_REGION')
+        or ''
+    ).strip()
 
     if not speech_key or not speech_region:
-        return jsonify({'success': False, 'error': 'Azure Speech credentials not configured'}), 500
+        missing = []
+        if not speech_key:
+            missing.append('AZURE_SPEECH_KEY')
+        if not speech_region:
+            missing.append('AZURE_SPEECH_REGION')
+        missing_text = ', '.join(missing)
+        return jsonify({
+            'success': False,
+            'error': f'Azure Speech credentials not configured ({missing_text})'
+        }), 500
 
     try:
         response = requests.post(
             f'https://{speech_region}.api.cognitive.microsoft.com/sts/v1.0/issueToken',
-            headers={'Ocp-Apim-Subscription-Key': speech_key}
+            headers={'Ocp-Apim-Subscription-Key': speech_key},
+            timeout=10
         )
         if response.status_code != 200:
-            return jsonify({'success': False, 'error': response.text}), response.status_code
+            app.logger.warning(
+                'Azure speech token request failed with status %s: %s',
+                response.status_code,
+                response.text[:300]
+            )
+            return jsonify({
+                'success': False,
+                'error': 'Failed to issue Azure Speech token',
+                'provider_error': response.text[:300]
+            }), response.status_code
 
         expires_at = (datetime.utcnow() + timedelta(minutes=9)).isoformat() + 'Z'
 
@@ -649,8 +676,15 @@ def api_speech_token():
             'region': speech_region,
             'expires_at': expires_at
         })
+    except requests.RequestException as e:
+        app.logger.exception('Azure speech token request exception: %s', e)
+        return jsonify({
+            'success': False,
+            'error': 'Azure Speech service request failed. Please try again shortly.'
+        }), 502
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        app.logger.exception('Unexpected error issuing Azure speech token: %s', e)
+        return jsonify({'success': False, 'error': 'Failed to issue Azure Speech token'}), 500
 
 
 @app.route('/api/pronunciation/sessions', methods=['POST'])

@@ -1,6 +1,11 @@
+.DS_Store
 .venv/
 .env
 service-account.json
 *-firebase-adminsdk-*.json
 __pycache__/
 *.pyc
+tmp/
+node_modules/
+frontend/dist/
+*.log

@@ -1,4 +1,5 @@
 import api from './index';
+import axios from 'axios';
 import type { LearningLocale, PronunciationAttempt, PronunciationSession } from '@/types';
 import { auth, storage } from '@/config/firebase';
 import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
@@ -32,15 +33,28 @@ interface GetAttemptsResponse {
 }
 
 export const getSpeechToken = async (): Promise<{ token: string; region: string; expiresAt: string }> => {
-  const response = await api.post<SpeechTokenResponse>('/azure/speech-token');
-  if (response.data.success && response.data.token && response.data.region && response.data.expires_at) {
-    return {
-      token: response.data.token,
-      region: response.data.region,
-      expiresAt: response.data.expires_at,
-    };
+  try {
+    const response = await api.post<SpeechTokenResponse>('/azure/speech-token');
+    if (response.data.success && response.data.token && response.data.region && response.data.expires_at) {
+      return {
+        token: response.data.token,
+        region: response.data.region,
+        expiresAt: response.data.expires_at,
+      };
+    }
+    throw new Error(response.data.error || 'Failed to get speech token');
+  } catch (error) {
+    if (axios.isAxiosError<SpeechTokenResponse>(error)) {
+      const backendMessage = error.response?.data?.error;
+      if (backendMessage) {
+        throw new Error(backendMessage);
+      }
+    }
+    if (error instanceof Error) {
+      throw error;
+    }
+    throw new Error('Failed to get speech token');
   }
-  throw new Error(response.data.error || 'Failed to get speech token');
 };
 
 export const createPronunciationSession = async (
