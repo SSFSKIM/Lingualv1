@@ -2,27 +2,59 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { GLTFLoader, type GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { VRMHumanBoneName, VRMLoaderPlugin, VRMUtils, type VRM } from '@pixiv/three-vrm';
-import { useAudioRms } from './useAudioRms';
+import {
+  getExpressionCapabilities,
+  listResolvedExpressionKeys,
+  resolveExpressionAliases,
+  type AvatarExpressionAliases,
+} from './expressionAliases';
 import { clamp01 } from './rms';
+import type { AvatarDialogueState, AvatarPerformanceFrame } from './types';
 
-type ChatMode = 'text' | 'realtime';
+type BoneMotionState = {
+  node: THREE.Object3D;
+  position: THREE.Vector3;
+  quaternion: THREE.Quaternion;
+};
 
 type VrmAvatarPanelProps = {
   enabled: boolean;
-  mode: ChatMode;
-  isSpeaking: boolean;
-  isListening: boolean;
-  remoteAudioStream: MediaStream | null;
+  performance: AvatarPerformanceFrame;
   modelUrl?: string;
   fallbackSrc?: string;
+  statusLabel?: string;
   title?: string;
 };
 
 type PanelStatus = 'idle' | 'loading' | 'ready' | 'error';
+type VrmHumanoidBoneAccess = {
+  getNormalizedBoneNode?: (name: VRMHumanBoneName) => THREE.Object3D | null;
+  getRawBoneNode?: (name: VRMHumanBoneName) => THREE.Object3D | null;
+};
+type VrmExpressionManagerAccess = {
+  expressionMap?: Record<string, unknown>;
+  setValue?: (name: string, value: number) => void;
+};
 
 const DEFAULT_MODEL_URL = '/avatars/lingual-teacher.vrm';
-const MOUTH_KEYS = ['aa', 'A'] as const;
-const BLINK_KEYS = ['blink', 'Blink'] as const;
+const CONTROLLED_EXPRESSION_CHANNELS: Array<keyof AvatarExpressionAliases> = [
+  'mouthAa',
+  'mouthIh',
+  'mouthOu',
+  'mouthEe',
+  'mouthOh',
+  'jaw',
+  'happy',
+  'relaxed',
+  'surprised',
+  'blink',
+  'blinkLeft',
+  'blinkRight',
+  'lookLeft',
+  'lookRight',
+  'lookUp',
+  'lookDown',
+];
 
 function supportsWebGL(): boolean {
   try {
@@ -59,20 +91,30 @@ function deepDispose(object: THREE.Object3D) {
   });
 }
 
-function getBoneWorldPosition(vrm: VRM, boneName: VRMHumanBoneName): THREE.Vector3 | null {
-  const humanoid = (vrm as unknown as { humanoid?: unknown }).humanoid as
-    | {
-        getNormalizedBoneNode?: (name: VRMHumanBoneName) => THREE.Object3D | null;
-        getBoneNode?: (name: VRMHumanBoneName) => THREE.Object3D | null;
-      }
-    | undefined;
+function resolveBoneNode(vrm: VRM, boneName: VRMHumanBoneName): THREE.Object3D | null {
+  const humanoid = (vrm as unknown as { humanoid?: unknown }).humanoid as VrmHumanoidBoneAccess | undefined;
 
-  const boneNode = humanoid?.getNormalizedBoneNode?.(boneName) ?? humanoid?.getBoneNode?.(boneName) ?? null;
+  return humanoid?.getNormalizedBoneNode?.(boneName) ?? humanoid?.getRawBoneNode?.(boneName) ?? null;
+}
+
+function getBoneWorldPosition(vrm: VRM, boneName: VRMHumanBoneName): THREE.Vector3 | null {
+  const boneNode = resolveBoneNode(vrm, boneName);
   if (!boneNode) return null;
 
   const position = new THREE.Vector3();
   boneNode.getWorldPosition(position);
   return position;
+}
+
+function captureBoneMotionState(vrm: VRM, boneName: VRMHumanBoneName): BoneMotionState | null {
+  const node = resolveBoneNode(vrm, boneName);
+  if (!node) return null;
+
+  return {
+    node,
+    position: node.position.clone(),
+    quaternion: node.quaternion.clone(),
+  };
 }
 
 function frameCameraToBust(vrm: VRM, camera: THREE.PerspectiveCamera) {
@@ -108,59 +150,118 @@ function frameCameraToBust(vrm: VRM, camera: THREE.PerspectiveCamera) {
   camera.updateProjectionMatrix();
 }
 
-function setExpression(vrm: VRM, keys: readonly string[], value: number) {
-  const manager = (vrm as unknown as { expressionManager?: unknown; blendShapeProxy?: unknown })
-    .expressionManager ??
-    (vrm as unknown as { expressionManager?: unknown; blendShapeProxy?: unknown }).blendShapeProxy;
+function resolveExpressionManager(vrm: VRM): VrmExpressionManagerAccess | null {
+  return (
+    ((vrm as unknown as { expressionManager?: unknown }).expressionManager as VrmExpressionManagerAccess | undefined) ??
+    ((vrm as unknown as { blendShapeProxy?: unknown }).blendShapeProxy as VrmExpressionManagerAccess | undefined) ??
+    null
+  );
+}
 
-  const mgr = manager as { setValue?: (name: string, value: number) => void } | null | undefined;
-  if (!mgr?.setValue) return;
+function setExpressionValue(manager: VrmExpressionManagerAccess | null, key: string | null, value: number) {
+  if (!manager?.setValue || !key) return;
 
-  const clamped = clamp01(value);
-  for (const key of keys) {
-    try {
-      mgr.setValue(key, clamped);
-    } catch {
-      // ignore unknown keys
-    }
+  try {
+    manager.setValue(key, clamp01(value));
+  } catch {
+    // Ignore unsupported keys on older VRM implementations.
   }
 }
 
-function randomBetween(min: number, max: number): number {
-  return min + Math.random() * (max - min);
+function resetControlledExpressions(
+  manager: VrmExpressionManagerAccess | null,
+  aliases: AvatarExpressionAliases
+) {
+  for (const channel of CONTROLLED_EXPRESSION_CHANNELS) {
+    setExpressionValue(manager, aliases[channel], 0);
+  }
+}
+
+function applyMouthExpressions(
+  manager: VrmExpressionManagerAccess | null,
+  aliases: AvatarExpressionAliases,
+  frame: AvatarPerformanceFrame
+) {
+  setExpressionValue(manager, aliases.mouthAa, frame.jawOpen * 0.95);
+  setExpressionValue(manager, aliases.mouthIh, frame.mouthSpread * 0.45);
+  setExpressionValue(manager, aliases.mouthEe, frame.mouthSpread * 0.8);
+  setExpressionValue(manager, aliases.mouthOu, frame.mouthRound * 0.8);
+  setExpressionValue(manager, aliases.mouthOh, Math.max(frame.mouthRound * 0.65, frame.jawOpen * 0.3));
+  setExpressionValue(manager, aliases.jaw, Math.max(frame.jawOpen, frame.mouthRound * 0.25));
+}
+
+function applyAffectExpressions(
+  manager: VrmExpressionManagerAccess | null,
+  aliases: AvatarExpressionAliases,
+  frame: AvatarPerformanceFrame
+) {
+  const relaxed = clamp01(frame.smile * 0.7 + frame.browInnerUp * 0.2);
+  const surprised = clamp01(frame.browOuterUp * 0.8 + frame.browInnerUp * 0.4 + frame.jawOpen * 0.18);
+
+  setExpressionValue(manager, aliases.happy, frame.smile);
+  setExpressionValue(manager, aliases.relaxed, relaxed);
+  setExpressionValue(manager, aliases.surprised, surprised);
+}
+
+function applyBlinkExpressions(
+  manager: VrmExpressionManagerAccess | null,
+  aliases: AvatarExpressionAliases,
+  blink: number
+) {
+  setExpressionValue(manager, aliases.blink, blink);
+  setExpressionValue(manager, aliases.blinkLeft, blink);
+  setExpressionValue(manager, aliases.blinkRight, blink);
+}
+
+function applyGazeExpressions(
+  manager: VrmExpressionManagerAccess | null,
+  aliases: AvatarExpressionAliases,
+  frame: AvatarPerformanceFrame
+) {
+  setExpressionValue(manager, aliases.lookLeft, frame.gazeYaw < 0 ? Math.abs(frame.gazeYaw) * 8 : 0);
+  setExpressionValue(manager, aliases.lookRight, frame.gazeYaw > 0 ? frame.gazeYaw * 8 : 0);
+  setExpressionValue(manager, aliases.lookUp, frame.gazePitch > 0 ? frame.gazePitch * 12 : 0);
+  setExpressionValue(manager, aliases.lookDown, frame.gazePitch < 0 ? Math.abs(frame.gazePitch) * 12 : 0);
+}
+
+function formatDialogueState(dialogueState: AvatarDialogueState): string {
+  switch (dialogueState) {
+    case 'listening':
+      return 'Listening';
+    case 'thinking':
+      return 'Thinking';
+    case 'pre_speaking':
+      return 'Preparing';
+    case 'speaking':
+      return 'Speaking';
+    case 'post_speaking':
+      return 'Settling';
+    default:
+      return 'Ready';
+  }
 }
 
 export default function VrmAvatarPanel({
   enabled,
-  mode,
-  isSpeaking,
-  isListening,
-  remoteAudioStream,
+  performance,
   modelUrl = DEFAULT_MODEL_URL,
   fallbackSrc,
+  statusLabel,
   title = 'Virtual Avatar',
 }: VrmAvatarPanelProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const performanceRef = useRef(performance);
 
   const [webglSupported] = useState(() => supportsWebGL());
   const [status, setStatus] = useState<PanelStatus>(() => (enabled && webglSupported ? 'loading' : 'idle'));
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [resolvedExpressionKeys, setResolvedExpressionKeys] = useState<string[]>([]);
+  const [showDebug, setShowDebug] = useState(false);
 
-  const analysisEnabled = useMemo(
-    () => enabled && mode === 'realtime' && Boolean(remoteAudioStream),
-    [enabled, mode, remoteAudioStream]
-  );
-  const { rmsLevelRef } = useAudioRms(remoteAudioStream, analysisEnabled);
-
-  const speakingRef = useRef(isSpeaking);
-  const listeningRef = useRef(isListening);
   useEffect(() => {
-    speakingRef.current = isSpeaking;
-  }, [isSpeaking]);
-  useEffect(() => {
-    listeningRef.current = isListening;
-  }, [isListening]);
+    performanceRef.current = performance;
+  }, [performance]);
 
   useEffect(() => {
     if (!enabled || !webglSupported) return;
@@ -168,6 +269,11 @@ export default function VrmAvatarPanel({
     const container = containerRef.current;
     const canvas = canvasRef.current;
     if (!container || !canvas) return;
+
+    queueMicrotask(() => {
+      setStatus('loading');
+      setErrorMessage(null);
+    });
 
     let isDisposed = false;
     let rafId: number | null = null;
@@ -219,53 +325,78 @@ export default function VrmAvatarPanel({
     resizeObserver.observe(container);
 
     const clock = new THREE.Clock();
-    let vrm: VRM | null = null;
+    const rotationEuler = new THREE.Euler();
+    const rotationQuat = new THREE.Quaternion();
+    const expressionAliasesRef = { current: resolveExpressionAliases(undefined) };
+    const expressionCapabilitiesRef = { current: getExpressionCapabilities(expressionAliasesRef.current) };
 
-    const blinkState = {
-      nextBlinkAt: performance.now() + randomBetween(2500, 6000),
-      isBlinking: false,
-      blinkStartAt: 0,
-      blinkDurationMs: 140,
+    let vrm: VRM | null = null;
+    let torsoState: BoneMotionState | null = null;
+    let neckState: BoneMotionState | null = null;
+    let headState: BoneMotionState | null = null;
+    let jawState: BoneMotionState | null = null;
+
+    const applyBoneMotion = (
+      state: BoneMotionState | null,
+      rotationX = 0,
+      rotationY = 0,
+      rotationZ = 0,
+      lift = 0
+    ) => {
+      if (!state) return;
+
+      state.node.position.copy(state.position);
+      state.node.position.y += lift;
+      state.node.quaternion.copy(state.quaternion);
+
+      rotationEuler.set(rotationX, rotationY, rotationZ, 'XYZ');
+      rotationQuat.setFromEuler(rotationEuler);
+      state.node.quaternion.multiply(rotationQuat);
     };
 
     const animate = () => {
       if (isDisposed || !renderer) return;
 
       rafId = window.requestAnimationFrame(animate);
-
       const delta = clock.getDelta();
+
       if (vrm) {
-        const now = performance.now();
+        const frame = performanceRef.current;
+        const manager = resolveExpressionManager(vrm);
+        const aliases = expressionAliasesRef.current;
+        const capabilities = expressionCapabilitiesRef.current;
+        const gazeFallbackYaw = capabilities.hasGaze ? 0 : frame.gazeYaw * 0.35;
+        const gazeFallbackPitch = capabilities.hasGaze ? 0 : frame.gazePitch * 0.25;
+        const jawFallback = capabilities.hasMouth || capabilities.hasJaw ? frame.jawOpen * 0.08 : frame.jawOpen * 0.18;
 
-        if (!blinkState.isBlinking && now >= blinkState.nextBlinkAt) {
-          blinkState.isBlinking = true;
-          blinkState.blinkStartAt = now;
-          blinkState.blinkDurationMs = randomBetween(120, 160);
-        }
+        resetControlledExpressions(manager, aliases);
+        applyMouthExpressions(manager, aliases, frame);
+        applyAffectExpressions(manager, aliases, frame);
+        applyBlinkExpressions(manager, aliases, frame.blink);
+        applyGazeExpressions(manager, aliases, frame);
 
-        let blinkValue = 0;
-        if (blinkState.isBlinking) {
-          const t = (now - blinkState.blinkStartAt) / blinkState.blinkDurationMs;
-          if (t >= 1) {
-            blinkState.isBlinking = false;
-            blinkState.nextBlinkAt = now + randomBetween(2500, 6000);
-            blinkValue = 0;
-          } else {
-            const phase = t < 0.5 ? t * 2 : (1 - t) * 2;
-            blinkValue = clamp01(phase * phase);
-          }
-        }
-
-        const mouth = speakingRef.current ? rmsLevelRef.current : 0;
-
-        setExpression(vrm, MOUTH_KEYS, mouth);
-        setExpression(vrm, BLINK_KEYS, blinkValue);
-
-        // Optional micro-feedback: slightly open mouth while listening (helps "alive" feel).
-        if (!speakingRef.current && listeningRef.current) {
-          setExpression(vrm, MOUTH_KEYS, Math.max(mouth, 0.03));
-        }
-
+        applyBoneMotion(
+          torsoState,
+          frame.chestPitch,
+          gazeFallbackYaw * 0.2,
+          0,
+          frame.intensity * 0.003
+        );
+        applyBoneMotion(
+          neckState,
+          frame.neckPitch + gazeFallbackPitch * 0.18,
+          frame.headYaw * 0.35 + gazeFallbackYaw * 0.2,
+          frame.headRoll * 0.35,
+          frame.intensity * 0.0015
+        );
+        applyBoneMotion(
+          headState,
+          frame.headPitch + gazeFallbackPitch,
+          frame.headYaw + gazeFallbackYaw,
+          frame.headRoll,
+          frame.intensity * 0.002
+        );
+        applyBoneMotion(jawState, jawFallback, 0, 0);
         vrm.update(delta);
       }
 
@@ -281,7 +412,7 @@ export default function VrmAvatarPanel({
         if (isDisposed) return;
 
         VRMUtils.removeUnnecessaryVertices(gltf.scene);
-        VRMUtils.removeUnnecessaryJoints(gltf.scene);
+        VRMUtils.combineSkeletons(gltf.scene);
 
         const loadedVrm = gltf.userData.vrm as VRM | undefined;
         if (!loadedVrm) {
@@ -291,6 +422,20 @@ export default function VrmAvatarPanel({
         }
 
         vrm = loadedVrm;
+        torsoState =
+          captureBoneMotionState(vrm, VRMHumanBoneName.UpperChest) ??
+          captureBoneMotionState(vrm, VRMHumanBoneName.Chest) ??
+          captureBoneMotionState(vrm, VRMHumanBoneName.Spine);
+        neckState = captureBoneMotionState(vrm, VRMHumanBoneName.Neck);
+        headState = captureBoneMotionState(vrm, VRMHumanBoneName.Head);
+        jawState = captureBoneMotionState(vrm, VRMHumanBoneName.Jaw);
+
+        const manager = resolveExpressionManager(vrm);
+        const aliases = resolveExpressionAliases(manager?.expressionMap);
+        expressionAliasesRef.current = aliases;
+        expressionCapabilitiesRef.current = getExpressionCapabilities(aliases);
+        setResolvedExpressionKeys(listResolvedExpressionKeys(aliases));
+
         vrm.scene.rotation.y = Math.PI;
         vrm.scene.traverse((obj: THREE.Object3D) => {
           obj.frustumCulled = false;
@@ -357,12 +502,9 @@ export default function VrmAvatarPanel({
     if (!enabled) return null;
     if (effectiveStatus === 'loading') return 'Loading avatar…';
     if (effectiveStatus === 'error') return effectiveErrorMessage ?? 'Avatar unavailable';
-
-    if (mode !== 'realtime') return 'Text mode';
-    if (isSpeaking) return 'Speaking';
-    if (isListening) return 'Listening';
-    return 'Ready';
-  }, [effectiveErrorMessage, effectiveStatus, enabled, isListening, isSpeaking, mode]);
+    if (statusLabel) return statusLabel;
+    return formatDialogueState(performance.dialogueState);
+  }, [effectiveErrorMessage, effectiveStatus, enabled, performance.dialogueState, statusLabel]);
 
   return (
     <div ref={containerRef} className="relative h-full w-full">
@@ -385,6 +527,29 @@ export default function VrmAvatarPanel({
         <div className="pointer-events-none absolute left-3 top-3 rounded-xl border-2 border-border bg-card/80 px-2 py-1 text-[11px] font-bold text-muted-foreground backdrop-blur">
           {overlayStatus}
         </div>
+      ) : null}
+
+      {import.meta.env.DEV && effectiveStatus === 'ready' ? (
+        <>
+          <button
+            type="button"
+            onClick={() => setShowDebug((prev) => !prev)}
+            className="absolute right-3 top-3 rounded-lg border-2 border-border bg-card/90 px-2 py-1 text-[10px] font-bold text-foreground shadow-stamp-sm"
+          >
+            {showDebug ? 'Hide Debug' : 'Show Debug'}
+          </button>
+          {showDebug ? (
+            <div className="absolute bottom-3 right-3 max-w-[18rem] rounded-xl border-2 border-border bg-card/90 p-3 text-[10px] text-foreground shadow-stamp backdrop-blur">
+              <div className="font-bold uppercase tracking-[0.12em] text-muted-foreground">Avatar Debug</div>
+              <div className="mt-2 space-y-1">
+                <div>State: {formatDialogueState(performance.dialogueState)}</div>
+                <div>Affect: {performance.affect}</div>
+                <div>Audio: {performance.debug.audioLevel.toFixed(2)}</div>
+                <div>Keys: {resolvedExpressionKeys.join(', ') || 'none'}</div>
+              </div>
+            </div>
+          ) : null}
+        </>
       ) : null}
     </div>
   );

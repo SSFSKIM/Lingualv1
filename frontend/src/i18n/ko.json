@@ -201,6 +201,7 @@
 
   "app.learn.status.connecting": "연결 중...",
   "app.learn.status.tapToConnect": "마이크를 눌러 연결",
+  "app.learn.status.aiResponding": "AI 응답 중",
   "app.learn.status.aiSpeaking": "AI 말하는 중",
   "app.learn.status.listening": "듣는 중...",
   "app.learn.status.ready": "준비 완료",

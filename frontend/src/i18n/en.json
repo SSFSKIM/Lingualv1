@@ -214,6 +214,7 @@
 
   "app.learn.status.connecting": "Connecting...",
   "app.learn.status.tapToConnect": "Tap the mic to connect",
+  "app.learn.status.aiResponding": "AI responding",
   "app.learn.status.aiSpeaking": "AI speaking",
   "app.learn.status.listening": "Listening...",
   "app.learn.status.ready": "Ready",

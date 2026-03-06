@@ -7,6 +7,7 @@ interface RealtimeMessage {
   content: string;
   timestamp: string;
   isFinal?: boolean;
+  sortOrder: number;
 }
 
 interface UseRealtimeChatOptions {
@@ -20,6 +21,10 @@ interface UseRealtimeChatReturn {
   isSpeaking: boolean;
   messages: RealtimeMessage[];
   remoteAudioStream: MediaStream | null;
+  assistantTranscriptDelta: string;
+  assistantTranscriptFinal: string;
+  assistantSpeechStartedAt: number | null;
+  assistantSpeechEndedAt: number | null;
   error: string | null;
   connect: () => Promise<void>;
   disconnect: () => void;
@@ -101,6 +106,10 @@ export function useRealtimeChat(options?: UseRealtimeChatOptions): UseRealtimeCh
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [messages, setMessages] = useState<RealtimeMessage[]>([]);
   const [remoteAudioStream, setRemoteAudioStream] = useState<MediaStream | null>(null);
+  const [assistantTranscriptDelta, setAssistantTranscriptDelta] = useState('');
+  const [assistantTranscriptFinal, setAssistantTranscriptFinal] = useState('');
+  const [assistantSpeechStartedAt, setAssistantSpeechStartedAt] = useState<number | null>(null);
+  const [assistantSpeechEndedAt, setAssistantSpeechEndedAt] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
@@ -110,14 +119,88 @@ export function useRealtimeChat(options?: UseRealtimeChatOptions): UseRealtimeCh
   const finalizedItemsRef = useRef<Set<string>>(new Set());
   const messageContentRef = useRef<Map<string, string>>(new Map());
   const messageTimestampRef = useRef<Map<string, string>>(new Map());
+  const messageOrderRef = useRef<Map<string, number>>(new Map());
+  const nextMessageOrderRef = useRef(0);
+  const pendingUserOrderRef = useRef<number | null>(null);
+  const pendingAssistantOrderRef = useRef<number | null>(null);
   const currentResponseIdRef = useRef<string | null>(null);
   const isSpeakingRef = useRef(false);
+  const assistantTranscriptDeltaRef = useRef('');
+  const assistantSpeechStartedAtRef = useRef<number | null>(null);
 
   const resetMessageTracking = useCallback(() => {
     finalizedItemsRef.current.clear();
     messageContentRef.current.clear();
     messageTimestampRef.current.clear();
+    messageOrderRef.current.clear();
+    nextMessageOrderRef.current = 0;
+    pendingUserOrderRef.current = null;
+    pendingAssistantOrderRef.current = null;
   }, []);
+
+  const resetAssistantPerformanceState = useCallback(() => {
+    assistantTranscriptDeltaRef.current = '';
+    assistantSpeechStartedAtRef.current = null;
+    setAssistantTranscriptDelta('');
+    setAssistantTranscriptFinal('');
+    setAssistantSpeechStartedAt(null);
+    setAssistantSpeechEndedAt(null);
+  }, []);
+
+  const ensureMessageOrder = useCallback((itemId: string) => {
+    const existingOrder = messageOrderRef.current.get(itemId);
+    if (existingOrder !== undefined) {
+      return existingOrder;
+    }
+
+    const nextOrder = nextMessageOrderRef.current;
+    nextMessageOrderRef.current += 1;
+    messageOrderRef.current.set(itemId, nextOrder);
+    return nextOrder;
+  }, []);
+
+  const reservePendingMessageOrder = useCallback((role: 'user' | 'assistant') => {
+    const pendingOrderRef = role === 'user' ? pendingUserOrderRef : pendingAssistantOrderRef;
+    if (pendingOrderRef.current !== null) {
+      return pendingOrderRef.current;
+    }
+
+    const nextOrder = nextMessageOrderRef.current;
+    nextMessageOrderRef.current += 1;
+    pendingOrderRef.current = nextOrder;
+    return nextOrder;
+  }, []);
+
+  const adoptPendingMessageOrder = useCallback((role: 'user' | 'assistant', itemId?: string) => {
+    if (!itemId) return;
+
+    const existingOrder = messageOrderRef.current.get(itemId);
+    if (existingOrder !== undefined) {
+      return existingOrder;
+    }
+
+    const pendingOrderRef = role === 'user' ? pendingUserOrderRef : pendingAssistantOrderRef;
+    const pendingOrder = pendingOrderRef.current;
+    if (pendingOrder === null) {
+      return undefined;
+    }
+
+    pendingOrderRef.current = null;
+    messageOrderRef.current.set(itemId, pendingOrder);
+    if (nextMessageOrderRef.current <= pendingOrder) {
+      nextMessageOrderRef.current = pendingOrder + 1;
+    }
+    return pendingOrder;
+  }, []);
+
+  const reserveMessageOrder = useCallback((item?: RealtimeItem, itemId?: string) => {
+    const resolvedItemId = itemId ?? item?.id;
+    if (!resolvedItemId) return;
+    if (item?.type && item.type !== 'message') return;
+    const role = resolveRole(item, 'assistant');
+    adoptPendingMessageOrder(role, resolvedItemId);
+    ensureMessageOrder(resolvedItemId);
+  }, [adoptPendingMessageOrder, ensureMessageOrder]);
 
   const upsertMessage = useCallback(
     (
@@ -130,6 +213,7 @@ export function useRealtimeChat(options?: UseRealtimeChatOptions): UseRealtimeCh
       const previousContent = messageContentRef.current.get(itemId) ?? '';
       const nextContent = mode === 'append' ? `${previousContent}${content}` : content;
       const timestamp = messageTimestampRef.current.get(itemId) ?? new Date().toISOString();
+      const sortOrder = ensureMessageOrder(itemId);
 
       messageContentRef.current.set(itemId, nextContent);
       messageTimestampRef.current.set(itemId, timestamp);
@@ -137,14 +221,16 @@ export function useRealtimeChat(options?: UseRealtimeChatOptions): UseRealtimeCh
       setMessages((prev) => {
         const existingIndex = prev.findIndex((message) => message.id === itemId);
         if (existingIndex === -1) {
-          return [...prev, { id: itemId, role, content: nextContent, timestamp, isFinal }];
+          return [...prev, { id: itemId, role, content: nextContent, timestamp, isFinal, sortOrder }]
+            .sort((first, second) => first.sortOrder - second.sortOrder);
         }
 
         const currentMessage = prev[existingIndex];
         if (
           currentMessage.role === role &&
           currentMessage.content === nextContent &&
-          currentMessage.isFinal === isFinal
+          currentMessage.isFinal === isFinal &&
+          currentMessage.sortOrder === sortOrder
         ) {
           return prev;
         }
@@ -155,21 +241,27 @@ export function useRealtimeChat(options?: UseRealtimeChatOptions): UseRealtimeCh
           role,
           content: nextContent,
           isFinal,
+          sortOrder,
         };
         return nextMessages;
       });
 
       return nextContent;
     },
-    []
+    [ensureMessageOrder]
   );
 
   const appendTranscript = useCallback(
     (role: 'user' | 'assistant', delta: string, itemId?: string) => {
       if (!itemId || delta.length === 0) return;
-      upsertMessage(role, delta, itemId, 'append', false);
+      adoptPendingMessageOrder(role, itemId);
+      const nextContent = upsertMessage(role, delta, itemId, 'append', false);
+      if (role === 'assistant') {
+        assistantTranscriptDeltaRef.current = nextContent;
+        setAssistantTranscriptDelta(nextContent);
+      }
     },
-    [upsertMessage]
+    [adoptPendingMessageOrder, upsertMessage]
   );
 
   const finalizeTranscript = useCallback(
@@ -178,13 +270,19 @@ export function useRealtimeChat(options?: UseRealtimeChatOptions): UseRealtimeCh
       const resolvedContent = content ?? messageContentRef.current.get(resolvedItemId) ?? '';
       if (!resolvedContent.trim()) return;
 
+      adoptPendingMessageOrder(role, resolvedItemId);
       const nextContent = upsertMessage(role, resolvedContent, resolvedItemId, 'replace', true);
+      if (role === 'assistant') {
+        assistantTranscriptDeltaRef.current = nextContent;
+        setAssistantTranscriptDelta(nextContent);
+        setAssistantTranscriptFinal(nextContent);
+      }
       if (!finalizedItemsRef.current.has(resolvedItemId)) {
         finalizedItemsRef.current.add(resolvedItemId);
         onMessageCallback?.(role, nextContent.trim());
       }
     },
-    [onMessageCallback, upsertMessage]
+    [adoptPendingMessageOrder, onMessageCallback, upsertMessage]
   );
 
   const cleanupConnection = useCallback(() => {
@@ -215,7 +313,8 @@ export function useRealtimeChat(options?: UseRealtimeChatOptions): UseRealtimeCh
 
     currentResponseIdRef.current = null;
     isSpeakingRef.current = false;
-  }, []);
+    resetAssistantPerformanceState();
+  }, [resetAssistantPerformanceState]);
 
   const sendClientEvent = useCallback((payload: Record<string, unknown>) => {
     if (dataChannelRef.current?.readyState === 'open') {
@@ -249,8 +348,12 @@ export function useRealtimeChat(options?: UseRealtimeChatOptions): UseRealtimeCh
 
       if (ASSISTANT_AUDIO_ACTIVE_EVENTS.has(event.type)) {
         if (!isSpeakingRef.current) {
+          const startedAt = Date.now();
           isSpeakingRef.current = true;
+          assistantSpeechStartedAtRef.current = startedAt;
           setIsSpeaking(true);
+          setAssistantSpeechStartedAt(startedAt);
+          setAssistantSpeechEndedAt(null);
         }
         return;
       }
@@ -258,16 +361,31 @@ export function useRealtimeChat(options?: UseRealtimeChatOptions): UseRealtimeCh
       if (ASSISTANT_AUDIO_DONE_EVENTS.has(event.type)) {
         isSpeakingRef.current = false;
         setIsSpeaking(false);
+        setAssistantSpeechEndedAt(Date.now());
         return;
       }
 
       switch (event.type) {
         case 'session.created':
-          finalizedItemsRef.current.clear();
+          resetMessageTracking();
+          resetAssistantPerformanceState();
+          break;
+
+        case 'conversation.item.created':
+        case 'conversation.item.added':
+        case 'response.output_item.added':
+          reserveMessageOrder(event.item, itemId);
           break;
 
         case 'response.created':
+          reservePendingMessageOrder('assistant');
           currentResponseIdRef.current = event.response?.id || null;
+          assistantTranscriptDeltaRef.current = '';
+          assistantSpeechStartedAtRef.current = null;
+          setAssistantTranscriptDelta('');
+          setAssistantTranscriptFinal('');
+          setAssistantSpeechStartedAt(null);
+          setAssistantSpeechEndedAt(null);
           break;
 
         case 'response.output_item.done': {
@@ -289,40 +407,61 @@ export function useRealtimeChat(options?: UseRealtimeChatOptions): UseRealtimeCh
           break;
 
         case 'conversation.item.input_audio_transcription.failed':
+          pendingUserOrderRef.current = null;
           if (event.error?.message) {
             setError(event.error.message);
           }
           break;
 
         case 'input_audio_buffer.speech_started':
+          reservePendingMessageOrder('user');
           setIsListening(true);
+          resetAssistantPerformanceState();
           if (isSpeakingRef.current) {
             cancelCurrentResponse();
             clearOutputAudioBuffer();
+            pendingAssistantOrderRef.current = null;
             isSpeakingRef.current = false;
             setIsSpeaking(false);
           }
           break;
 
         case 'input_audio_buffer.speech_stopped':
+          reserveMessageOrder(undefined, itemId);
           setIsListening(false);
           break;
 
         case 'response.done':
           currentResponseIdRef.current = null;
+          if (!assistantTranscriptDeltaRef.current.trim()) {
+            pendingAssistantOrderRef.current = null;
+          }
           isSpeakingRef.current = false;
           setIsSpeaking(false);
+          if (assistantSpeechStartedAtRef.current === null && assistantTranscriptDeltaRef.current.trim()) {
+            setAssistantSpeechEndedAt(Date.now());
+          }
           break;
 
         case 'error':
           setError(event.error?.message || 'Unknown error');
           currentResponseIdRef.current = null;
+          pendingAssistantOrderRef.current = null;
           isSpeakingRef.current = false;
           setIsSpeaking(false);
           break;
       }
     },
-    [appendTranscript, cancelCurrentResponse, clearOutputAudioBuffer, finalizeTranscript]
+    [
+      appendTranscript,
+      cancelCurrentResponse,
+      clearOutputAudioBuffer,
+      finalizeTranscript,
+      reserveMessageOrder,
+      reservePendingMessageOrder,
+      resetAssistantPerformanceState,
+      resetMessageTracking,
+    ]
   );
 
   const connect = useCallback(async () => {
@@ -427,7 +566,8 @@ export function useRealtimeChat(options?: UseRealtimeChatOptions): UseRealtimeCh
   const clearMessages = useCallback(() => {
     setMessages([]);
     resetMessageTracking();
-  }, [resetMessageTracking]);
+    resetAssistantPerformanceState();
+  }, [resetAssistantPerformanceState, resetMessageTracking]);
 
   return {
     isConnected,
@@ -435,6 +575,10 @@ export function useRealtimeChat(options?: UseRealtimeChatOptions): UseRealtimeCh
     isSpeaking,
     messages,
     remoteAudioStream,
+    assistantTranscriptDelta,
+    assistantTranscriptFinal,
+    assistantSpeechStartedAt,
+    assistantSpeechEndedAt,
     error,
     connect,
     disconnect,

@@ -183,6 +183,8 @@ def create_chat_blueprint(deps: RouteDeps) -> Blueprint:
         data = request.get_json() or {}
         role = data.get('role', '').strip()
         content = data.get('content', '').strip()
+        timestamp = data.get('timestamp')
+        sort_order = data.get('sortOrder', data.get('sort_order'))
 
         if not role or role not in ['user', 'assistant']:
             return jsonify({'success': False, 'error': 'Invalid role'}), 400
@@ -190,12 +192,38 @@ def create_chat_blueprint(deps: RouteDeps) -> Blueprint:
         if not content:
             return jsonify({'success': False, 'error': 'Content is required'}), 400
 
+        if timestamp is not None and (not isinstance(timestamp, str) or not timestamp.strip()):
+            return jsonify({'success': False, 'error': 'Invalid timestamp'}), 400
+
+        if sort_order is not None:
+            if isinstance(sort_order, bool):
+                return jsonify({'success': False, 'error': 'Invalid sort order'}), 400
+            if isinstance(sort_order, float):
+                sort_order = int(sort_order)
+            elif isinstance(sort_order, str):
+                stripped = sort_order.strip()
+                if not stripped:
+                    sort_order = None
+                elif stripped.lstrip('-').isdigit():
+                    sort_order = int(stripped)
+                else:
+                    return jsonify({'success': False, 'error': 'Invalid sort order'}), 400
+            elif not isinstance(sort_order, int):
+                return jsonify({'success': False, 'error': 'Invalid sort order'}), 400
+
         try:
             chat = deps.db.get_chat_session(uid, chat_id)
             if not chat:
                 return jsonify({'success': False, 'error': 'Chat not found'}), 404
 
-            message = deps.db.add_message_to_chat(uid, chat_id, role, content)
+            message = deps.db.add_message_to_chat(
+                uid,
+                chat_id,
+                role,
+                content,
+                timestamp=timestamp.strip() if isinstance(timestamp, str) else None,
+                sort_order=sort_order,
+            )
             resolved_title = None
 
             chat_messages = chat.get('messages', [])
@@ -204,7 +232,7 @@ def create_chat_blueprint(deps: RouteDeps) -> Blueprint:
                     client = deps.get_openai_client()
                     if client:
                         title_response = client.chat.completions.create(
-                            model='gpt-5-mini-2025-08-07',
+                            model='gpt-5.3-chat-latest',
                             messages=[
                                 {
                                     'role': 'system',
@@ -258,7 +286,7 @@ def create_chat_blueprint(deps: RouteDeps) -> Blueprint:
                 return jsonify({'success': False, 'error': 'OpenAI client not initialized'}), 500
 
             response = client.chat.completions.create(
-                model='gpt-5-mini-2025-08-07',
+                model='gpt-5.3-chat-latest',
                 messages=messages,
                 max_completion_tokens=8192,
             )
@@ -271,7 +299,7 @@ def create_chat_blueprint(deps: RouteDeps) -> Blueprint:
             if len(chat_messages) == 0:
                 try:
                     title_response = client.chat.completions.create(
-                        model='gpt-5-mini-2025-08-07',
+                        model='gpt-5.3-chat-latest',
                         messages=[
                             {
                                 'role': 'system',

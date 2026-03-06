@@ -24,6 +24,8 @@ import {
   deleteChatSession,
 } from '@/api/chat';
 import { ChatInput } from '@/components/chat';
+import { buildLive2DAvatarStateFromPerformance } from '@/components/avatar/live2dAdapter';
+import { useAvatarPerformance } from '@/components/avatar/useAvatarPerformance';
 import { getUserProfile } from '@/api/user';
 import { getAssessmentResults } from '@/api/assessment';
 import { ChatSessionsSidebar } from '@/components/learning';
@@ -43,8 +45,14 @@ import { useAuth } from '@/hooks/useAuth';
 const FALLBACK_AVATAR = '/imgs/landing/student.jpg';
 const AI_AVATAR = '/imgs/avatars/ai.svg';
 const CHAT_AVATAR_ENABLED_KEY = 'lingual:chat:avatarEnabled';
+const TEXT_AVATAR_SPEAK_MIN_MS = 1200;
+const TEXT_AVATAR_SPEAK_MAX_MS = 4200;
+const LIVE2D_CHAT_ENABLED = (import.meta.env.VITE_ENABLE_LIVE2D_CHAT ?? 'true') !== 'false';
 
-const VrmAvatarPanel = lazy(() => import('@/components/avatar/VrmAvatarPanel'));
+const AvatarPerformancePanel = lazy(() => import('@/components/avatar/AvatarPerformancePanel'));
+const Live2DAvatarPanel = lazy(() => import('@/components/avatar/Live2DAvatarPanel'));
+
+type AvatarActivity = 'idle' | 'listening' | 'thinking' | 'speaking';
 
 const domainBadgeStyles: Record<string, string> = {
   grammar: 'bg-primary/10 text-primary border border-primary/20',
@@ -57,6 +65,24 @@ const domainBadgeStyles: Record<string, string> = {
   presentational_communication: 'bg-success/10 text-success border border-success/20',
   language_control: 'bg-foreground/10 text-foreground border border-foreground/20',
 };
+
+function getTextAvatarSpeechDuration(content: string): number {
+  const trimmed = content.trim();
+  if (!trimmed) return 0;
+
+  return Math.min(
+    TEXT_AVATAR_SPEAK_MAX_MS,
+    Math.max(TEXT_AVATAR_SPEAK_MIN_MS, trimmed.length * 45)
+  );
+}
+
+function getClientNow(): number {
+  try {
+    return window.performance?.now() ?? Date.now();
+  } catch {
+    return Date.now();
+  }
+}
 
 export function AppChatPage() {
   const { t } = useLanguage();
@@ -83,6 +109,11 @@ export function AppChatPage() {
   const [isDeletingChat, setIsDeletingChat] = useState(false);
   const [isSidebarExpanded, setIsSidebarExpanded] = useState(false);
   const [isSidebarDialogOpen, setIsSidebarDialogOpen] = useState(false);
+  const [textAvatarActivity, setTextAvatarActivity] = useState<AvatarActivity>('idle');
+  const [textAssistantTranscriptDelta, setTextAssistantTranscriptDelta] = useState('');
+  const [textAssistantTranscriptFinal, setTextAssistantTranscriptFinal] = useState('');
+  const [textAssistantSpeechStartedAt, setTextAssistantSpeechStartedAt] = useState<number | null>(null);
+  const [textAssistantSpeechEndedAt, setTextAssistantSpeechEndedAt] = useState<number | null>(null);
   const [isAvatarEnabled, setIsAvatarEnabled] = useState(() => {
     try {
       const stored = window.localStorage.getItem(CHAT_AVATAR_ENABLED_KEY);
@@ -103,13 +134,56 @@ export function AppChatPage() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const currentChatIdRef = useRef<string | null>(null);
   const previousMessageCountRef = useRef(0);
+  const textAvatarTimeoutRef = useRef<number | null>(null);
+  const realtimeSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const nextRealtimeMessageOrderRef = useRef(0);
   currentChatIdRef.current = currentChatId;
+
+  const clearTextAvatarTimeout = useCallback(() => {
+    if (textAvatarTimeoutRef.current === null) return;
+    window.clearTimeout(textAvatarTimeoutRef.current);
+    textAvatarTimeoutRef.current = null;
+  }, []);
+
+  const resetTextAvatarPerformance = useCallback(() => {
+    setTextAssistantTranscriptDelta('');
+    setTextAssistantTranscriptFinal('');
+    setTextAssistantSpeechStartedAt(null);
+    setTextAssistantSpeechEndedAt(null);
+  }, []);
+
+  const resetRealtimePersistence = useCallback((messageCount = 0) => {
+    realtimeSaveQueueRef.current = Promise.resolve();
+    nextRealtimeMessageOrderRef.current = messageCount;
+  }, []);
+
+  const playTextAvatarSpeech = useCallback((content: string) => {
+    clearTextAvatarTimeout();
+
+    if (!content.trim()) {
+      setTextAvatarActivity('idle');
+      return;
+    }
+
+    setTextAssistantTranscriptDelta(content);
+    setTextAssistantTranscriptFinal(content);
+    setTextAssistantSpeechStartedAt(getClientNow());
+    setTextAssistantSpeechEndedAt(null);
+    setTextAvatarActivity('speaking');
+    textAvatarTimeoutRef.current = window.setTimeout(() => {
+      setTextAvatarActivity('idle');
+      setTextAssistantSpeechEndedAt(getClientNow());
+      textAvatarTimeoutRef.current = null;
+    }, getTextAvatarSpeechDuration(content));
+  }, [clearTextAvatarTimeout]);
 
   const handleRealtimeMessage = useCallback((role: 'user' | 'assistant', content: string) => {
     const chatId = currentChatIdRef.current;
     if (!chatId || !content.trim()) return;
 
     const timestamp = new Date().toISOString();
+    const sortOrder = nextRealtimeMessageOrderRef.current;
+    nextRealtimeMessageOrderRef.current += 1;
 
     setSessions((prev) => {
       const target = prev.find((session) => session.id === chatId);
@@ -130,8 +204,10 @@ export function AppChatPage() {
       return [updated, ...prev.filter((session) => session.id !== chatId)];
     });
 
-    saveMessageToChat(chatId, role, content)
-      .then((response) => {
+    realtimeSaveQueueRef.current = realtimeSaveQueueRef.current
+      .catch(() => undefined)
+      .then(async () => {
+        const response = await saveMessageToChat(chatId, role, content, { timestamp, sortOrder });
         const resolvedTitle = response.title?.trim();
         if (!resolvedTitle) return;
         setSessions((prev) => prev.map((session) => (
@@ -145,35 +221,108 @@ export function AppChatPage() {
       });
   }, []);
 
+  const legacyRealtimeSession = useRealtimeChat({ onMessage: handleRealtimeMessage });
   const {
     isConnected,
     isListening,
     isSpeaking,
     messages: realtimeMessages,
-    remoteAudioStream,
     error: realtimeError,
     connect,
     disconnect,
     clearMessages,
-  } = useRealtimeChat({ onMessage: handleRealtimeMessage });
+  } = legacyRealtimeSession;
+  const remoteAudioStream = legacyRealtimeSession.remoteAudioStream;
 
   const displayMessages = useMemo(
-    () => [...historyMessages, ...realtimeMessages].sort((a, b) => {
-      const first = Date.parse(a.timestamp);
-      const second = Date.parse(b.timestamp);
-      if (Number.isNaN(first) || Number.isNaN(second)) return 0;
-      return first - second;
-    }),
+    () => [...historyMessages, ...realtimeMessages],
     [historyMessages, realtimeMessages]
+  );
+
+  const avatarSource = useMemo(() => {
+    if (mode === 'realtime') {
+      return {
+        mode,
+        isConnected: legacyRealtimeSession.isConnected,
+        isListening: legacyRealtimeSession.isListening,
+        isSpeaking: legacyRealtimeSession.isSpeaking,
+        remoteAudioStream,
+        assistantTranscriptDelta: legacyRealtimeSession.assistantTranscriptDelta,
+        assistantTranscriptFinal: legacyRealtimeSession.assistantTranscriptFinal,
+        assistantSpeechStartedAt: legacyRealtimeSession.assistantSpeechStartedAt,
+        assistantSpeechEndedAt: legacyRealtimeSession.assistantSpeechEndedAt,
+      };
+    }
+
+    return {
+      mode,
+      isConnected: true,
+      isListening: false,
+      isSpeaking: textAvatarActivity === 'speaking',
+      remoteAudioStream: null,
+      assistantTranscriptDelta:
+        textAvatarActivity === 'thinking' && !textAssistantTranscriptDelta
+          ? '…'
+          : textAssistantTranscriptDelta,
+      assistantTranscriptFinal: textAssistantTranscriptFinal,
+      assistantSpeechStartedAt: textAssistantSpeechStartedAt,
+      assistantSpeechEndedAt: textAssistantSpeechEndedAt,
+    };
+  }, [
+    legacyRealtimeSession.assistantSpeechEndedAt,
+    legacyRealtimeSession.assistantSpeechStartedAt,
+    legacyRealtimeSession.assistantTranscriptDelta,
+    legacyRealtimeSession.assistantTranscriptFinal,
+    legacyRealtimeSession.isConnected,
+    legacyRealtimeSession.isListening,
+    legacyRealtimeSession.isSpeaking,
+    mode,
+    remoteAudioStream,
+    textAssistantSpeechEndedAt,
+    textAssistantSpeechStartedAt,
+    textAssistantTranscriptDelta,
+    textAssistantTranscriptFinal,
+      textAvatarActivity,
+  ]);
+
+  const live2dPerformance = useAvatarPerformance(avatarSource);
+  const live2dAvatarState = useMemo(
+    () => buildLive2DAvatarStateFromPerformance(live2dPerformance),
+    [live2dPerformance]
   );
 
   const statusLabel = useMemo(() => {
     if (isConnecting) return t('app.learn.status.connecting');
     if (!isConnected) return t('app.learn.status.tapToConnect');
-    if (isSpeaking) return t('app.learn.status.aiSpeaking');
+    if (
+      LIVE2D_CHAT_ENABLED &&
+      mode === 'realtime' &&
+      (live2dPerformance.dialogueState === 'thinking' || live2dPerformance.dialogueState === 'pre_speaking')
+    ) {
+      return t('app.learn.status.aiResponding');
+    }
+    if (isSpeaking || (LIVE2D_CHAT_ENABLED && mode === 'realtime' && live2dPerformance.dialogueState === 'speaking')) {
+      return t('app.learn.status.aiSpeaking');
+    }
     if (isListening) return t('app.learn.status.listening');
     return t('app.learn.status.ready');
-  }, [isConnecting, isConnected, isSpeaking, isListening, t]);
+  }, [isConnecting, isConnected, isListening, isSpeaking, live2dPerformance.dialogueState, mode, t]);
+
+  const avatarStatusLabel = useMemo(() => {
+    if (mode === 'realtime') {
+      return statusLabel;
+    }
+
+    if (textAvatarActivity === 'thinking') {
+      return t('app.learn.status.aiResponding');
+    }
+
+    if (textAvatarActivity === 'speaking') {
+      return t('app.learn.status.aiSpeaking');
+    }
+
+    return t('app.learn.status.ready');
+  }, [mode, statusLabel, t, textAvatarActivity]);
 
   const micButtonLabel = useMemo(() => {
     if (isConnecting) return t('app.learn.status.connecting');
@@ -193,9 +342,16 @@ export function AppChatPage() {
     previousMessageCountRef.current = nextCount;
   }, [displayMessages, scrollToBottom]);
 
+  useEffect(() => () => {
+    clearTextAvatarTimeout();
+  }, [clearTextAvatarTimeout]);
+
   const loadChat = useCallback(async (chatId: string) => {
     setLoadingChat(true);
     setError(null);
+    clearTextAvatarTimeout();
+    setTextAvatarActivity('idle');
+    resetTextAvatarPerformance();
     clearMessages();
     disconnect();
 
@@ -207,6 +363,7 @@ export function AppChatPage() {
         content: msg.content,
         timestamp: msg.timestamp,
       }));
+      resetRealtimePersistence(formattedMessages.length);
       setHistoryMessages(formattedMessages);
       setCurrentChatId(chatId);
     } catch (err) {
@@ -214,11 +371,14 @@ export function AppChatPage() {
     } finally {
       setLoadingChat(false);
     }
-  }, [clearMessages, disconnect]);
+  }, [clearMessages, clearTextAvatarTimeout, disconnect, resetRealtimePersistence, resetTextAvatarPerformance]);
 
   const createNewChat = useCallback(async () => {
     setLoadingChat(true);
     setError(null);
+    clearTextAvatarTimeout();
+    setTextAvatarActivity('idle');
+    resetTextAvatarPerformance();
     clearMessages();
     disconnect();
 
@@ -232,6 +392,7 @@ export function AppChatPage() {
         updated_at: timestamp,
         message_count: 0,
       };
+      resetRealtimePersistence(0);
       setSessions((prev) => [newSession, ...prev]);
       setHistoryMessages([]);
       setCurrentChatId(chatId);
@@ -240,7 +401,7 @@ export function AppChatPage() {
     } finally {
       setLoadingChat(false);
     }
-  }, [clearMessages, disconnect]);
+  }, [clearMessages, clearTextAvatarTimeout, disconnect, resetRealtimePersistence, resetTextAvatarPerformance]);
 
   useEffect(() => {
     let isActive = true;
@@ -324,6 +485,10 @@ export function AppChatPage() {
     if (!currentChatId) return;
 
     try {
+      clearTextAvatarTimeout();
+      setTextAvatarActivity('idle');
+      resetTextAvatarPerformance();
+
       if (isConnected) {
         disconnect();
         return;
@@ -339,6 +504,9 @@ export function AppChatPage() {
   };
 
   const handleModeChange = (newMode: Mode) => {
+    clearTextAvatarTimeout();
+    setTextAvatarActivity('idle');
+    resetTextAvatarPerformance();
     if (mode === 'realtime' && isConnected && newMode !== 'realtime') {
       disconnect();
     }
@@ -352,6 +520,12 @@ export function AppChatPage() {
     setInputValue('');
     setIsSendingText(true);
     setError(null);
+    clearTextAvatarTimeout();
+    setTextAvatarActivity('thinking');
+    setTextAssistantTranscriptDelta('…');
+    setTextAssistantTranscriptFinal('');
+    setTextAssistantSpeechStartedAt(null);
+    setTextAssistantSpeechEndedAt(null);
 
     const userMessage: ChatMessage = {
       id: `user-${Date.now()}`,
@@ -361,21 +535,23 @@ export function AppChatPage() {
     };
     setHistoryMessages((prev) => [...prev, userMessage]);
 
-      setSessions((prev) => {
-        const target = prev.find((s) => s.id === currentChatId);
-        if (!target) return prev;
-        const updated = {
-          ...target,
-          title: target.message_count === 0 ? (message.length > 30 ? `${message.slice(0, 30)}...` : message) : target.title,
-          updated_at: userMessage.timestamp,
-          message_count: target.message_count + 1,
-          last_message: message,
-        };
+    setSessions((prev) => {
+      const target = prev.find((s) => s.id === currentChatId);
+      if (!target) return prev;
+      const updated = {
+        ...target,
+        title: target.message_count === 0 ? (message.length > 30 ? `${message.slice(0, 30)}...` : message) : target.title,
+        updated_at: userMessage.timestamp,
+        message_count: target.message_count + 1,
+        last_message: message,
+      };
       return [updated, ...prev.filter((s) => s.id !== currentChatId)];
     });
 
     try {
       const response = await sendChatMessage(currentChatId, message);
+      setTextAssistantTranscriptDelta(response.response);
+      setTextAssistantTranscriptFinal(response.response);
       const assistantMessage: ChatMessage = {
         id: `assistant-${Date.now()}`,
         role: 'assistant',
@@ -396,8 +572,12 @@ export function AppChatPage() {
         };
         return [updated, ...prev.filter((s) => s.id !== currentChatId)];
       });
+
+      playTextAvatarSpeech(response.response);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to send message');
+      setTextAvatarActivity('idle');
+      resetTextAvatarPerformance();
     } finally {
       setIsSendingText(false);
     }
@@ -421,6 +601,9 @@ export function AppChatPage() {
       if (currentChatId === chatId) {
         setCurrentChatId(null);
         setHistoryMessages([]);
+        clearTextAvatarTimeout();
+        setTextAvatarActivity('idle');
+        resetTextAvatarPerformance();
         clearMessages();
         disconnect();
         if (remaining.length > 0) {
@@ -602,15 +785,26 @@ export function AppChatPage() {
                 </div>
               }
             >
-              <VrmAvatarPanel
-                enabled={isAvatarEnabled}
-                mode={mode}
-                isSpeaking={isSpeaking}
-                isListening={isListening}
-                remoteAudioStream={remoteAudioStream}
-                fallbackSrc={AI_AVATAR}
-                title={t('app.learn.chat.title')}
-              />
+              {LIVE2D_CHAT_ENABLED ? (
+                <Live2DAvatarPanel
+                  enabled={isAvatarEnabled}
+                  avatarState={live2dAvatarState}
+                  avatarReaction={null}
+                  performanceFrame={live2dPerformance}
+                  audioLevel={live2dPerformance.debug.audioLevel}
+                  fallbackSrc={AI_AVATAR}
+                  statusLabel={avatarStatusLabel}
+                  title={t('app.learn.chat.title')}
+                />
+              ) : (
+                <AvatarPerformancePanel
+                  enabled={isAvatarEnabled}
+                  source={avatarSource}
+                  statusLabel={avatarStatusLabel}
+                  fallbackSrc={AI_AVATAR}
+                  title={t('app.learn.chat.title')}
+                />
+              )}
             </Suspense>
           </div>
         )}

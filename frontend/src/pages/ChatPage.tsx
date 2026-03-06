@@ -76,15 +76,26 @@ export function ChatPage() {
 
   // Use ref for currentChatId to avoid stale closures in callback
   const currentChatIdRef = useRef<string | null>(null);
+  const realtimeSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const nextRealtimeMessageOrderRef = useRef(0);
   currentChatIdRef.current = currentChatId;
 
   // Callback to save realtime messages to database
   const handleRealtimeMessage = useCallback((role: 'user' | 'assistant', content: string) => {
     const chatId = currentChatIdRef.current;
     if (chatId && content.trim()) {
-      saveMessageToChat(chatId, role, content).catch((err) => {
-        console.error('Failed to save realtime message:', err);
-      });
+      const sortOrder = nextRealtimeMessageOrderRef.current;
+      const timestamp = new Date().toISOString();
+      nextRealtimeMessageOrderRef.current += 1;
+
+      realtimeSaveQueueRef.current = realtimeSaveQueueRef.current
+        .catch(() => undefined)
+        .then(async () => {
+          await saveMessageToChat(chatId, role, content, { timestamp, sortOrder });
+        })
+        .catch((err) => {
+          console.error('Failed to save realtime message:', err);
+        });
     }
   }, []);
 
@@ -175,6 +186,8 @@ export function ChatPage() {
         content: msg.content,
         timestamp: msg.timestamp,
       }));
+      realtimeSaveQueueRef.current = Promise.resolve();
+      nextRealtimeMessageOrderRef.current = formattedMessages.length;
       setMessages(formattedMessages);
       setView('chat');
     } catch (err) {
@@ -191,6 +204,8 @@ export function ChatPage() {
     clearRealtimeMessages();
     try {
       const { chatId } = await createChatSession();
+      realtimeSaveQueueRef.current = Promise.resolve();
+      nextRealtimeMessageOrderRef.current = 0;
       setCurrentChatId(chatId);
       setCurrentChat({
         id: chatId,

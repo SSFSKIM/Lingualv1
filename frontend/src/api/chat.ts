@@ -31,9 +31,14 @@ interface SendMessageResponse {
 
 interface SaveMessageResponse {
   success: boolean;
-  message: { role: string; content: string; timestamp: string };
+  message: { role: string; content: string; timestamp: string; sort_order?: number };
   title?: string | null;
   error?: string;
+}
+
+interface SaveMessageOptions {
+  timestamp?: string;
+  sortOrder?: number;
 }
 
 export const getChatSessions = async (): Promise<ChatSession[]> => {
@@ -86,11 +91,17 @@ export const sendChatMessage = async (chatId: string, message: string): Promise<
 export const saveMessageToChat = async (
   chatId: string,
   role: 'user' | 'assistant',
-  content: string
+  content: string,
+  options?: SaveMessageOptions
 ): Promise<SaveMessageResponse> => {
   const response = await api.post<SaveMessageResponse>(
     `/chats/${chatId}/messages/save`,
-    { role, content }
+    {
+      role,
+      content,
+      ...(options?.timestamp ? { timestamp: options.timestamp } : {}),
+      ...(options?.sortOrder !== undefined ? { sortOrder: options.sortOrder } : {}),
+    }
   );
   if (response.data.success) {
     return response.data;

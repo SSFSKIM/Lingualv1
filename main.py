@@ -73,6 +73,7 @@ def get_openai_client():
 
 from scoring import load_assessment_data, compute_results, get_actfl_description
 import database as db
+from backend.avatar_chat import register_avatar_chat_routes
 from backend.route_deps import RouteDeps
 from backend.routes.auth import create_auth_blueprint
 from backend.routes.chat import create_chat_blueprint
@@ -456,6 +457,7 @@ def register_domain_blueprints():
     app.register_blueprint(create_assessment_blueprint(deps))
     app.register_blueprint(create_pronunciation_blueprint(deps))
     app.register_blueprint(create_games_blueprint(deps))
+    register_avatar_chat_routes(app, deps)
 
 
 register_domain_blueprints()

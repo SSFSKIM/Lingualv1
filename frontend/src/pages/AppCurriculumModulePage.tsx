@@ -78,6 +78,8 @@ export function AppCurriculumModulePage() {
   const [isConnecting, setIsConnecting] = useState(false);
 
   const chatIdRef = useRef<string | null>(null);
+  const realtimeSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const nextRealtimeMessageOrderRef = useRef(0);
   useEffect(() => {
     chatIdRef.current = chatId;
   }, [chatId]);
@@ -160,9 +162,19 @@ export function AppCurriculumModulePage() {
   const persistRealtimeMessage = useCallback((role: 'user' | 'assistant', content: string) => {
     const activeChatId = chatIdRef.current;
     if (!activeChatId || !content.trim()) return;
-    saveMessageToChat(activeChatId, role, content).catch((saveError) => {
-      console.error('Failed to save curriculum realtime message:', saveError);
-    });
+
+    const sortOrder = nextRealtimeMessageOrderRef.current;
+    const timestamp = new Date().toISOString();
+    nextRealtimeMessageOrderRef.current += 1;
+
+    realtimeSaveQueueRef.current = realtimeSaveQueueRef.current
+      .catch(() => undefined)
+      .then(async () => {
+        await saveMessageToChat(activeChatId, role, content, { timestamp, sortOrder });
+      })
+      .catch((saveError) => {
+        console.error('Failed to save curriculum realtime message:', saveError);
+      });
   }, []);
 
   const sessionParams = useMemo(() => {
@@ -200,6 +212,8 @@ export function AppCurriculumModulePage() {
     try {
       disconnect();
       clearMessages();
+      realtimeSaveQueueRef.current = Promise.resolve();
+      nextRealtimeMessageOrderRef.current = 0;
 
       const title = `CUR ${module.id} - ${getLocalizedText(module.title, lang, module.id)}`;
       const created = await createChatSession(title);

@@ -48,6 +48,7 @@ Schema:
         - role: str ('user' or 'assistant')
         - content: str
         - timestamp: str (ISO format)
+        - sort_order: int (optional, stable client-side ordering)
 
 - users/{uid}/minigame_attempts/{attempt_id}
     - game_type: str ('listening_quiz' | 'grammar_challenge')
@@ -299,6 +300,40 @@ def _timestamp_to_iso(ts):
     return str(ts)
 
 
+def _coerce_sort_order(value):
+    """Normalize optional sort order values to ints."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        stripped = value.strip()
+        if stripped.startswith('-'):
+            stripped = stripped[1:]
+        if stripped.isdigit():
+            return int(value)
+    return None
+
+
+def sort_chat_messages(messages):
+    """Return chat messages in stable display/context order."""
+    if not isinstance(messages, list):
+        return []
+
+    decorated = []
+    for index, message in enumerate(messages):
+        if not isinstance(message, dict):
+            continue
+        sort_order = _coerce_sort_order(message.get('sort_order'))
+        effective_order = sort_order if sort_order is not None else index
+        decorated.append((effective_order, index, message))
+
+    decorated.sort(key=lambda item: (item[0], item[1]))
+    return [message for _, _, message in decorated]
+
+
 def get_chat_sessions(uid, limit=50):
     """Get all chat sessions for user, ordered by most recent."""
     chats_ref = get_chats_collection(uid)
@@ -308,7 +343,7 @@ def get_chat_sessions(uid, limit=50):
     for doc in docs:
         data = doc.to_dict()
         # Get preview from last message
-        messages = data.get('messages', [])
+        messages = sort_chat_messages(data.get('messages', []))
         last_message = messages[-1] if messages else None
 
         sessions.append({
@@ -329,24 +364,28 @@ def get_chat_session(uid, chat_id):
 
     if doc.exists:
         data = doc.to_dict()
+        messages = sort_chat_messages(data.get('messages', []))
         return {
             'id': doc.id,
             'title': data.get('title', 'New Chat'),
             'created_at': _timestamp_to_iso(data.get('created_at')),
             'updated_at': _timestamp_to_iso(data.get('updated_at')),
-            'messages': data.get('messages', [])
+            'messages': messages
         }
     return None
 
 
-def add_message_to_chat(uid, chat_id, role, content):
+def add_message_to_chat(uid, chat_id, role, content, timestamp=None, sort_order=None):
     """Add a message to a chat session."""
     chat_ref = get_chats_collection(uid).document(chat_id)
     message = {
         'role': role,
         'content': content,
-        'timestamp': datetime.utcnow().isoformat()
+        'timestamp': timestamp or datetime.utcnow().isoformat()
     }
+    normalized_sort_order = _coerce_sort_order(sort_order)
+    if normalized_sort_order is not None:
+        message['sort_order'] = normalized_sort_order
 
     chat_ref.update({
         'messages': firestore.ArrayUnion([message]),
@@ -374,7 +413,7 @@ def get_chat_messages_for_context(uid, chat_id, limit=20):
     """Get recent messages from a chat for AI context."""
     session = get_chat_session(uid, chat_id)
     if session:
-        messages = session.get('messages', [])
+        messages = sort_chat_messages(session.get('messages', []))
         return messages[-limit:] if len(messages) > limit else messages
     return []
 
