@@ -64,6 +64,7 @@ export function PronunciationPracticePage() {
   const { learningLocale } = useLearningLocale();
   const { status, error: practiceError, assess } = usePronunciationPractice();
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [rawAudioStorageAllowed, setRawAudioStorageAllowed] = useState(true);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [attempts, setAttempts] = useState<PronunciationAttempt[]>([]);
   const [selectedWordIndex, setSelectedWordIndex] = useState<number>(0);
@@ -139,6 +140,7 @@ export function PronunciationPracticePage() {
     setCurrentIndex(0);
     setAttempts([]);
     setSessionId(null);
+    setRawAudioStorageAllowed(true);
     setSelectedWordIndex(0);
     if (curriculumMatchesLocale && scenarios.length) {
       setSelectedObjectiveId(null);
@@ -242,6 +244,7 @@ export function PronunciationPracticePage() {
         });
         activeSessionId = session.sessionId;
         setSessionId(activeSessionId);
+        setRawAudioStorageAllowed(session.session?.rawAudioStorageAllowed !== false);
       }
 
       const { attempt, audioBlob } = await assess(
@@ -250,7 +253,7 @@ export function PronunciationPracticePage() {
         currentPrompt.id,
       );
       let audioUrl: string | undefined;
-      if (audioBlob) {
+      if (audioBlob && rawAudioStorageAllowed) {
         try {
           audioUrl = await uploadPronunciationAudio({
             sessionId: activeSessionId,
@@ -261,6 +264,8 @@ export function PronunciationPracticePage() {
         } catch (uploadError) {
           console.error('Failed to upload pronunciation audio:', uploadError);
         }
+      } else if (audioBlob && !rawAudioStorageAllowed) {
+        toast.info('Raw audio retention is disabled for this school context, so the recording was not stored.');
       }
       const attemptPayload: PronunciationAttempt = {
         ...attempt,
@@ -279,7 +284,7 @@ export function PronunciationPracticePage() {
     } finally {
       setIsSaving(false);
     }
-  }, [assess, currentPrompt, learningLocale, sessionId, t, selectedScenario]);
+  }, [assess, currentPrompt, learningLocale, rawAudioStorageAllowed, sessionId, t, selectedScenario]);
 
   const isBusy = status !== 'idle' || isSaving;
 

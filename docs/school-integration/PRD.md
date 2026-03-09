@@ -1,7 +1,7 @@
 # School Integration PRD
 
 Status: Draft v0.1
-Last updated: 2026-03-07
+Last updated: 2026-03-09
 Owner: Product + Engineering
 
 ## 1. Why this exists
@@ -177,6 +177,7 @@ As a school leader, I want voice features to respect consent and retention polic
 - Teachers must be able to publish an assignment tied to a class and curriculum mapping.
 - Students must launch practice from an assignment, not only from a generic chat entry point.
 - The AI session must be built from assignment context plus learner state.
+- If voice is blocked by consent or policy, assignment launch may downgrade to assignment-scoped text practice only when teacher-configured text fallback is enabled; otherwise launch must fail closed.
 
 ### 8.5 Pedagogical behavior
 
@@ -204,7 +205,9 @@ Teachers must be able to view at least:
 ### 8.7 Compliance and privacy
 
 - Voice-enabled practice must be blocked if consent state does not allow it.
+- Pronunciation features must follow the same consent and retention rules as other school voice flows.
 - The system must support parent/guardian consent tracking where required.
+- Teachers and school admins must be able to review and update student consent state within their authorized school scope during beta.
 - Raw audio retention must be configurable and conservative by default.
 - Schools must be able to request deletion and receive an auditable result.
 - Access to student data must follow role and class membership scope.

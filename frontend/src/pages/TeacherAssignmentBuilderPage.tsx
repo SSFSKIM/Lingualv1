@@ -45,6 +45,9 @@ type MappingFormState = {
   silenceToleranceMs: string;
   hintLadderText: string;
   maxModelingSteps: string;
+  minStudentTurnWords: string;
+  followUpPressure: 'light' | 'balanced' | 'high';
+  allowClarificationRequests: boolean;
   modalityMode: ModalityMode;
   voiceMinutesCap: string;
   textFallbackEnabled: boolean;
@@ -83,6 +86,9 @@ const DEFAULT_MAPPING_FORM: MappingFormState = {
   silenceToleranceMs: '3000',
   hintLadderText: 'wait\ncontext_hint\nchoice_prompt\nmodel_and_retry',
   maxModelingSteps: '1',
+  minStudentTurnWords: '8',
+  followUpPressure: 'balanced',
+  allowClarificationRequests: true,
   modalityMode: 'hybrid',
   voiceMinutesCap: '',
   textFallbackEnabled: true,
@@ -121,6 +127,12 @@ const MODALITY_OPTIONS: Array<{ value: ModalityMode; label: string }> = [
   { value: 'text_only', label: 'Text only' },
 ];
 
+const FOLLOW_UP_PRESSURE_OPTIONS = [
+  { value: 'light', label: 'Light' },
+  { value: 'balanced', label: 'Balanced' },
+  { value: 'high', label: 'High' },
+] as const;
+
 function getLocalizedText(
   value: Record<string, string> | undefined,
   lang: 'en' | 'ko',
@@ -149,6 +161,15 @@ function formatStatusVariant(status: string): 'success' | 'secondary' | 'outline
   if (status === 'published') return 'success';
   if (status === 'archived') return 'secondary';
   return 'outline';
+}
+
+function describeOutputPressure(mapping: CurriculumMappingDto): string {
+  const policy = mapping.outputPolicy;
+  if (!policy) {
+    return 'Uses backend defaults derived at launch time.';
+  }
+
+  return `${policy.minStudentTurnWords}+ words per turn · ${policy.followUpPressure.replace('_', ' ')} follow-up pressure · clarification ${policy.allowClarificationRequests ? 'allowed' : 'limited'}`;
 }
 
 export function TeacherAssignmentBuilderPage() {
@@ -329,10 +350,16 @@ export function TeacherAssignmentBuilderPage() {
     const elicitationRepeatThreshold = parseOptionalInt(mappingForm.elicitationRepeatThreshold);
     const silenceToleranceMs = parseOptionalInt(mappingForm.silenceToleranceMs);
     const maxModelingSteps = parseOptionalInt(mappingForm.maxModelingSteps);
+    const minStudentTurnWords = parseOptionalInt(mappingForm.minStudentTurnWords);
     const voiceMinutesCap = parseOptionalInt(mappingForm.voiceMinutesCap);
 
-    if (elicitationRepeatThreshold === null || silenceToleranceMs === null || maxModelingSteps === null) {
-      setError('Feedback and scaffold numeric fields must be valid numbers.');
+    if (
+      elicitationRepeatThreshold === null ||
+      silenceToleranceMs === null ||
+      maxModelingSteps === null ||
+      minStudentTurnWords === null
+    ) {
+      setError('Feedback, scaffold, and output-pressure numeric fields must be valid numbers.');
       return;
     }
     if (voiceMinutesCap === null) {
@@ -365,6 +392,11 @@ export function TeacherAssignmentBuilderPage() {
         silenceToleranceMs: silenceToleranceMs ?? 3000,
         hintLadder: splitLines(mappingForm.hintLadderText),
         maxModelingSteps: maxModelingSteps ?? 1,
+      },
+      outputPolicy: {
+        minStudentTurnWords: minStudentTurnWords ?? 8,
+        followUpPressure: mappingForm.followUpPressure,
+        allowClarificationRequests: mappingForm.allowClarificationRequests,
       },
       modalityPolicy: {
         mode: mappingForm.modalityMode,
@@ -656,7 +688,7 @@ export function TeacherAssignmentBuilderPage() {
             />
           </div>
 
-          <div className="mt-6 grid gap-6 lg:grid-cols-3">
+          <div className="mt-6 grid gap-6 xl:grid-cols-2 2xl:grid-cols-4">
             <div className="space-y-4 rounded-2xl border-2 border-border bg-secondary/40 p-4">
               <h3 className="text-base font-semibold text-foreground">Feedback policy</h3>
               <div className="space-y-2">
@@ -731,6 +763,52 @@ export function TeacherAssignmentBuilderPage() {
                 onChange={(event) => handleMappingField('hintLadderText', event.target.value)}
                 placeholder={'wait\ncontext_hint\nchoice_prompt\nmodel_and_retry'}
               />
+            </div>
+
+            <div className="space-y-4 rounded-2xl border-2 border-border bg-secondary/40 p-4">
+              <div>
+                <h3 className="text-base font-semibold text-foreground">Output pressure</h3>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Control how hard the tutor pushes students past short or one-word answers.
+                </p>
+              </div>
+              <Input
+                label="Minimum student turn words"
+                type="number"
+                min={1}
+                value={mappingForm.minStudentTurnWords}
+                onChange={(event) => handleMappingField('minStudentTurnWords', event.target.value)}
+              />
+              <div className="space-y-2">
+                <label htmlFor="mapping-follow-up-pressure" className="text-sm font-semibold text-foreground">
+                  Follow-up pressure
+                </label>
+                <select
+                  id="mapping-follow-up-pressure"
+                  value={mappingForm.followUpPressure}
+                  onChange={(event) =>
+                    handleMappingField(
+                      'followUpPressure',
+                      event.target.value as MappingFormState['followUpPressure']
+                    )
+                  }
+                  className="h-11 w-full rounded-xl border-2 border-border bg-card px-4 text-sm text-foreground focus:border-primary focus:outline-none"
+                >
+                  {FOLLOW_UP_PRESSURE_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <label className="flex items-center gap-3 text-sm font-medium text-foreground">
+                <input
+                  type="checkbox"
+                  checked={mappingForm.allowClarificationRequests}
+                  onChange={(event) => handleMappingField('allowClarificationRequests', event.target.checked)}
+                />
+                Allow clarification requests
+              </label>
             </div>
 
             <div className="space-y-4 rounded-2xl border-2 border-border bg-secondary/40 p-4">
@@ -970,12 +1048,20 @@ export function TeacherAssignmentBuilderPage() {
                       <Badge variant="outline" size="sm">{mapping.id}</Badge>
                       <Badge variant="secondary" size="sm">{mapping.moduleId}</Badge>
                       <Badge variant="accent" size="sm">{mapping.feedbackPolicy.mode}</Badge>
+                      {mapping.outputPolicy ? (
+                        <Badge variant="secondary" size="sm">
+                          {mapping.outputPolicy.followUpPressure} output
+                        </Badge>
+                      ) : null}
                     </div>
                     <p className="mt-3 text-sm font-semibold text-foreground">
                       {(mapping.targetExpressions[0] || 'No target expressions yet')}
                     </p>
                     <p className="mt-1 text-sm text-muted-foreground">
                       Situation: {mapping.situationIds.join(', ') || 'n/a'} · Objectives: {mapping.objectiveIds.join(', ') || 'n/a'}
+                    </p>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      Output pressure: {describeOutputPressure(mapping)}
                     </p>
                   </div>
                 ))

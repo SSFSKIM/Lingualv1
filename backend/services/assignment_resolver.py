@@ -3,6 +3,21 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
+from backend.services.compliance import resolve_assignment_launch
+from backend.services.pedagogy import (
+    build_correction_ladder_prompt,
+    build_feedback_mode_prompt,
+    build_output_pressure_prompt,
+    build_scaffold_ladder_prompt,
+    build_task_template_prompt,
+    normalize_feedback_policy,
+    normalize_output_policy,
+    normalize_scaffold_policy,
+    serialize_feedback_policy,
+    serialize_output_policy,
+    serialize_scaffold_policy,
+)
+
 
 SUPPORTED_ASSIGNMENT_STATUSES = {"draft", "published", "archived"}
 SUPPORTED_TASK_TYPES = {"information_gap", "opinion_gap", "decision_making"}
@@ -42,69 +57,12 @@ def _timestamp_to_iso(value: Any) -> str | None:
     return str(value)
 
 
-def default_feedback_policy() -> dict[str, Any]:
-    return {
-        "mode": "balanced",
-        "target_only_strict": False,
-        "recast_default": True,
-        "elicitation_repeat_threshold": 3,
-        "end_review_enabled": True,
-    }
-
-
-def default_scaffold_policy() -> dict[str, Any]:
-    return {
-        "silence_tolerance_ms": 3000,
-        "hint_ladder": ["wait", "context_hint", "choice_prompt", "model_and_retry"],
-        "max_modeling_steps": 1,
-    }
-
-
 def default_modality_policy() -> dict[str, Any]:
     return {
         "mode": "hybrid",
         "voice_minutes_cap": None,
         "text_fallback_enabled": True,
     }
-
-
-def normalize_feedback_policy(policy: Any) -> dict[str, Any]:
-    normalized = default_feedback_policy()
-    if isinstance(policy, dict):
-        mode = _normalize_string(policy.get("mode"))
-        if mode:
-            normalized["mode"] = mode
-        target_only_strict = policy.get("target_only_strict", policy.get("targetOnlyStrict"))
-        recast_default = policy.get("recast_default", policy.get("recastDefault"))
-        elicitation_repeat_threshold = policy.get(
-            "elicitation_repeat_threshold",
-            policy.get("elicitationRepeatThreshold"),
-        )
-        end_review_enabled = policy.get("end_review_enabled", policy.get("endReviewEnabled"))
-        if isinstance(target_only_strict, bool):
-            normalized["target_only_strict"] = target_only_strict
-        if isinstance(recast_default, bool):
-            normalized["recast_default"] = recast_default
-        if isinstance(elicitation_repeat_threshold, int):
-            normalized["elicitation_repeat_threshold"] = max(1, elicitation_repeat_threshold)
-        if isinstance(end_review_enabled, bool):
-            normalized["end_review_enabled"] = end_review_enabled
-    return normalized
-
-
-def normalize_scaffold_policy(policy: Any) -> dict[str, Any]:
-    normalized = default_scaffold_policy()
-    if isinstance(policy, dict):
-        silence_tolerance_ms = policy.get("silence_tolerance_ms", policy.get("silenceToleranceMs"))
-        hint_ladder = _normalize_string_list(policy.get("hint_ladder", policy.get("hintLadder")))
-        max_modeling_steps = policy.get("max_modeling_steps", policy.get("maxModelingSteps"))
-        if isinstance(silence_tolerance_ms, int):
-            normalized["silence_tolerance_ms"] = max(0, silence_tolerance_ms)
-        if hint_ladder:
-            normalized["hint_ladder"] = hint_ladder
-        if isinstance(max_modeling_steps, int):
-            normalized["max_modeling_steps"] = max(0, max_modeling_steps)
-    return normalized
 
 
 def normalize_modality_policy(policy: Any) -> dict[str, Any]:
@@ -125,26 +83,6 @@ def normalize_modality_policy(policy: Any) -> dict[str, Any]:
     return normalized
 
 
-def serialize_feedback_policy(policy: Any) -> dict[str, Any]:
-    normalized = normalize_feedback_policy(policy)
-    return {
-        "mode": normalized["mode"],
-        "targetOnlyStrict": normalized["target_only_strict"],
-        "recastDefault": normalized["recast_default"],
-        "elicitationRepeatThreshold": normalized["elicitation_repeat_threshold"],
-        "endReviewEnabled": normalized["end_review_enabled"],
-    }
-
-
-def serialize_scaffold_policy(policy: Any) -> dict[str, Any]:
-    normalized = normalize_scaffold_policy(policy)
-    return {
-        "silenceToleranceMs": normalized["silence_tolerance_ms"],
-        "hintLadder": normalized["hint_ladder"],
-        "maxModelingSteps": normalized["max_modeling_steps"],
-    }
-
-
 def serialize_modality_policy(policy: Any) -> dict[str, Any]:
     normalized = normalize_modality_policy(policy)
     return {
@@ -157,7 +95,8 @@ def serialize_modality_policy(policy: Any) -> dict[str, Any]:
 def serialize_curriculum_mapping(mapping: dict[str, Any] | None) -> dict[str, Any] | None:
     if not isinstance(mapping, dict):
         return None
-    return {
+    raw_output_policy = mapping.get("output_policy")
+    serialized = {
         "id": mapping.get("id"),
         "orgId": mapping.get("org_id"),
         "classId": mapping.get("class_id"),
@@ -177,6 +116,13 @@ def serialize_curriculum_mapping(mapping: dict[str, Any] | None) -> dict[str, An
         "createdAt": _timestamp_to_iso(mapping.get("created_at")),
         "updatedAt": _timestamp_to_iso(mapping.get("updated_at")),
     }
+    if isinstance(raw_output_policy, dict) and raw_output_policy:
+        serialized["outputPolicy"] = serialize_output_policy(
+            raw_output_policy,
+            task_type="",
+            feedback_mode=normalize_feedback_policy(mapping.get("feedback_policy")).get("mode", "balanced"),
+        )
+    return serialized
 
 
 def serialize_assignment(assignment: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -452,6 +398,12 @@ def resolve_assignment_bootstrap(
         objectives=resolved_objectives,
         rubrics=resolved_rubrics,
     )
+    mapping_dto["outputPolicy"] = serialize_output_policy(
+        mapping.get("output_policy"),
+        task_type=assignment_dto.get("taskType", ""),
+        evidence=pedagogy_context.get("evidence"),
+        feedback_mode=(mapping_dto.get("feedbackPolicy") or {}).get("mode", "balanced"),
+    )
 
     system_prompt_preview = deps.build_curriculum_system_prompt(
         package=package,
@@ -516,9 +468,13 @@ def resolve_assignment_bootstrap(
             "pedagogy": pedagogy_context,
         },
         "launch": {
+            "configuredMode": launch_modality.get("mode", "hybrid"),
             "modality": serialize_modality_policy(launch_modality),
-            "voiceAllowed": True,
-            "textAllowed": True,
+            "voiceAllowed": launch_modality.get("mode") in {"voice_only", "hybrid"},
+            "textAllowed": launch_modality.get("mode") in {"text_only", "hybrid"},
+            "fallbackApplied": False,
+            "blockedReasons": [],
+            "retentionPolicy": None,
             "maxAttempts": assignment_dto.get("maxAttempts"),
             "taskType": assignment_dto.get("taskType"),
         },
@@ -541,7 +497,6 @@ def resolve_assignment_bootstrap(
         "limitations": [
             "Bootstrap currently supports only the bundled sample curriculum package.",
             "Teacher mapping controls are returned in bootstrap data and only partially injected into live prompt assembly.",
-            "Compliance gating is not yet enforced here; voiceAllowed is optimistic until Phase 6 lands.",
         ],
     }
 
@@ -625,7 +580,26 @@ def resolve_assignment_bootstrap_for_user(
         class_record=class_record,
         ui_language=ui_language,
     )
+    launch_policy, _compliance_record = resolve_assignment_launch(
+        deps,
+        org_id=class_record.get("org_id", ""),
+        student_uid=uid,
+        modality_policy=(bootstrap.get("launch") or {}).get("modality"),
+        teacher_preview=teacher_preview,
+    )
+    bootstrap["launch"] = {
+        **(bootstrap.get("launch") or {}),
+        **launch_policy,
+    }
     bootstrap["teacherPreview"] = teacher_preview
+    if bootstrap["launch"].get("fallbackApplied"):
+        bootstrap.setdefault("limitations", []).append(
+            "Voice launch is blocked for this user, so this assignment has been downgraded to assignment-scoped text practice.",
+        )
+    if not bootstrap["launch"].get("voiceAllowed") and not bootstrap["launch"].get("textAllowed"):
+        bootstrap.setdefault("limitations", []).append(
+            "This assignment is currently blocked because neither voice nor text launch is permitted under the active consent and modality policy.",
+        )
     return bootstrap
 
 
@@ -684,7 +658,16 @@ def build_assignment_system_prompt(bootstrap: dict[str, Any]) -> str:
 
     feedback_policy = mapping.get("feedbackPolicy", {})
     scaffold_policy = mapping.get("scaffoldPolicy", {})
+    output_policy = normalize_output_policy(
+        mapping.get("outputPolicy"),
+        task_type=assignment.get("taskType", ""),
+        evidence=pedagogy.get("evidence"),
+        feedback_mode=feedback_policy.get("mode", "balanced"),
+    )
     modality_policy = launch.get("modality", {})
+    task_type = assignment.get("taskType", "")
+    retention_policy = launch.get("retentionPolicy") if isinstance(launch.get("retentionPolicy"), dict) else {}
+    blocked_reasons = launch.get("blockedReasons") if isinstance(launch.get("blockedReasons"), list) else []
 
     overlay = f"""
 ASSIGNMENT ENVELOPE:
@@ -692,13 +675,18 @@ ASSIGNMENT ENVELOPE:
 - Class: {classroom.get('name', '')}
 - Task type: {assignment.get('taskType', '')}
 - Max attempts: {assignment.get('maxAttempts') if assignment.get('maxAttempts') is not None else 'unlimited'}
+- Configured modality mode: {launch.get('configuredMode') or modality_policy.get('mode', 'hybrid')}
 - Voice allowed: {launch.get('voiceAllowed')}
 - Text allowed: {launch.get('textAllowed')}
 - Modality mode: {modality_policy.get('mode', 'hybrid')}
+- Text fallback applied: {launch.get('fallbackApplied', False)}
 - Task model: {pedagogy.get('taskModel') or 'n/a'}
 - Evidence target min turns: {(pedagogy.get('evidence') or {}).get('minTurns') or 'n/a'}
 - Evidence target max turns: {(pedagogy.get('evidence') or {}).get('maxTurns') or 'n/a'}
 - Evidence time limit sec: {(pedagogy.get('evidence') or {}).get('timeLimitSec') or 'n/a'}
+- Retention policy: {retention_policy.get('id', 'n/a')}
+- Raw audio storage allowed: {retention_policy.get('rawAudioStorageAllowed', 'n/a')}
+- Launch blockers: {', '.join(str(reason) for reason in blocked_reasons) or 'none'}
 
 ASSIGNMENT OBJECTIVES:
 {chr(10).join(objective_lines)}
@@ -733,6 +721,9 @@ TEACHER POLICY:
 - Silence tolerance ms: {scaffold_policy.get('silenceToleranceMs', 3000)}
 - Hint ladder: {', '.join(scaffold_policy.get('hintLadder', [])) or 'default ladder'}
 - Max modeling steps: {scaffold_policy.get('maxModelingSteps', 1)}
+- Output min student turn words: {output_policy.get('min_student_turn_words', 8)}
+- Output follow-up pressure: {output_policy.get('follow_up_pressure', 'balanced')}
+- Output clarification requests allowed: {output_policy.get('allow_clarification_requests', True)}
 - Teacher notes: {mapping.get('teacherNotes', '') or 'n/a'}
 
 PRIORITY RULES:
@@ -743,6 +734,29 @@ PRIORITY RULES:
 5. Push for extended output when the learner gives minimal answers.
 """.strip()
 
+    pedagogy_sections = [
+        build_feedback_mode_prompt(feedback_policy),
+        build_correction_ladder_prompt(feedback_policy),
+        build_scaffold_ladder_prompt(scaffold_policy),
+        build_task_template_prompt(
+            task_type=task_type,
+            assignment=assignment,
+            curriculum=curriculum,
+            pedagogy=pedagogy,
+        ),
+        build_output_pressure_prompt(
+            serialize_output_policy(
+                output_policy,
+                task_type=task_type,
+                evidence=pedagogy.get("evidence"),
+                feedback_mode=feedback_policy.get("mode", "balanced"),
+            ),
+            assignment=assignment,
+            pedagogy=pedagogy,
+        ),
+    ]
+    pedagogy_overlay = "\n\n".join(section for section in pedagogy_sections if section.strip())
+
     if not base_prompt:
-        return overlay
-    return f"{base_prompt}\n\n{overlay}"
+        return f"{overlay}\n\n{pedagogy_overlay}".strip()
+    return f"{base_prompt}\n\n{overlay}\n\n{pedagogy_overlay}".strip()

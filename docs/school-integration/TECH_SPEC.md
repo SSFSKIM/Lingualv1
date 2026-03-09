@@ -1,7 +1,7 @@
 # School Integration Technical Spec
 
 Status: Draft v0.1
-Last updated: 2026-03-07
+Last updated: 2026-03-09
 Owner: Engineering
 
 Implementation note:
@@ -419,7 +419,7 @@ Core endpoints:
 Add service modules:
 
 - `backend/services/assignment_resolver.py`
-- `backend/services/prompt_builder.py`
+- `backend/services/pedagogy/`
 - `backend/services/compliance.py`
 - `backend/services/events.py`
 - `backend/services/analytics.py`
@@ -432,8 +432,10 @@ New sequence for school practice:
 4. Backend creates `practice_sessions/{sessionId}`.
 5. Backend returns practice bootstrap plus the allowed realtime session parameters.
 6. Voice routes call compliance service before creating a realtime session.
-7. Client and server emit `learning_events`.
-8. Rollup service updates class and assignment analytics.
+7. If voice is blocked, launch downgrades to assignment-scoped text only when `text_fallback_enabled` is true; otherwise launch fails closed.
+8. Pronunciation routes use the same compliance service before creating voice-capable sessions or storing raw audio.
+9. Client and server emit `learning_events`.
+10. Rollup service updates class and assignment analytics.
 
 ### 5.2 Prompt architecture
 
@@ -462,6 +464,12 @@ The prompt builder should move to layered assembly.
 - scaffold ladder
 - target-output pressure
 - preferred balance of fluency vs accuracy
+
+Implementation note:
+
+- keep `assignment_resolver.py` as the final assignment-aware prompt assembler
+- keep pedagogy-specific policy normalization and prompt sections in `backend/services/pedagogy/`
+- keep the beta pedagogy engine deterministic and policy-driven before introducing any live intervention layer
 
 ### Layer 4: learner personalization
 
@@ -502,9 +510,13 @@ Compliance is a gating system, not a UI checkbox.
 Rules to encode:
 
 - If `voice_allowed` is false, no voice session may be created.
+- If voice is blocked and `text_fallback_enabled` is true, assignment launch may downgrade to assignment-scoped text.
+- If voice is blocked and `text_fallback_enabled` is false, launch must fail closed.
 - If consent is revoked, active voice attempts must fail closed.
+- Pronunciation routes must apply the same voice gating and retention policy checks as assignment practice routes.
 - Retention policy must determine whether raw audio is stored, for how long, and where.
 - Audit trail must record consent changes and sensitive access paths.
+- Teachers and school admins may update consent records inside their authorized organization and class scope during beta.
 
 Recommended beta defaults, pending counsel validation:
 
@@ -554,7 +566,7 @@ Additional controls:
 - org weekly voice budget
 - class weekly voice budget
 - assignment voice minute cap
-- automatic downgrade from voice to text when budget or consent blocks voice
+- automatic downgrade from voice to text when budget or consent blocks voice only if `text_fallback_enabled` is true
 
 ## 6. Frontend design
 

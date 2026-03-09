@@ -83,7 +83,7 @@ describe('LandingPage', () => {
     });
   });
 
-  it('routes unassessed users to /assessment', async () => {
+  it('routes unassessed users to /onboarding', async () => {
     authState.user = { uid: '1', email: 'test@example.com', name: 'Test User' };
     getUserProfileMock.mockResolvedValue({
       profileCompleted: true,
@@ -99,7 +99,7 @@ describe('LandingPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Try Demo' }));
 
     await waitFor(() => {
-      expect(navigateMock).toHaveBeenCalledWith('/assessment');
+      expect(navigateMock).toHaveBeenCalledWith('/onboarding');
     });
   });
 

@@ -157,6 +157,20 @@ class FakeCurriculumAdminDb:
                 'status': 'active',
             }
         }
+        self.student_compliance_records = {
+            'org-1_student-1': {
+                'id': 'org-1_student-1',
+                'org_id': 'org-1',
+                'student_uid': 'student-1',
+                'is_minor': True,
+                'guardian_consent_status': 'granted',
+                'voice_consent_status': 'granted',
+                'text_allowed': True,
+                'voice_allowed': True,
+                'retention_policy_id': 'standard_school',
+            }
+        }
+        self.consent_events = []
         self.mapping_counter = 0
         self.assignment_counter = 0
         self.practice_session_counter = 0
@@ -261,6 +275,14 @@ class FakeCurriculumAdminDb:
 
     def get_student_class_enrollment(self, class_id, student_uid):
         return self.enrollments.get(f'{class_id}_{student_uid}')
+
+    def get_student_compliance_record(self, org_id, student_uid):
+        record = self.student_compliance_records.get(f'{org_id}_{student_uid}')
+        return dict(record) if record else None
+
+    def create_consent_event(self, **payload):
+        self.consent_events.append(dict(payload))
+        return f'event-{len(self.consent_events)}'
 
     def create_practice_session(self, payload, session_id=None):
         self.practice_session_counter += 1
@@ -387,12 +409,20 @@ class CurriculumAdminRoutesTestCase(unittest.TestCase):
             'targetExpressions': ['Could I have'],
             'focusGrammar': ['past tense'],
             'allowedContextTags': ['weekend'],
+            'outputPolicy': {
+                'minStudentTurnWords': 12,
+                'followUpPressure': 'high',
+                'allowClarificationRequests': False,
+            },
             'teacherNotes': 'Keep the conversation focused on past narrative.',
         })
         self.assertEqual(mapping_response.status_code, 201)
         mapping_payload = mapping_response.get_json()['mapping']
         self.assertEqual(mapping_payload['moduleId'], 'M1')
         self.assertEqual(mapping_payload['situationIds'], ['S1'])
+        self.assertEqual(mapping_payload['outputPolicy']['minStudentTurnWords'], 12)
+        self.assertEqual(mapping_payload['outputPolicy']['followUpPressure'], 'high')
+        self.assertFalse(mapping_payload['outputPolicy']['allowClarificationRequests'])
 
         assignment_response = self.client.post('/api/teacher/classes/class-1/assignments', json={
             'mappingId': mapping_payload['id'],
@@ -439,7 +469,51 @@ class CurriculumAdminRoutesTestCase(unittest.TestCase):
         self.assertEqual(bootstrap['mapping']['id'], mapping_id)
         self.assertEqual(bootstrap['realtimeSessionParams']['practice']['assignmentId'], assignment_id)
         self.assertEqual(bootstrap['realtimeSessionParams']['practice']['moduleId'], 'M1')
+        self.assertEqual(bootstrap['mapping']['outputPolicy']['minStudentTurnWords'], 9)
+        self.assertEqual(bootstrap['mapping']['outputPolicy']['followUpPressure'], 'high')
+        self.assertTrue(bootstrap['mapping']['outputPolicy']['allowClarificationRequests'])
         self.assertIn('sample curriculum package', ' '.join(bootstrap['limitations']).lower())
+
+    def test_student_assignment_bootstrap_downgrades_to_text_when_voice_is_blocked_and_fallback_is_enabled(self):
+        self._set_session_user('teacher-1', 'mem-teacher')
+        mapping_response = self.client.post('/api/teacher/classes/class-1/curriculum/mappings', json={
+            'packageId': 'sample-ap-french',
+            'moduleId': 'M1',
+            'objectiveIds': ['OBJ1'],
+            'situationIds': ['S1'],
+            'modalityPolicy': {
+                'mode': 'hybrid',
+                'textFallbackEnabled': True,
+            },
+        })
+        mapping_id = mapping_response.get_json()['mapping']['id']
+
+        assignment_response = self.client.post('/api/teacher/classes/class-1/assignments', json={
+            'mappingId': mapping_id,
+            'title': 'Voice practice with fallback',
+            'status': 'published',
+            'taskType': 'information_gap',
+        })
+        assignment_id = assignment_response.get_json()['assignment']['id']
+
+        self.fake_db.student_compliance_records['org-1_student-1'].update({
+            'guardian_consent_status': 'revoked',
+            'voice_consent_status': 'revoked',
+            'voice_allowed': False,
+        })
+
+        self._set_session_user('student-1', 'mem-student')
+        bootstrap_response = self.client.post(f'/api/student/assignments/{assignment_id}/bootstrap', json={
+            'uiLanguage': 'en',
+        })
+
+        self.assertEqual(bootstrap_response.status_code, 200)
+        bootstrap = bootstrap_response.get_json()['bootstrap']
+        self.assertEqual(bootstrap['launch']['configuredMode'], 'hybrid')
+        self.assertEqual(bootstrap['launch']['modality']['mode'], 'text_only')
+        self.assertFalse(bootstrap['launch']['voiceAllowed'])
+        self.assertTrue(bootstrap['launch']['textAllowed'])
+        self.assertTrue(bootstrap['launch']['fallbackApplied'])
 
     def test_practice_session_events_roll_up_into_assignment_analytics(self):
         self._set_session_user('teacher-1', 'mem-teacher')

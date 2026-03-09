@@ -1,7 +1,7 @@
 # School Integration Limitations
 
 Status: Active
-Last updated: 2026-03-08
+Last updated: 2026-03-09
 Owner: Engineering
 
 ## Purpose
@@ -42,13 +42,13 @@ Planned follow-up: dashboard date range filters, cross-class trends, richer visu
 Impact: the runtime now uses the canonical AP French sample JSON as its bundled package source, but teachers still cannot create mappings against organization-owned or imported packages.
 Planned follow-up: package ownership rules and school-aware package lookup.
 
-5. Assignment launch currently supports assignment-aware realtime voice/hybrid sessions, but not assignment-scoped text launch.
-Impact: students can start assignment-aware realtime practice, but `text_only` assignments do not yet have a dedicated assignment launch flow.
-Planned follow-up: Phase 4 text fallback and assignment-aware text chat entry.
+5. Assignment launch now supports assignment-scoped text fallback, but the text experience still lives in the assignment launch page instead of the shared chat shell.
+Impact: `text_only` or downgraded launches now work and remain assignment-aware, but text transcripts and follow-up review still do not reuse the main chat workspace UX or a richer text-specific teacher review surface.
+Planned follow-up: unify assignment text practice with the shared chat shell and extend text-mode review affordances.
 
-6. Live prompt generation now injects the core assignment envelope, but some teacher controls are still not enforced as hard runtime constraints.
-Impact: `targetExpressions`, `focusGrammar`, `feedbackPolicy`, `scaffoldPolicy`, teacher notes, rubric/task/evidence metadata, and curriculum pedagogy tags now shape the prompt, but `allowedContextTags` and `rubricFocus` still are not enforced as hard runtime constraints.
-Planned follow-up: stricter prompt-policy enforcement plus event-backed rubric measurement.
+6. Live prompt generation now uses a modular pedagogy package, but it is still a pre-session prompt layer rather than a live intervention engine.
+Impact: `targetExpressions`, `focusGrammar`, `feedbackPolicy`, `scaffoldPolicy`, teacher-configurable `outputPolicy`, teacher notes, rubric/task/evidence metadata, and curriculum pedagogy tags now shape the prompt through `backend/services/pedagogy/`. However, `allowedContextTags` and `rubricFocus` still are not enforced as hard runtime constraints, and no mid-session server-side pedagogy orchestrator updates the realtime session once it starts.
+Planned follow-up: stricter prompt-policy enforcement and a later event-driven intervention layer if beta evidence shows it is needed.
 
 7. Practice analytics are improved, but still not equivalent to human scoring.
 Impact: assignment launch now creates `practice_sessions`, emits lifecycle and turn-level `learning_events`, and rolls them into per-session summaries plus a teacher-facing assignment analytics page. The runtime now also tracks repeated-error patterns, feedback-linked correction families, actual context-tag signals, rubric-dimension evidence, rubric thresholds/confidence, and locale-aware communicative-function / discourse-move / feedback detection for English and French. However, these detections and rubric scores are still rule-based heuristics rather than model-verified semantics or certified assessment scoring.
@@ -60,9 +60,9 @@ Planned follow-up: realtime usage metering, model-cost accounting, and budget en
 
 ### Compliance and policy
 
-9. Compliance gating is not yet enforced in assignment bootstrap or realtime session creation.
-Impact: launch data currently assumes voice is allowed unless future policy layers block it.
-Planned follow-up: student compliance records, consent checks, retention enforcement, and voice gating.
+9. Compliance gating is now enforced for assignment launch, realtime session creation, and pronunciation voice flows, but the operational tooling is still beta-minimal.
+Impact: voice now fails closed without consent, `textFallbackEnabled` controls assignment downgrade behavior, pronunciation raw-audio retention is policy-aware, and teachers/admins can edit consent state from student drill-down. However, there is still no guardian-facing workflow, bulk consent management, deletion execution tooling, or audit export surface.
+Planned follow-up: guardian/parent workflow, bulk operations, deletion tooling, and audit export.
 
 10. Firestore rules are now school-aware for the current collections, but they have not yet been validated in a Firebase emulator or deployment rehearsal for all school flows.
 Impact: rule logic is materially improved, but still needs environment-level validation before pilot hardening.

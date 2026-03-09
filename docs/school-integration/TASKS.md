@@ -1,7 +1,7 @@
 # School Integration Tasks
 
 Status: Active
-Last updated: 2026-03-08
+Last updated: 2026-03-09
 Owner: Engineering + Product
 
 ## Status legend
@@ -102,20 +102,20 @@ Owner: Engineering + Product
 
 ### Pedagogy engine
 
-- [ ] Encode default recast -> elicitation -> review ladder.
-- [ ] Add teacher-configurable feedback modes.
-- [ ] Add scaffold ladder settings.
-- [ ] Support task templates:
+- [x] Encode default recast -> elicitation -> review ladder.
+- [x] Add teacher-configurable feedback modes.
+- [x] Add scaffold ladder settings.
+- [x] Support task templates:
   - information gap
   - opinion gap
   - decision-making
-- [ ] Add extended-output pressure settings.
+- [x] Add extended-output pressure settings.
 
 ### Modality and cost controls
 
 - [ ] Add org / class / assignment modality policies.
 - [-] Track voice minutes and estimated cost per session.
-- [ ] Add text fallback when voice is blocked by policy, consent, or budget.
+- [x] Add assignment-scoped text fallback when voice is blocked by policy, consent, or budget and `textFallbackEnabled` is true.
 
 ## Phase 5: Learning events and analytics
 
@@ -153,16 +153,18 @@ Owner: Engineering + Product
 
 ### Compliance model
 
-- [ ] Add `student_compliance_records` model.
-- [ ] Add `consent_events` audit trail.
-- [ ] Define retention policy objects and defaults.
+- [x] Add `student_compliance_records` model.
+- [x] Add `consent_events` audit trail.
+- [x] Define retention policy objects and defaults.
 - [ ] Define deletion request and deletion execution flow.
+- [x] Add teacher and school-admin consent review/update workflow within authorized school scope.
 
 ### Enforcement
 
-- [ ] Block voice session creation when `voice_allowed` is false.
-- [ ] Block pronunciation audio storage when policy forbids it.
-- [ ] Log sensitive access and disclosure events required by policy.
+- [x] Block voice session creation when `voice_allowed` is false.
+- [x] Apply the same compliance gate to pronunciation voice flows as assignment practice.
+- [x] Block pronunciation audio storage when policy forbids it.
+- [-] Log sensitive access and disclosure events required by policy.
 - [ ] Add admin tools for consent review and audit export.
 
 ### Policy review
@@ -203,6 +205,6 @@ Owner: Engineering + Product
 - [x] Teacher can create an assignment from curriculum mappings.
 - [x] Student can launch assignment-aware practice.
 - [x] Teacher can see class and student analytics tied to that assignment.
-- [ ] Voice access respects consent and retention policy.
+- [x] Voice access respects consent and retention policy.
 - [x] Teacher routes are role-protected.
 - [x] Firestore rules are no longer placeholder-only.

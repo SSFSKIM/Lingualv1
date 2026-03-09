@@ -133,6 +133,26 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    match /student_compliance_records/{recordId} {
+      allow read: if isUserOwner(resource.data.student_uid)
+        || (
+          resource.data.org_id is string
+          && activeMembershipInOrg(resource.data.org_id)
+          && (
+            hasActiveRole('teacher')
+            || hasActiveRole('school_admin')
+          )
+        );
+      allow write: if false;
+    }
+
+    match /consent_events/{eventId} {
+      allow read: if resource.data.org_id is string
+        && activeMembershipInOrg(resource.data.org_id)
+        && hasActiveRole('school_admin');
+      allow write: if false;
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }

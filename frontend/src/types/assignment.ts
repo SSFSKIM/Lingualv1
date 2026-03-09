@@ -1,4 +1,5 @@
 import type { CurriculumMode, I18nText } from './curriculum';
+import type { RetentionPolicySummary } from './school';
 
 export type FeedbackMode = 'fluency_first' | 'balanced' | 'accuracy_first' | string;
 export type ModalityMode = 'text_only' | 'voice_only' | 'hybrid';
@@ -17,6 +18,12 @@ export interface ScaffoldPolicy {
   silenceToleranceMs: number;
   hintLadder: string[];
   maxModelingSteps: number;
+}
+
+export interface OutputPolicy {
+  minStudentTurnWords: number;
+  followUpPressure: 'light' | 'balanced' | 'high' | string;
+  allowClarificationRequests: boolean;
 }
 
 export interface ModalityPolicy {
@@ -38,6 +45,7 @@ export interface CurriculumMappingDto {
   allowedContextTags: string[];
   feedbackPolicy: FeedbackPolicy;
   scaffoldPolicy: ScaffoldPolicy;
+  outputPolicy?: OutputPolicy;
   modalityPolicy: ModalityPolicy;
   rubricFocus: string[];
   teacherNotes: string;
@@ -178,8 +186,12 @@ export interface AssignmentBootstrapData {
   };
   launch: {
     modality: ModalityPolicy;
+    configuredMode?: ModalityMode | string;
     voiceAllowed: boolean;
     textAllowed: boolean;
+    fallbackApplied?: boolean;
+    blockedReasons?: string[];
+    retentionPolicy?: RetentionPolicySummary | null;
     maxAttempts?: number | null;
     taskType: AssignmentTaskType | string;
   };
@@ -379,6 +391,7 @@ export interface CreateCurriculumMappingPayload {
   allowedContextTags?: string[];
   feedbackPolicy?: Partial<FeedbackPolicy>;
   scaffoldPolicy?: Partial<ScaffoldPolicy>;
+  outputPolicy?: Partial<OutputPolicy>;
   modalityPolicy?: Partial<ModalityPolicy>;
   rubricFocus?: string[];
   teacherNotes?: string;

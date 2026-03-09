@@ -195,6 +195,9 @@ export interface PronunciationSession {
   locale: LearningLocale;
   createdAt: string;
   updatedAt: string;
+  voiceAllowed?: boolean;
+  rawAudioStorageAllowed?: boolean;
+  retentionPolicyId?: string;
 }
 
 // Minigame Types
@@ -244,15 +247,19 @@ export type LearningLocale = 'ko-KR' | 'es-ES' | 'fr-FR';
 
 // Curriculum Types
 export type {
+  ConsentStatus,
   CreateSchoolPayload,
   CreateTeacherClassPayload,
   MembershipSummary,
+  RetentionPolicySummary,
   SchoolContextSummary,
   OrganizationType,
   SetupChecklistItem,
+  StudentComplianceRecord,
   TeacherClassSummary,
   TeacherDashboardData,
   TeacherDashboardSummary,
+  UpdateStudentCompliancePayload,
   MembershipStatus,
   SchoolRole,
 } from './school';
@@ -273,6 +280,7 @@ export type {
   FeedbackPolicy,
   ModalityMode,
   ModalityPolicy,
+  OutputPolicy,
   PracticeSessionCostSummary,
   PracticeSessionDto,
   PracticeSessionEventPayload,

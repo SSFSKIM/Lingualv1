@@ -214,6 +214,20 @@ class FakeRealtimeRouteDb:
                 'status': 'active',
             }
         }
+        self.student_compliance_records = {
+            'org-1_student-1': {
+                'id': 'org-1_student-1',
+                'org_id': 'org-1',
+                'student_uid': 'student-1',
+                'is_minor': True,
+                'guardian_consent_status': 'granted',
+                'voice_consent_status': 'granted',
+                'text_allowed': True,
+                'voice_allowed': True,
+                'retention_policy_id': 'standard_school',
+            }
+        }
+        self.consent_events = []
 
     def resolve_user_school_context(self, uid, preferred_active_membership_id=None):
         memberships = []
@@ -259,6 +273,14 @@ class FakeRealtimeRouteDb:
 
     def get_student_class_enrollment(self, class_id, student_uid):
         return self.enrollments.get(f'{class_id}_{student_uid}')
+
+    def get_student_compliance_record(self, org_id, student_uid):
+        record = self.student_compliance_records.get(f'{org_id}_{student_uid}')
+        return dict(record) if record else None
+
+    def create_consent_event(self, **payload):
+        self.consent_events.append(dict(payload))
+        return f'event-{len(self.consent_events)}'
 
 
 class FakeRealtimeSessionResponse:
@@ -432,6 +454,32 @@ class RealtimeChatRoutesTestCase(unittest.TestCase):
         self.assertIn('RUBRICS IN PLAY', instructions)
         self.assertIn('Feedback mode: accuracy_first', instructions)
         self.assertIn('Teacher notes: Keep the student in the restaurant ordering lane.', instructions)
+
+    def test_realtime_session_blocks_voice_when_consent_is_missing(self):
+        self.fake_db.student_compliance_records['org-1_student-1'].update({
+            'guardian_consent_status': 'revoked',
+            'voice_consent_status': 'revoked',
+            'voice_allowed': False,
+        })
+
+        with patch.dict('os.environ', {'OPENAI_API_KEY': 'test-openai-key'}, clear=False):
+            with patch('backend.routes.chat.requests.post') as mocked_post:
+                response = self.client.post('/api/realtime/session', json={
+                    'uiLanguage': 'en',
+                    'practice': {
+                        'type': 'curriculum_module',
+                        'assignmentId': 'assignment-1',
+                        'moduleId': 'M1',
+                        'situationId': 'S1',
+                    },
+                })
+
+        self.assertEqual(response.status_code, 403)
+        payload = response.get_json()
+        self.assertFalse(payload['success'])
+        self.assertIn('blockedReasons', payload)
+        mocked_post.assert_not_called()
+        self.assertEqual(self.fake_db.consent_events[-1]['event_type'], 'voice.blocked.realtime_session')
 
     def test_realtime_session_allows_avatar_directive_opt_in_in_development(self):
         with patch.dict(

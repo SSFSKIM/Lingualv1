@@ -1,6 +1,7 @@
 export type OrganizationType = 'school' | 'district' | 'program';
 export type SchoolRole = 'school_admin' | 'teacher' | 'student';
 export type MembershipStatus = 'active' | 'invited' | 'inactive';
+export type ConsentStatus = 'unknown' | 'granted' | 'revoked' | 'not_required';
 
 export interface MembershipSummary {
   id: string;
@@ -61,6 +62,41 @@ export interface TeacherDashboardData {
   classes: TeacherClassSummary[];
   setupChecklist: SetupChecklistItem[];
   alerts: string[];
+}
+
+export interface RetentionPolicySummary {
+  id: string;
+  label: string;
+  rawAudioStorageAllowed: boolean;
+  rawAudioRetentionDays?: number | null;
+  transcriptRetentionDays?: number | null;
+  analyticsRetentionDays?: number | null;
+}
+
+export interface StudentComplianceRecord {
+  id: string;
+  orgId: string;
+  studentUid: string;
+  isMinor: boolean;
+  guardianConsentStatus: ConsentStatus | string;
+  voiceConsentStatus: ConsentStatus | string;
+  textAllowed: boolean;
+  voiceAllowed: boolean;
+  retentionPolicyId: string;
+  retentionPolicy: RetentionPolicySummary;
+  schoolAgreementVersion?: string;
+  lastVerifiedAt?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+}
+
+export interface UpdateStudentCompliancePayload {
+  isMinor?: boolean;
+  guardianConsentStatus?: ConsentStatus | string;
+  voiceConsentStatus?: ConsentStatus | string;
+  textAllowed?: boolean;
+  retentionPolicyId?: string;
+  schoolAgreementVersion?: string;
 }
 
 export interface CreateSchoolPayload {

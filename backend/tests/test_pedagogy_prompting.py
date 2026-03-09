@@ -1,0 +1,185 @@
+import unittest
+
+from backend.services.assignment_resolver import build_assignment_system_prompt
+from backend.services.pedagogy import (
+    build_correction_ladder_prompt,
+    build_feedback_mode_prompt,
+    build_output_pressure_prompt,
+    build_scaffold_ladder_prompt,
+    build_task_template_prompt,
+    normalize_output_policy,
+    serialize_output_policy,
+)
+
+
+class PedagogyPoliciesTestCase(unittest.TestCase):
+    def test_normalize_output_policy_derives_defaults_from_task_type_and_feedback_mode(self):
+        normalized = normalize_output_policy(
+            None,
+            task_type='opinion_gap',
+            evidence={'minTurns': 5},
+            feedback_mode='balanced',
+        )
+
+        self.assertEqual(normalized['min_student_turn_words'], 10)
+        self.assertEqual(normalized['follow_up_pressure'], 'high')
+        self.assertTrue(normalized['allow_clarification_requests'])
+
+    def test_normalize_output_policy_allows_explicit_overrides(self):
+        normalized = normalize_output_policy(
+            {
+                'minStudentTurnWords': 12,
+                'followUpPressure': 'light',
+                'allowClarificationRequests': False,
+            },
+            task_type='decision_making',
+            feedback_mode='accuracy_first',
+        )
+
+        self.assertEqual(normalized['min_student_turn_words'], 12)
+        self.assertEqual(normalized['follow_up_pressure'], 'light')
+        self.assertFalse(normalized['allow_clarification_requests'])
+
+
+class PedagogyPromptSectionsTestCase(unittest.TestCase):
+    def test_feedback_and_correction_sections_reflect_teacher_policy(self):
+        feedback_policy = {
+            'mode': 'accuracy_first',
+            'targetOnlyStrict': True,
+            'recastDefault': True,
+            'elicitationRepeatThreshold': 2,
+            'endReviewEnabled': True,
+        }
+
+        feedback_prompt = build_feedback_mode_prompt(feedback_policy)
+        correction_prompt = build_correction_ladder_prompt(feedback_policy)
+
+        self.assertIn('FEEDBACK MODE DIRECTIVE', feedback_prompt)
+        self.assertIn('accurate production of the mapped targets', feedback_prompt)
+        self.assertIn('CORRECTION LADDER', correction_prompt)
+        self.assertIn('repeats 2 time(s)', correction_prompt)
+        self.assertIn('1-3 recurring issues', correction_prompt)
+
+    def test_scaffold_task_template_and_output_pressure_sections_render_expected_guidance(self):
+        scaffold_prompt = build_scaffold_ladder_prompt(
+            {
+                'silenceToleranceMs': 3500,
+                'hintLadder': ['wait', 'context_hint', 'choice_prompt', 'model_and_retry'],
+                'maxModelingSteps': 1,
+            }
+        )
+        task_prompt = build_task_template_prompt(
+            task_type='decision_making',
+            assignment={
+                'description': 'Choose the best plan for the weekend.',
+            },
+            curriculum={
+                'situation': {
+                    'seed': {
+                        'setting': 'Weekend planning',
+                        'roles': ['student', 'friend'],
+                    }
+                }
+            },
+            pedagogy={'evidence': {'minTurns': 4}},
+        )
+        output_prompt = build_output_pressure_prompt(
+            serialize_output_policy(
+                None,
+                task_type='decision_making',
+                evidence={'minTurns': 4},
+                feedback_mode='balanced',
+            ),
+            assignment={'successCriteria': ['Compare two options']},
+            pedagogy={'evidence': {'minTurns': 4}},
+        )
+
+        self.assertIn('SCAFFOLD LADDER', scaffold_prompt)
+        self.assertIn('Step 3 (choice_prompt)', scaffold_prompt)
+        self.assertIn('TASK TEMPLATE DIRECTIVE', task_prompt)
+        self.assertIn('negotiation toward one clear decision', task_prompt)
+        self.assertIn('Resolved scenario context: setting=Weekend planning, roles=student, friend.', task_prompt)
+        self.assertIn('OUTPUT PRESSURE', output_prompt)
+        self.assertIn('roughly 9+ words', output_prompt)
+        self.assertIn('target turn volume of about 4 turns', output_prompt)
+
+
+class AssignmentPromptAssemblyTestCase(unittest.TestCase):
+    def test_build_assignment_system_prompt_assembles_modular_pedagogy_sections(self):
+        bootstrap = {
+            'systemPromptPreview': 'Base assignment prompt',
+            'assignment': {
+                'title': 'Restaurant Ordering Practice',
+                'taskType': 'information_gap',
+                'maxAttempts': 3,
+                'successCriteria': ['Use one polite request', 'Ask one follow-up question'],
+                'description': 'Order a meal and ask about one menu item.',
+            },
+            'mapping': {
+                'targetExpressions': ['Could I have', 'I would like'],
+                'focusGrammar': ['polite requests'],
+                'teacherNotes': 'Keep the learner in the restaurant ordering lane.',
+                'feedbackPolicy': {
+                    'mode': 'accuracy_first',
+                    'targetOnlyStrict': True,
+                    'recastDefault': True,
+                    'elicitationRepeatThreshold': 2,
+                    'endReviewEnabled': True,
+                },
+                'scaffoldPolicy': {
+                    'silenceToleranceMs': 3200,
+                    'hintLadder': ['wait', 'context_hint', 'choice_prompt'],
+                    'maxModelingSteps': 1,
+                },
+            },
+            'class': {
+                'name': 'French 2 - Period 3',
+            },
+            'curriculum': {
+                'objectives': [
+                    {'id': 'OBJ1', 'canDo': {'en': 'I can order food politely in a restaurant.'}},
+                ],
+                'rubrics': [
+                    {'id': 'rub.speaking.v1', 'title': {'en': 'Speaking Rubric'}},
+                ],
+                'situation': {
+                    'seed': {
+                        'setting': 'Restaurant',
+                        'roles': ['learner', 'server'],
+                    }
+                },
+                'pedagogy': {
+                    'taskModel': 'ap.conversation',
+                    'communicativeFunctions': ['ask_follow_up'],
+                    'discourseMoves': ['turn_taking'],
+                    'foundationDomains': ['communication_strategies'],
+                    'evidence': {
+                        'minTurns': 4,
+                        'maxTurns': 8,
+                        'timeLimitSec': 90,
+                    },
+                },
+            },
+            'launch': {
+                'voiceAllowed': True,
+                'textAllowed': True,
+                'modality': {'mode': 'hybrid'},
+            },
+        }
+
+        prompt = build_assignment_system_prompt(bootstrap)
+
+        self.assertIn('Base assignment prompt', prompt)
+        self.assertIn('ASSIGNMENT ENVELOPE', prompt)
+        self.assertIn('FEEDBACK MODE DIRECTIVE', prompt)
+        self.assertIn('CORRECTION LADDER', prompt)
+        self.assertIn('SCAFFOLD LADDER', prompt)
+        self.assertIn('TASK TEMPLATE DIRECTIVE', prompt)
+        self.assertIn('OUTPUT PRESSURE', prompt)
+        self.assertIn('Output min student turn words: 8', prompt)
+        self.assertIn('repeats 2 time(s)', prompt)
+        self.assertIn('setting=Restaurant, roles=learner, server.', prompt)
+
+
+if __name__ == '__main__':
+    unittest.main()

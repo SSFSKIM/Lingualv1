@@ -12,9 +12,21 @@ import {
   Target,
   Users,
 } from 'lucide-react';
-import { getStudentDrillDown } from '@/api/teacher';
+import { getStudentCompliance, getStudentDrillDown, updateStudentCompliance } from '@/api/teacher';
 import { Alert, AlertDescription, Badge, Button, Card } from '@/components/ui';
-import type { StudentDrillDownData } from '@/types';
+import type { ConsentStatus, StudentComplianceRecord, StudentDrillDownData } from '@/types';
+
+const CONSENT_OPTIONS: Array<{ value: ConsentStatus; label: string }> = [
+  { value: 'unknown', label: 'Unknown' },
+  { value: 'granted', label: 'Granted' },
+  { value: 'revoked', label: 'Revoked' },
+  { value: 'not_required', label: 'Not required' },
+];
+
+const RETENTION_OPTIONS = [
+  { value: 'standard_school', label: 'Standard school retention' },
+  { value: 'no_raw_audio', label: 'No raw audio retention' },
+];
 
 export function TeacherStudentDrillDownPage() {
   const { classId, studentUid } = useParams<{ classId: string; studentUid: string }>();
@@ -22,6 +34,16 @@ export function TeacherStudentDrillDownPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [analytics, setAnalytics] = useState<StudentDrillDownData | null>(null);
+  const [compliance, setCompliance] = useState<StudentComplianceRecord | null>(null);
+  const [complianceError, setComplianceError] = useState<string | null>(null);
+  const [isSavingCompliance, setIsSavingCompliance] = useState(false);
+  const [complianceDraft, setComplianceDraft] = useState({
+    isMinor: true,
+    guardianConsentStatus: 'unknown' as ConsentStatus,
+    voiceConsentStatus: 'unknown' as ConsentStatus,
+    textAllowed: true,
+    retentionPolicyId: 'standard_school',
+  });
 
   useEffect(() => {
     let isActive = true;
@@ -35,9 +57,21 @@ export function TeacherStudentDrillDownPage() {
     const load = async () => {
       setLoading(true);
       try {
-        const data = await getStudentDrillDown(classId, studentUid);
+        const [data, complianceRecord] = await Promise.all([
+          getStudentDrillDown(classId, studentUid),
+          getStudentCompliance(classId, studentUid),
+        ]);
         if (!isActive) return;
         setAnalytics(data);
+        setCompliance(complianceRecord);
+        setComplianceDraft({
+          isMinor: complianceRecord.isMinor,
+          guardianConsentStatus: complianceRecord.guardianConsentStatus as ConsentStatus,
+          voiceConsentStatus: complianceRecord.voiceConsentStatus as ConsentStatus,
+          textAllowed: complianceRecord.textAllowed,
+          retentionPolicyId: complianceRecord.retentionPolicyId,
+        });
+        setComplianceError(null);
         setError(null);
       } catch (err) {
         if (!isActive) return;
@@ -52,6 +86,27 @@ export function TeacherStudentDrillDownPage() {
       isActive = false;
     };
   }, [classId, studentUid]);
+
+  const handleComplianceSave = async () => {
+    if (!classId || !studentUid) return;
+    setComplianceError(null);
+    setIsSavingCompliance(true);
+    try {
+      const updated = await updateStudentCompliance(classId, studentUid, complianceDraft);
+      setCompliance(updated);
+      setComplianceDraft({
+        isMinor: updated.isMinor,
+        guardianConsentStatus: updated.guardianConsentStatus as ConsentStatus,
+        voiceConsentStatus: updated.voiceConsentStatus as ConsentStatus,
+        textAllowed: updated.textAllowed,
+        retentionPolicyId: updated.retentionPolicyId,
+      });
+    } catch (err) {
+      setComplianceError(err instanceof Error ? err.message : 'Failed to update consent state.');
+    } finally {
+      setIsSavingCompliance(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -206,6 +261,135 @@ export function TeacherStudentDrillDownPage() {
         </div>
 
         <div className="space-y-6">
+          <Card className="border-3 border-foreground p-6 shadow-stamp">
+            <div className="flex items-center gap-3">
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl border-2 border-foreground bg-accent/20 text-accent-foreground">
+                <CheckCircle2 size={22} strokeWidth={2.5} />
+              </div>
+              <div>
+                <h2 className="text-xl font-display font-bold text-foreground">Consent and modality</h2>
+                <p className="text-sm text-muted-foreground">Voice launch eligibility for this student.</p>
+              </div>
+            </div>
+
+            {compliance ? (
+              <div className="mt-6 space-y-4">
+                <div className="flex flex-wrap gap-2">
+                  <Badge variant={compliance.voiceAllowed ? 'success' : 'outline'} size="sm">
+                    Voice {compliance.voiceAllowed ? 'allowed' : 'blocked'}
+                  </Badge>
+                  <Badge variant={compliance.textAllowed ? 'accent' : 'outline'} size="sm">
+                    Text {compliance.textAllowed ? 'allowed' : 'blocked'}
+                  </Badge>
+                  <Badge variant="secondary" size="sm">
+                    {compliance.retentionPolicy.label}
+                  </Badge>
+                </div>
+
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <label className="space-y-2 text-sm font-medium text-foreground">
+                    <span>Student status</span>
+                    <select
+                      value={complianceDraft.isMinor ? 'minor' : 'adult'}
+                      onChange={(event) => setComplianceDraft((current) => ({
+                        ...current,
+                        isMinor: event.target.value === 'minor',
+                        guardianConsentStatus: event.target.value === 'minor'
+                          ? current.guardianConsentStatus
+                          : 'not_required',
+                      }))}
+                      className="w-full rounded-2xl border-2 border-border bg-background px-4 py-3 text-sm text-foreground focus:border-foreground focus:outline-none"
+                    >
+                      <option value="minor">Minor</option>
+                      <option value="adult">Adult</option>
+                    </select>
+                  </label>
+
+                  <label className="space-y-2 text-sm font-medium text-foreground">
+                    <span>Voice consent</span>
+                    <select
+                      value={complianceDraft.voiceConsentStatus}
+                      onChange={(event) => setComplianceDraft((current) => ({
+                        ...current,
+                        voiceConsentStatus: event.target.value as ConsentStatus,
+                      }))}
+                      className="w-full rounded-2xl border-2 border-border bg-background px-4 py-3 text-sm text-foreground focus:border-foreground focus:outline-none"
+                    >
+                      {CONSENT_OPTIONS.filter((option) => option.value !== 'not_required').map((option) => (
+                        <option key={option.value} value={option.value}>{option.label}</option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="space-y-2 text-sm font-medium text-foreground">
+                    <span>Guardian consent</span>
+                    <select
+                      value={complianceDraft.isMinor ? complianceDraft.guardianConsentStatus : 'not_required'}
+                      onChange={(event) => setComplianceDraft((current) => ({
+                        ...current,
+                        guardianConsentStatus: event.target.value as ConsentStatus,
+                      }))}
+                      disabled={!complianceDraft.isMinor}
+                      className="w-full rounded-2xl border-2 border-border bg-background px-4 py-3 text-sm text-foreground focus:border-foreground focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {CONSENT_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>{option.label}</option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="space-y-2 text-sm font-medium text-foreground">
+                    <span>Retention policy</span>
+                    <select
+                      value={complianceDraft.retentionPolicyId}
+                      onChange={(event) => setComplianceDraft((current) => ({
+                        ...current,
+                        retentionPolicyId: event.target.value,
+                      }))}
+                      className="w-full rounded-2xl border-2 border-border bg-background px-4 py-3 text-sm text-foreground focus:border-foreground focus:outline-none"
+                    >
+                      {RETENTION_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>{option.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+
+                <label className="flex items-center gap-3 rounded-2xl border-2 border-border bg-secondary/40 px-4 py-3 text-sm font-medium text-foreground">
+                  <input
+                    type="checkbox"
+                    checked={complianceDraft.textAllowed}
+                    onChange={(event) => setComplianceDraft((current) => ({
+                      ...current,
+                      textAllowed: event.target.checked,
+                    }))}
+                    className="h-4 w-4 rounded border-border"
+                  />
+                  Text launch allowed for this student
+                </label>
+
+                <div className="flex flex-wrap items-center gap-3">
+                  <Button onClick={() => void handleComplianceSave()} loading={isSavingCompliance}>
+                    Save consent state
+                  </Button>
+                  <p className="text-sm text-muted-foreground">
+                    Last verified: {compliance.lastVerifiedAt || 'not recorded'}
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div className="mt-6 rounded-2xl border-2 border-dashed border-border bg-secondary/40 p-5 text-sm text-muted-foreground">
+                Consent state is unavailable for this student.
+              </div>
+            )}
+
+            {complianceError ? (
+              <Alert variant="destructive" className="mt-4">
+                <AlertDescription>{complianceError}</AlertDescription>
+              </Alert>
+            ) : null}
+          </Card>
+
           {/* Repeated errors */}
           <Card className="border-3 border-foreground p-6 shadow-stamp">
             <div className="flex items-center gap-3">

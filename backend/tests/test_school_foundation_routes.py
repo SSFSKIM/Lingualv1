@@ -18,6 +18,8 @@ class FakeSchoolDb:
         self.memberships = {}
         self.classes = {}
         self.enrollments = {}
+        self.student_compliance_records = {}
+        self.consent_events = []
         self.user_active_memberships = {}
         self.updated_profiles = []
         self.org_counter = 0
@@ -129,6 +131,26 @@ class FakeSchoolDb:
             for enrollment in self.enrollments.values()
             if enrollment.get('class_id') == class_id and enrollment.get('status') == 'active'
         ]
+
+    def get_student_class_enrollment(self, class_id, student_uid):
+        enrollment = self.enrollments.get(f'{class_id}_{student_uid}')
+        return dict(enrollment) if enrollment else None
+
+    def get_student_compliance_record(self, org_id, student_uid):
+        record = self.student_compliance_records.get(f'{org_id}_{student_uid}')
+        return dict(record) if record else None
+
+    def upsert_student_compliance_record(self, org_id, student_uid, record):
+        record_id = f'{org_id}_{student_uid}'
+        self.student_compliance_records[record_id] = {
+            'id': record_id,
+            **record,
+        }
+        return record_id
+
+    def create_consent_event(self, **payload):
+        self.consent_events.append(dict(payload))
+        return f'event-{len(self.consent_events)}'
 
     def list_class_assignments(self, class_id):
         return []
@@ -266,6 +288,47 @@ class SchoolFoundationRoutesTestCase(unittest.TestCase):
         dashboard_payload = dashboard_response.get_json()['dashboard']
         self.assertEqual(dashboard_payload['summary']['classCount'], 2)
         self.assertIn('Create school workspace', [item['title'] for item in dashboard_payload['setupChecklist']])
+
+    def test_teacher_can_review_and_update_student_compliance(self):
+        onboarding_response = self.client.post('/api/schools', json={
+            'orgName': 'Lingual Academy',
+            'orgType': 'school',
+            'className': 'Spanish 1 - Period 2',
+            'term': 'Spring 2026',
+            'subject': 'Spanish',
+            'gradeBand': '9-10',
+            'learningLocale': 'es-ES',
+        })
+        created_class = onboarding_response.get_json()['createdClass']
+        class_id = created_class['id']
+        org_id = onboarding_response.get_json()['school']['activeOrganizationId']
+        self.fake_db.enrollments[f'{class_id}_student-1'] = {
+            'id': f'{class_id}_student-1',
+            'class_id': class_id,
+            'student_uid': 'student-1',
+            'status': 'active',
+        }
+
+        get_response = self.client.get(f'/api/teacher/classes/{class_id}/students/student-1/compliance')
+        self.assertEqual(get_response.status_code, 200)
+        self.assertFalse(get_response.get_json()['compliance']['voiceAllowed'])
+
+        update_response = self.client.put(
+            f'/api/teacher/classes/{class_id}/students/student-1/compliance',
+            json={
+                'isMinor': True,
+                'guardianConsentStatus': 'granted',
+                'voiceConsentStatus': 'granted',
+                'textAllowed': True,
+                'retentionPolicyId': 'no_raw_audio',
+            },
+        )
+        self.assertEqual(update_response.status_code, 200)
+        compliance = update_response.get_json()['compliance']
+        self.assertTrue(compliance['voiceAllowed'])
+        self.assertEqual(compliance['retentionPolicyId'], 'no_raw_audio')
+        self.assertEqual(self.fake_db.student_compliance_records[f'{org_id}_student-1']['voice_consent_status'], 'granted')
+        self.assertEqual(self.fake_db.consent_events[-1]['event_type'], 'consent.updated')
 
 
 if __name__ == '__main__':

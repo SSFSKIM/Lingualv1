@@ -60,7 +60,7 @@ export const getSpeechToken = async (): Promise<{ token: string; region: string;
 export const createPronunciationSession = async (
   locale: LearningLocale,
   options?: { promptSetId?: string; objectiveId?: string }
-): Promise<{ sessionId: string }> => {
+): Promise<{ sessionId: string; session?: PronunciationSession }> => {
   const response = await api.post<CreateSessionResponse>('/pronunciation/sessions', {
     locale,
     kind: 'practice',
@@ -68,7 +68,7 @@ export const createPronunciationSession = async (
     objectiveId: options?.objectiveId,
   });
   if (response.data.success && response.data.sessionId) {
-    return { sessionId: response.data.sessionId };
+    return { sessionId: response.data.sessionId, session: response.data.session };
   }
   throw new Error(response.data.error || 'Failed to create session');
 };

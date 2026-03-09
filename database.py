@@ -143,6 +143,30 @@ Schema:
     - created_at: timestamp
     - updated_at: timestamp
 
+- student_compliance_records/{org_id}_{student_uid}
+    - org_id: str
+    - student_uid: str
+    - is_minor: bool
+    - guardian_consent_status: str
+    - voice_consent_status: str
+    - text_allowed: bool
+    - voice_allowed: bool
+    - retention_policy_id: str
+    - school_agreement_version: str
+    - last_verified_at: timestamp | None
+    - created_at: timestamp
+    - updated_at: timestamp
+
+- consent_events/{event_id}
+    - org_id: str
+    - student_uid: str
+    - event_type: str
+    - actor_type: str
+    - actor_id: str
+    - evidence_ref: str
+    - payload: dict
+    - created_at: timestamp
+
 - practice_sessions/{session_id}
     - org_id: str
     - class_id: str
@@ -237,6 +261,16 @@ def get_assignments_collection():
     return get_db().collection('assignments')
 
 
+def get_student_compliance_records_collection():
+    """Get student compliance records collection."""
+    return get_db().collection('student_compliance_records')
+
+
+def get_consent_events_collection():
+    """Get consent events collection."""
+    return get_db().collection('consent_events')
+
+
 def get_practice_sessions_collection():
     """Get practice sessions collection."""
     return get_db().collection('practice_sessions')
@@ -275,6 +309,16 @@ def get_curriculum_mapping_ref(mapping_id):
 def get_assignment_ref(assignment_id):
     """Get assignment document reference."""
     return get_assignments_collection().document(assignment_id)
+
+
+def get_student_compliance_record_ref(org_id, student_uid):
+    """Get student compliance record reference."""
+    return get_student_compliance_records_collection().document(f'{org_id}_{student_uid}')
+
+
+def get_consent_event_ref(event_id):
+    """Get consent event reference."""
+    return get_consent_events_collection().document(event_id)
 
 
 def get_practice_session_ref(session_id):
@@ -771,6 +815,57 @@ def list_class_enrollments(class_id, status='active'):
     return enrollments
 
 
+def get_student_compliance_record(org_id, student_uid):
+    """Get a student's compliance record for an organization."""
+    doc = get_student_compliance_record_ref(org_id, student_uid).get()
+    if not doc.exists:
+        return None
+    data = doc.to_dict() or {}
+    data['id'] = doc.id
+    return data
+
+
+def upsert_student_compliance_record(org_id, student_uid, record):
+    """Create or update a student compliance record."""
+    doc_ref = get_student_compliance_record_ref(org_id, student_uid)
+    existing = doc_ref.get()
+    payload = dict(record or {})
+    payload['org_id'] = org_id
+    payload['student_uid'] = student_uid
+    payload['updated_at'] = firestore.SERVER_TIMESTAMP
+    if not existing.exists:
+        payload.setdefault('created_at', firestore.SERVER_TIMESTAMP)
+    doc_ref.set(payload, merge=True)
+    return doc_ref.id
+
+
+def create_consent_event(
+    *,
+    org_id,
+    student_uid,
+    event_type,
+    actor_type,
+    actor_id,
+    payload=None,
+    evidence_ref='',
+    event_id=None,
+):
+    """Create an auditable consent event."""
+    doc_ref = get_consent_event_ref(event_id) if event_id else get_consent_events_collection().document()
+    event_data = {
+        'org_id': org_id,
+        'student_uid': student_uid,
+        'event_type': event_type,
+        'actor_type': actor_type,
+        'actor_id': actor_id,
+        'evidence_ref': evidence_ref,
+        'payload': payload or {},
+        'created_at': firestore.SERVER_TIMESTAMP,
+    }
+    doc_ref.set(event_data)
+    return doc_ref.id
+
+
 def create_curriculum_mapping(
     org_id,
     class_id,
@@ -783,6 +878,7 @@ def create_curriculum_mapping(
     allowed_context_tags=None,
     feedback_policy=None,
     scaffold_policy=None,
+    output_policy=None,
     modality_policy=None,
     rubric_focus=None,
     teacher_notes='',
@@ -803,6 +899,7 @@ def create_curriculum_mapping(
         'allowed_context_tags': _normalize_string_list(allowed_context_tags or []),
         'feedback_policy': feedback_policy or {},
         'scaffold_policy': scaffold_policy or {},
+        'output_policy': output_policy or {},
         'modality_policy': modality_policy or {},
         'rubric_focus': _normalize_string_list(rubric_focus or []),
         'teacher_notes': teacher_notes or '',

@@ -5,6 +5,32 @@ import requests
 from flask import Blueprint, current_app, jsonify, request
 
 from backend.route_deps import RouteDeps
+from backend.services.compliance import (
+    create_consent_event,
+    get_retention_policy,
+    is_school_voice_context,
+    resolve_student_compliance_record,
+)
+
+
+def _resolve_school_pronunciation_policy(deps: RouteDeps, uid: str):
+    context = deps.get_school_request_context()
+    if not is_school_voice_context(context):
+        return None
+
+    org_id = context.active_organization_id
+    compliance_record = resolve_student_compliance_record(
+        deps,
+        org_id=org_id,
+        student_uid=uid,
+    )
+    retention_policy = get_retention_policy(compliance_record.get('retention_policy_id'))
+    return {
+        'org_id': org_id,
+        'context': context,
+        'compliance_record': compliance_record,
+        'retention_policy': retention_policy,
+    }
 
 
 def create_pronunciation_blueprint(deps: RouteDeps) -> Blueprint:
@@ -14,6 +40,23 @@ def create_pronunciation_blueprint(deps: RouteDeps) -> Blueprint:
     @deps.login_required
     def api_speech_token():
         """Issue a short-lived Azure Speech token for the browser SDK."""
+        uid = deps.get_current_user_uid()
+        school_policy = _resolve_school_pronunciation_policy(deps, uid)
+        if school_policy and not school_policy['compliance_record'].get('voice_allowed'):
+            create_consent_event(
+                deps,
+                org_id=school_policy['org_id'],
+                student_uid=uid,
+                event_type='voice.blocked.pronunciation_token',
+                actor_type='student',
+                actor_id=uid or '',
+                payload={'route': '/api/azure/speech-token'},
+            )
+            return jsonify({
+                'success': False,
+                'error': 'Voice consent has not been granted for this student.',
+            }), 403
+
         speech_key = (os.environ.get('AZURE_SPEECH_KEY') or os.environ.get('SPEECH_KEY') or '').strip()
         speech_region = (os.environ.get('AZURE_SPEECH_REGION') or os.environ.get('SPEECH_REGION') or '').strip()
 
@@ -80,8 +123,35 @@ def create_pronunciation_blueprint(deps: RouteDeps) -> Blueprint:
             return jsonify({'success': False, 'error': 'Invalid locale'}), 400
 
         try:
+            school_policy = _resolve_school_pronunciation_policy(deps, uid)
+            if school_policy and not school_policy['compliance_record'].get('voice_allowed'):
+                create_consent_event(
+                    deps,
+                    org_id=school_policy['org_id'],
+                    student_uid=uid,
+                    event_type='voice.blocked.pronunciation_session',
+                    actor_type='student',
+                    actor_id=uid or '',
+                    payload={'locale': locale, 'kind': kind},
+                )
+                return jsonify({'success': False, 'error': 'Voice consent has not been granted for this student.'}), 403
+
             session_id = deps.db.create_pronunciation_session(uid, locale, kind, prompt_set_id, objective_id)
-            return jsonify({'success': True, 'sessionId': session_id})
+            retention_policy = (
+                school_policy['retention_policy']
+                if school_policy else get_retention_policy('standard_school')
+            )
+            return jsonify({
+                'success': True,
+                'sessionId': session_id,
+                'session': {
+                    'id': session_id,
+                    'locale': locale,
+                    'rawAudioStorageAllowed': bool(retention_policy.get('raw_audio_storage_allowed', True)),
+                    'retentionPolicyId': retention_policy.get('id', 'standard_school'),
+                    'voiceAllowed': True,
+                },
+            })
         except Exception as e:
             return jsonify({'success': False, 'error': str(e)}), 500
 
@@ -113,9 +183,36 @@ def create_pronunciation_blueprint(deps: RouteDeps) -> Blueprint:
             return jsonify({'success': False, 'error': 'Invalid locale'}), 400
 
         try:
+            school_policy = _resolve_school_pronunciation_policy(deps, uid)
+            if school_policy and not school_policy['compliance_record'].get('voice_allowed'):
+                create_consent_event(
+                    deps,
+                    org_id=school_policy['org_id'],
+                    student_uid=uid,
+                    event_type='voice.blocked.pronunciation_attempt',
+                    actor_type='student',
+                    actor_id=uid or '',
+                    payload={'sessionId': session_id, 'promptId': prompt_id},
+                )
+                return jsonify({'success': False, 'error': 'Voice consent has not been granted for this student.'}), 403
+
             session = deps.db.get_pronunciation_session(uid, session_id)
             if not session:
                 return jsonify({'success': False, 'error': 'Session not found'}), 404
+
+            allowed_audio_url = audio_url
+            if school_policy and not school_policy['retention_policy'].get('raw_audio_storage_allowed', True):
+                allowed_audio_url = None
+                if audio_url:
+                    create_consent_event(
+                        deps,
+                        org_id=school_policy['org_id'],
+                        student_uid=uid,
+                        event_type='retention.audio_storage_suppressed',
+                        actor_type='student',
+                        actor_id=uid or '',
+                        payload={'sessionId': session_id, 'promptId': prompt_id},
+                    )
 
             attempt_id = deps.db.add_pronunciation_attempt(uid, session_id, {
                 'prompt_id': prompt_id,
@@ -126,7 +223,7 @@ def create_pronunciation_blueprint(deps: RouteDeps) -> Blueprint:
                 'scores': scores,
                 'words': words,
                 'raw_result': raw_result,
-                'audio_url': audio_url,
+                'audio_url': allowed_audio_url,
             })
             return jsonify({'success': True, 'attemptId': attempt_id})
         except Exception as e:

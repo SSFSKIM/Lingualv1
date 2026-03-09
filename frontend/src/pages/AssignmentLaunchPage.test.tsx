@@ -8,6 +8,7 @@ const createAssignmentPracticeSessionMock = vi.fn();
 const reportPracticeSessionEventMock = vi.fn();
 const createChatSessionMock = vi.fn();
 const saveMessageToChatMock = vi.fn();
+const sendChatMessageMock = vi.fn();
 const connectMock = vi.fn();
 const disconnectMock = vi.fn();
 const clearMessagesMock = vi.fn();
@@ -32,6 +33,7 @@ vi.mock('@/api/assignments', () => ({
 vi.mock('@/api/chat', () => ({
   createChatSession: (...args: unknown[]) => createChatSessionMock(...args),
   saveMessageToChat: (...args: unknown[]) => saveMessageToChatMock(...args),
+  sendChatMessage: (...args: unknown[]) => sendChatMessageMock(...args),
 }));
 
 vi.mock('@/hooks/useRealtimeChat', () => ({
@@ -228,6 +230,7 @@ describe('AssignmentLaunchPage', () => {
     reportPracticeSessionEventMock.mockReset();
     createChatSessionMock.mockReset();
     saveMessageToChatMock.mockReset();
+    sendChatMessageMock.mockReset();
     connectMock.mockReset();
     disconnectMock.mockReset();
     clearMessagesMock.mockReset();
@@ -240,6 +243,12 @@ describe('AssignmentLaunchPage', () => {
       title: 'ASM Restaurant Ordering Practice',
     });
     createAssignmentPracticeSessionMock.mockResolvedValue(PRACTICE_SESSION);
+    sendChatMessageMock.mockResolvedValue({
+      success: true,
+      response: 'Bonjour, je voudrais un the.',
+      userMessage: { role: 'user', content: 'Bonjour', timestamp: new Date().toISOString() },
+      assistantMessage: { role: 'assistant', content: 'Bonjour, je voudrais un the.', timestamp: new Date().toISOString() },
+    });
     reportPracticeSessionEventMock.mockImplementation(async (_sessionId: string, payload: { eventType: string }) => {
       if (payload.eventType === 'student.turn') {
         return {
@@ -324,5 +333,59 @@ describe('AssignmentLaunchPage', () => {
         })
       );
     });
+  });
+
+  it('supports assignment-scoped text launch when voice is downgraded to text fallback', async () => {
+    bootstrapStudentAssignmentMock.mockResolvedValue({
+      ...BOOTSTRAP,
+      launch: {
+        ...BOOTSTRAP.launch,
+        configuredMode: 'hybrid',
+        modality: {
+          ...BOOTSTRAP.launch.modality,
+          mode: 'text_only',
+        },
+        voiceAllowed: false,
+        textAllowed: true,
+        fallbackApplied: true,
+        blockedReasons: ['Voice consent has not been granted for this student.'],
+      },
+    });
+    createAssignmentPracticeSessionMock.mockResolvedValue({
+      ...PRACTICE_SESSION,
+      modality: 'text_only',
+      voiceEnabled: false,
+      textEnabled: true,
+    });
+
+    render(<AssignmentLaunchPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Restaurant Ordering Practice')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Start text practice' }));
+
+    await waitFor(() => {
+      expect(createAssignmentPracticeSessionMock).toHaveBeenCalled();
+    });
+
+    const input = screen.getByPlaceholderText('Type your assignment response...');
+    fireEvent.change(input, { target: { value: 'Bonjour' } });
+    fireEvent.keyDown(input, { key: 'Enter', shiftKey: false, preventDefault: vi.fn() });
+
+    await waitFor(() => {
+      expect(sendChatMessageMock).toHaveBeenCalledWith(
+        'chat-123',
+        'Bonjour',
+        expect.objectContaining({
+          assignmentId: 'assignment-1',
+          practiceSessionId: 'practice-1',
+          uiLanguage: 'en',
+        })
+      );
+    });
+
+    expect(screen.getByText('Bonjour, je voudrais un the.')).toBeInTheDocument();
   });
 });

@@ -14,6 +14,7 @@ from backend.services.assignment_resolver import (
     normalize_feedback_policy,
     normalize_modality_policy,
     normalize_scaffold_policy,
+    normalize_output_policy,
     serialize_assignment,
     serialize_curriculum_mapping,
 )
@@ -215,6 +216,11 @@ def create_curriculum_admin_blueprint(deps: RouteDeps) -> Blueprint:
                 allowed_context_tags=allowed_context_tags,
                 feedback_policy=normalize_feedback_policy(data.get('feedbackPolicy')),
                 scaffold_policy=normalize_scaffold_policy(data.get('scaffoldPolicy')),
+                output_policy=(
+                    normalize_output_policy(data.get('outputPolicy'))
+                    if data.get('outputPolicy') is not None
+                    else {}
+                ),
                 modality_policy=normalize_modality_policy(data.get('modalityPolicy')),
                 rubric_focus=rubric_focus,
                 teacher_notes=teacher_notes,
@@ -362,6 +368,11 @@ def create_curriculum_admin_blueprint(deps: RouteDeps) -> Blueprint:
                 assignment_id=assignment_id,
                 ui_language=ui_language,
             )
+            launch = bootstrap.get('launch', {}) if isinstance(bootstrap, dict) else {}
+            if not launch.get('voiceAllowed') and not launch.get('textAllowed'):
+                blocked_reasons = launch.get('blockedReasons') or []
+                reason = blocked_reasons[0] if blocked_reasons else 'This assignment launch is blocked by policy.'
+                return jsonify({'success': False, 'error': reason, 'blockedReasons': blocked_reasons}), 403
 
             session_payload = build_practice_session_payload(
                 bootstrap,

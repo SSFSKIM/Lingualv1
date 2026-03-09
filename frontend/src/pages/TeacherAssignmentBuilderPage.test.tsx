@@ -174,6 +174,11 @@ describe('TeacherAssignmentBuilderPage', () => {
       hintLadder: string[];
       maxModelingSteps: number;
     };
+    outputPolicy?: {
+      minStudentTurnWords: number;
+      followUpPressure: string;
+      allowClarificationRequests: boolean;
+    };
     modalityPolicy: {
       mode: 'hybrid' | 'voice_only' | 'text_only';
       voiceMinutesCap?: number | null;
@@ -242,6 +247,12 @@ describe('TeacherAssignmentBuilderPage', () => {
           hintLadder: ['wait', 'context_hint', 'choice_prompt', 'model_and_retry'],
           maxModelingSteps: 1,
         },
+        outputPolicy: {
+          minStudentTurnWords: (payload.outputPolicy as { minStudentTurnWords: number } | undefined)?.minStudentTurnWords ?? 8,
+          followUpPressure: (payload.outputPolicy as { followUpPressure: string } | undefined)?.followUpPressure ?? 'balanced',
+          allowClarificationRequests:
+            (payload.outputPolicy as { allowClarificationRequests: boolean } | undefined)?.allowClarificationRequests ?? true,
+        },
         modalityPolicy: {
           mode: 'hybrid' as const,
           voiceMinutesCap: null,
@@ -289,6 +300,13 @@ describe('TeacherAssignmentBuilderPage', () => {
     fireEvent.change(screen.getByLabelText('Target expressions'), {
       target: { value: 'Could I have\nI would like' },
     });
+    fireEvent.change(screen.getByLabelText('Minimum student turn words'), {
+      target: { value: '11' },
+    });
+    fireEvent.change(screen.getByLabelText('Follow-up pressure'), {
+      target: { value: 'high' },
+    });
+    fireEvent.click(screen.getByLabelText('Allow clarification requests'));
     fireEvent.change(screen.getByLabelText('Teacher notes'), {
       target: { value: 'Keep the learner in the restaurant lane.' },
     });
@@ -304,6 +322,11 @@ describe('TeacherAssignmentBuilderPage', () => {
           situationIds: ['S1'],
           objectiveIds: ['OBJ1'],
           targetExpressions: ['Could I have', 'I would like'],
+          outputPolicy: {
+            minStudentTurnWords: 11,
+            followUpPressure: 'high',
+            allowClarificationRequests: false,
+          },
           teacherNotes: 'Keep the learner in the restaurant lane.',
         })
       );
@@ -340,5 +363,7 @@ describe('TeacherAssignmentBuilderPage', () => {
     await waitFor(() => {
       expect(screen.getByText('Restaurant mission')).toBeInTheDocument();
     });
+
+    expect(screen.getByText(/Output pressure: 11\+ words per turn/i)).toBeInTheDocument();
   });
 });

@@ -3,8 +3,10 @@ import type {
   ClassAnalyticsData,
   CreateTeacherClassPayload,
   StudentDrillDownData,
+  StudentComplianceRecord,
   TeacherClassSummary,
   TeacherDashboardData,
+  UpdateStudentCompliancePayload,
 } from '@/types';
 
 interface TeacherDashboardResponse {
@@ -30,6 +32,11 @@ interface ClassAnalyticsResponse {
 interface StudentDrillDownResponse {
   success: boolean;
   analytics: StudentDrillDownData;
+}
+
+interface StudentComplianceResponse {
+  success: boolean;
+  compliance: StudentComplianceRecord;
 }
 
 export const getTeacherDashboard = async (): Promise<TeacherDashboardData> => {
@@ -62,4 +69,26 @@ export const getStudentDrillDown = async (
     `/teacher/classes/${classId}/students/${studentUid}/analytics`,
   );
   return response.data.analytics;
+};
+
+export const getStudentCompliance = async (
+  classId: string,
+  studentUid: string,
+): Promise<StudentComplianceRecord> => {
+  const response = await api.get<StudentComplianceResponse>(
+    `/teacher/classes/${classId}/students/${studentUid}/compliance`,
+  );
+  return response.data.compliance;
+};
+
+export const updateStudentCompliance = async (
+  classId: string,
+  studentUid: string,
+  payload: UpdateStudentCompliancePayload,
+): Promise<StudentComplianceRecord> => {
+  const response = await api.put<StudentComplianceResponse>(
+    `/teacher/classes/${classId}/students/${studentUid}/compliance`,
+    payload,
+  );
+  return response.data.compliance;
 };

@@ -29,6 +29,12 @@ interface SendMessageResponse {
   error?: string;
 }
 
+interface SendMessageOptions {
+  assignmentId?: string;
+  practiceSessionId?: string;
+  uiLanguage?: 'en' | 'ko';
+}
+
 interface SaveMessageResponse {
   success: boolean;
   message: { role: string; content: string; timestamp: string; sort_order?: number };
@@ -79,8 +85,17 @@ export const updateChatTitle = async (chatId: string, title: string): Promise<vo
   }
 };
 
-export const sendChatMessage = async (chatId: string, message: string): Promise<SendMessageResponse> => {
-  const response = await api.post<SendMessageResponse>(`/chats/${chatId}/messages`, { message });
+export const sendChatMessage = async (
+  chatId: string,
+  message: string,
+  options?: SendMessageOptions,
+): Promise<SendMessageResponse> => {
+  const response = await api.post<SendMessageResponse>(`/chats/${chatId}/messages`, {
+    message,
+    ...(options?.assignmentId ? { assignmentId: options.assignmentId } : {}),
+    ...(options?.practiceSessionId ? { practiceSessionId: options.practiceSessionId } : {}),
+    ...(options?.uiLanguage ? { uiLanguage: options.uiLanguage } : {}),
+  });
   if (response.data.success) {
     return response.data;
   }

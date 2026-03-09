@@ -10,10 +10,12 @@ import {
   PlayCircle,
 } from 'lucide-react';
 import { bootstrapStudentAssignment, createAssignmentPracticeSession, reportPracticeSessionEvent } from '@/api/assignments';
-import { createChatSession, saveMessageToChat } from '@/api/chat';
+import { createChatSession, saveMessageToChat, sendChatMessage } from '@/api/chat';
+import { ChatInput } from '@/components/chat';
 import { Alert, AlertDescription, Badge, Button, Card } from '@/components/ui';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useRealtimeChat } from '@/hooks/useRealtimeChat';
+import type { ChatMessage } from '@/types';
 import type { AssignmentBootstrapData, PracticeSessionDto } from '@/types';
 
 function getLocalizedText(
@@ -45,6 +47,9 @@ export function AssignmentLaunchPage() {
   const [practiceError, setPracticeError] = useState<string | null>(null);
   const [isStartingPractice, setIsStartingPractice] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
+  const [isSendingText, setIsSendingText] = useState(false);
+  const [textInput, setTextInput] = useState('');
+  const [textMessages, setTextMessages] = useState<ChatMessage[]>([]);
   const [chatId, setChatId] = useState<string | null>(null);
   const [practiceSession, setPracticeSession] = useState<PracticeSessionDto | null>(null);
 
@@ -191,11 +196,11 @@ export function AssignmentLaunchPage() {
     sessionParams: realtimeSessionParams,
   });
 
-  const canStartVoicePractice = Boolean(
-    bootstrap &&
-      bootstrap.launch.voiceAllowed &&
-      bootstrap.launch.modality.mode !== 'text_only'
+  const isTextLaunch = Boolean(bootstrap && bootstrap.launch.modality.mode === 'text_only');
+  const canStartPractice = Boolean(
+    bootstrap && (bootstrap.launch.voiceAllowed || bootstrap.launch.textAllowed)
   );
+  const launchBlockedReasons = bootstrap?.launch.blockedReasons ?? [];
 
   const startAssignmentPractice = async () => {
     if (!bootstrap) return;
@@ -212,6 +217,8 @@ export function AssignmentLaunchPage() {
       sessionEventQueueRef.current = Promise.resolve();
       nextRealtimeMessageOrderRef.current = 0;
       sessionEndedRef.current = false;
+      setTextMessages([]);
+      setTextInput('');
 
       const created = await createChatSession(`ASM ${bootstrap.assignment.title}`);
       setChatId(created.chatId);
@@ -222,7 +229,9 @@ export function AssignmentLaunchPage() {
       });
       setPracticeSession(createdPracticeSession);
       practiceSessionRef.current = createdPracticeSession;
-      await connect();
+      if (bootstrap.launch.modality.mode !== 'text_only') {
+        await connect();
+      }
     } catch (startError) {
       if (createdPracticeSession) {
         await finalizePracticeSession('connection_failed', {
@@ -232,6 +241,65 @@ export function AssignmentLaunchPage() {
       setPracticeError(startError instanceof Error ? startError.message : 'Failed to start assignment practice.');
     } finally {
       setIsStartingPractice(false);
+    }
+  };
+
+  const handleSendText = async () => {
+    if (
+      !bootstrap ||
+      !chatId ||
+      !practiceSession ||
+      practiceSession.status !== 'active' ||
+      !textInput.trim() ||
+      isSendingText
+    ) {
+      return;
+    }
+
+    const message = textInput.trim();
+    setTextInput('');
+    setPracticeError(null);
+    setIsSendingText(true);
+
+    try {
+      const response = await sendChatMessage(chatId, message, {
+        assignmentId: bootstrap.assignment.id,
+        practiceSessionId: practiceSession.id,
+        uiLanguage: lang,
+      });
+
+      const userTurnIndex = nextRealtimeMessageOrderRef.current;
+      const assistantTurnIndex = userTurnIndex + 1;
+      nextRealtimeMessageOrderRef.current += 2;
+
+      const userMessage: ChatMessage = {
+        id: `assignment-user-${userTurnIndex}`,
+        role: 'user',
+        content: message,
+        timestamp: new Date().toISOString(),
+      };
+      const assistantMessage: ChatMessage = {
+        id: `assignment-assistant-${assistantTurnIndex}`,
+        role: 'assistant',
+        content: response.response,
+        timestamp: new Date().toISOString(),
+      };
+      setTextMessages((current) => [...current, userMessage, assistantMessage]);
+
+      await queuePracticeEvent('student.turn', userTurnIndex, {
+        chatId,
+        content: message,
+        source: 'text',
+      });
+      await queuePracticeEvent('assistant.turn', assistantTurnIndex, {
+        chatId,
+        content: response.response,
+        source: 'text',
+      });
+    } catch (sendError) {
+      setPracticeError(sendError instanceof Error ? sendError.message : 'Failed to send assignment text message.');
+    } finally {
+      setIsSendingText(false);
     }
   };
 
@@ -376,9 +444,16 @@ export function AssignmentLaunchPage() {
         <Alert>
           <MessageSquareText className="h-4 w-4" />
           <AlertDescription>
-            This assignment is configured as text-only, but the assignment-scoped text chat launch is not built yet.
-            The current launch page supports realtime voice and hybrid sessions only.
+            {bootstrap.launch.fallbackApplied
+              ? 'Voice is blocked for this student, so this assignment has been downgraded to assignment-scoped text practice.'
+              : 'This assignment is configured to launch in assignment-scoped text mode.'}
           </AlertDescription>
+        </Alert>
+      ) : null}
+
+      {launchBlockedReasons.length > 0 && !canStartPractice ? (
+        <Alert variant="destructive">
+          <AlertDescription>{launchBlockedReasons.join(' ')}</AlertDescription>
         </Alert>
       ) : null}
 
@@ -517,18 +592,30 @@ export function AssignmentLaunchPage() {
               </div>
             </div>
 
+            {bootstrap.launch.retentionPolicy ? (
+              <div className="mt-4 rounded-2xl border-2 border-border bg-secondary/40 p-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">Retention</p>
+                <p className="mt-2 text-sm text-foreground">
+                  {bootstrap.launch.retentionPolicy.label} · Raw audio{' '}
+                  {bootstrap.launch.retentionPolicy.rawAudioStorageAllowed ? 'stored' : 'not stored'}
+                </p>
+              </div>
+            ) : null}
+
             <div className="mt-6 flex flex-wrap gap-3">
-              <Button onClick={startAssignmentPractice} loading={isStartingPractice} disabled={!canStartVoicePractice}>
+              <Button onClick={startAssignmentPractice} loading={isStartingPractice} disabled={!canStartPractice}>
                 <PlayCircle size={16} className="mr-2" />
-                Start assignment practice
+                {isTextLaunch ? 'Start text practice' : 'Start assignment practice'}
               </Button>
-              <Button
-                variant="outline"
-                onClick={() => void toggleConnection()}
-                disabled={!chatId || isStartingPractice || practiceSession?.status !== 'active'}
-              >
-                {isConnected ? 'End session' : isConnecting ? 'Connecting…' : 'Reconnect'}
-              </Button>
+              {!isTextLaunch ? (
+                <Button
+                  variant="outline"
+                  onClick={() => void toggleConnection()}
+                  disabled={!chatId || isStartingPractice || practiceSession?.status !== 'active'}
+                >
+                  {isConnected ? 'End session' : isConnecting ? 'Connecting…' : 'Reconnect'}
+                </Button>
+              ) : null}
               <Button
                 variant="outline"
                 onClick={() => chatId && navigate(`/app/chat?chatId=${encodeURIComponent(chatId)}`)}
@@ -541,8 +628,9 @@ export function AssignmentLaunchPage() {
             <div className="mt-5 rounded-2xl border-2 border-border bg-secondary/40 p-4">
               <p className="text-sm font-semibold text-foreground">Live status</p>
               <p className="mt-2 text-sm text-muted-foreground">
-                Connected: {isConnected ? 'yes' : 'no'} · Listening: {isListening ? 'yes' : 'no'} · Speaking:{' '}
-                {isSpeaking ? 'yes' : 'no'}
+                {isTextLaunch
+                  ? `Text session ready: ${practiceSession?.status === 'active' && chatId ? 'yes' : 'no'}`
+                  : `Connected: ${isConnected ? 'yes' : 'no'} · Listening: ${isListening ? 'yes' : 'no'} · Speaking: ${isSpeaking ? 'yes' : 'no'}`}
               </p>
             </div>
 
@@ -594,14 +682,18 @@ export function AssignmentLaunchPage() {
           </Card>
 
           <Card className="border-3 border-foreground p-6 shadow-stamp">
-            <h2 className="text-xl font-display font-bold text-foreground">Realtime transcript</h2>
+            <h2 className="text-xl font-display font-bold text-foreground">
+              {isTextLaunch ? 'Assignment text practice' : 'Realtime transcript'}
+            </h2>
             <div className="mt-5 space-y-3">
-              {messages.length === 0 ? (
+              {(isTextLaunch ? textMessages : messages).length === 0 ? (
                 <div className="rounded-2xl border-2 border-dashed border-border bg-secondary/40 p-5 text-sm text-muted-foreground">
-                  Start practice to begin collecting the assignment transcript.
+                  {isTextLaunch
+                    ? 'Start text practice to begin collecting the assignment transcript.'
+                    : 'Start practice to begin collecting the assignment transcript.'}
                 </div>
               ) : (
-                messages.map((message) => (
+                (isTextLaunch ? textMessages : messages).map((message) => (
                   <div
                     key={message.id}
                     className={`rounded-2xl border-2 p-4 ${
@@ -618,6 +710,18 @@ export function AssignmentLaunchPage() {
                 ))
               )}
             </div>
+
+            {isTextLaunch ? (
+              <div className="mt-5 border-t-2 border-border pt-5">
+                <ChatInput
+                  value={textInput}
+                  onChange={setTextInput}
+                  onSend={() => void handleSendText()}
+                  disabled={!chatId || !practiceSession || practiceSession.status !== 'active' || isSendingText}
+                  placeholder="Type your assignment response..."
+                />
+              </div>
+            ) : null}
           </Card>
         </div>
       </div>

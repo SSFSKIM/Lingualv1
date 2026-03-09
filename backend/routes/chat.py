@@ -10,6 +10,7 @@ from backend.services.assignment_resolver import (
     build_assignment_system_prompt,
     resolve_assignment_bootstrap_for_user,
 )
+from backend.services.compliance import create_consent_event
 
 
 AVATAR_EMOTION_KEYS = [
@@ -274,6 +275,23 @@ def create_chat_blueprint(deps: RouteDeps) -> Blueprint:
                     assignment_id=assignment_id,
                     ui_language=ui_language,
                 )
+                if not (bootstrap.get('launch') or {}).get('voiceAllowed'):
+                    blocked_reasons = (bootstrap.get('launch') or {}).get('blockedReasons') or []
+                    create_consent_event(
+                        deps,
+                        org_id=(bootstrap.get('class') or {}).get('orgId', ''),
+                        student_uid=uid or '',
+                        event_type='voice.blocked.realtime_session',
+                        actor_type='student',
+                        actor_id=uid or '',
+                        payload={'assignmentId': assignment_id, 'blockedReasons': blocked_reasons},
+                    )
+                    reason = blocked_reasons[0] if blocked_reasons else 'Voice practice is not allowed for this assignment.'
+                    return jsonify({
+                        'success': False,
+                        'error': reason,
+                        'blockedReasons': blocked_reasons,
+                    }), 403
                 system_instructions = build_assignment_system_prompt(bootstrap)
             else:
                 practice = payload.get('practice')
@@ -562,9 +580,14 @@ def create_chat_blueprint(deps: RouteDeps) -> Blueprint:
         uid = deps.get_current_user_uid()
         data = request.get_json() or {}
         user_message = data.get('message', '').strip()
+        assignment_id = data.get('assignmentId')
+        practice_session_id = data.get('practiceSessionId')
+        ui_language = data.get('uiLanguage', 'en')
 
         if not user_message:
             return jsonify({'success': False, 'error': 'Message is required'}), 400
+        if ui_language not in deps.supported_ui_languages:
+            ui_language = 'en'
 
         if not os.environ.get('OPENAI_API_KEY'):
             return jsonify({'success': False, 'error': 'OpenAI API key not configured'}), 500
@@ -575,8 +598,47 @@ def create_chat_blueprint(deps: RouteDeps) -> Blueprint:
                 return jsonify({'success': False, 'error': 'Chat not found'}), 404
 
             chat_messages = chat.get('messages', [])
-            proficiency_context = deps.get_user_proficiency_context()
-            system_prompt = deps.build_system_prompt(proficiency_context)
+            if isinstance(assignment_id, str) and assignment_id.strip():
+                assignment_id = assignment_id.strip()
+                context = deps.get_school_request_context()
+                bootstrap = resolve_assignment_bootstrap_for_user(
+                    deps,
+                    uid=uid,
+                    context=context,
+                    assignment_id=assignment_id,
+                    ui_language=ui_language,
+                )
+                launch = bootstrap.get('launch') or {}
+                if launch.get('modality', {}).get('mode') != 'text_only' or not launch.get('textAllowed'):
+                    blocked_reasons = launch.get('blockedReasons') or []
+                    create_consent_event(
+                        deps,
+                        org_id=(bootstrap.get('class') or {}).get('orgId', ''),
+                        student_uid=uid or '',
+                        event_type='text.blocked.assignment_chat',
+                        actor_type='student',
+                        actor_id=uid or '',
+                        payload={'assignmentId': assignment_id, 'blockedReasons': blocked_reasons},
+                    )
+                    reason = blocked_reasons[0] if blocked_reasons else 'Assignment text launch is not enabled.'
+                    return jsonify({'success': False, 'error': reason}), 403
+
+                if isinstance(practice_session_id, str) and practice_session_id.strip():
+                    practice_session = deps.db.get_practice_session(practice_session_id.strip())
+                    if not practice_session:
+                        return jsonify({'success': False, 'error': 'Practice session not found'}), 404
+                    if practice_session.get('student_uid') != uid or practice_session.get('assignment_id') != assignment_id:
+                        return jsonify({'success': False, 'error': 'Practice session is not available for this user.'}), 403
+                    transcript_ref = practice_session.get('transcript_ref', {}) if isinstance(practice_session, dict) else {}
+                    if transcript_ref.get('chat_id') and transcript_ref.get('chat_id') != chat_id:
+                        return jsonify({'success': False, 'error': 'Practice session is linked to a different chat.'}), 409
+                    if practice_session.get('status') != 'active':
+                        return jsonify({'success': False, 'error': 'Practice session is no longer active.'}), 409
+
+                system_prompt = build_assignment_system_prompt(bootstrap)
+            else:
+                proficiency_context = deps.get_user_proficiency_context()
+                system_prompt = deps.build_system_prompt(proficiency_context)
 
             messages = [{'role': 'system', 'content': system_prompt}]
             for msg in chat_messages[-10:]:
