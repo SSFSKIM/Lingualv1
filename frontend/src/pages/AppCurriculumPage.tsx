@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { BookOpen, ChevronDown, ChevronRight, Loader2 } from 'lucide-react';
 import { getSampleCurriculumPackage } from '@/api/curriculum';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { resolveActivityTemplates } from '@/utils/curriculumTemplates';
 import type { CurriculumPackageV1, I18nText, Module, Unit } from '@/types';
 
 const getLocalizedText = (value: I18nText | undefined, lang: 'en' | 'ko', fallback = ''): string => {
@@ -56,16 +57,11 @@ export function AppCurriculumPage() {
 
   const moduleTemplateSummaries = useMemo(() => {
     if (!curriculum) return new Map<string, string>();
-    const index = new Map(
-      (curriculum.templates.activityTemplates || []).map((t) => [t.id, t]),
-    );
     const map = new Map<string, string>();
     for (const mod of curriculum.modules) {
-      const objectives = curriculum.objectives.filter((o) => mod.objectiveIds.includes(o.id));
-      const refs = Array.from(new Set(objectives.flatMap((o) => o.templateRefs || []).filter(Boolean)));
-      const resolved = refs.filter((r) => index.has(r));
-      if (resolved.length > 0) {
-        const names = resolved.map((r) => getLocalizedText(index.get(r)!.title, lang, r));
+      const { templates } = resolveActivityTemplates(curriculum, mod.objectiveIds);
+      if (templates.length > 0) {
+        const names = templates.map((t) => getLocalizedText(t.title, lang, t.id));
         map.set(mod.id, names.join(', '));
       }
     }

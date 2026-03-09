@@ -7,8 +7,8 @@ import { createChatSession, saveMessageToChat } from '@/api/chat';
 import { Badge, Button } from '@/components/ui';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useRealtimeChat } from '@/hooks/useRealtimeChat';
+import { resolveActivityTemplates } from '@/utils/curriculumTemplates';
 import type {
-  ActivityTemplateDefinition,
   CurriculumMode,
   CurriculumPackageV1,
   I18nText,
@@ -57,24 +57,6 @@ const formatConstraintSummary = (situation: Situation): string => {
   if (constraints.maxReplays !== undefined) items.push(`replays: ${constraints.maxReplays}`);
   return items.join(' • ') || 'No strict constraints';
 };
-
-function buildTemplateIndex(pkg: CurriculumPackageV1 | null): Map<string, ActivityTemplateDefinition> {
-  return new Map((pkg?.templates.activityTemplates || []).map((template) => [template.id, template]));
-}
-
-function resolveActivityTemplates(
-  pkg: CurriculumPackageV1 | null,
-  objectiveIds: string[],
-): { templates: ActivityTemplateDefinition[]; unresolvedRefs: string[] } {
-  const index = buildTemplateIndex(pkg);
-  const objectives = pkg?.objectives.filter((o) => objectiveIds.includes(o.id)) || [];
-  const refs = Array.from(new Set(objectives.flatMap((o) => o.templateRefs || []).filter(Boolean)));
-  const templates = refs
-    .map((ref) => index.get(ref))
-    .filter((t): t is ActivityTemplateDefinition => Boolean(t));
-  const unresolvedRefs = refs.filter((ref) => !index.has(ref));
-  return { templates, unresolvedRefs };
-}
 
 type PracticeSituation = {
   mode: CurriculumMode;
@@ -179,7 +161,7 @@ export function AppCurriculumModulePage() {
   }, [practiceSituations, selectedSituationId]);
 
   const situationTemplates = useMemo(() => {
-    if (!curriculum || !selectedPracticeSituation) return { templates: [] as ActivityTemplateDefinition[], unresolvedRefs: [] as string[] };
+    if (!curriculum || !selectedPracticeSituation) return { templates: [], refs: [], unresolvedRefs: [] };
     return resolveActivityTemplates(curriculum, selectedPracticeSituation.situation.objectiveIds);
   }, [curriculum, selectedPracticeSituation]);
 

@@ -15,8 +15,8 @@ import { getSampleCurriculumPackage } from '@/api/curriculum';
 import { getTeacherClasses } from '@/api/teacher';
 import { Alert, AlertDescription, Badge, Button, Card, Input, Textarea } from '@/components/ui';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { resolveActivityTemplates } from '@/utils/curriculumTemplates';
 import type {
-  ActivityTemplateDefinition,
   AssignmentTaskType,
   CreateAssignmentPayload,
   CreateCurriculumMappingPayload,
@@ -171,38 +171,6 @@ function describeOutputPressure(mapping: CurriculumMappingDto): string {
   }
 
   return `${policy.minStudentTurnWords}+ words per turn · ${policy.followUpPressure.replace('_', ' ')} follow-up pressure · clarification ${policy.allowClarificationRequests ? 'allowed' : 'limited'}`;
-}
-
-function dedupeStrings(values: string[]): string[] {
-  return Array.from(new Set(values.filter(Boolean)));
-}
-
-function buildTemplateIndex(curriculum: CurriculumPackageV1 | null): Map<string, ActivityTemplateDefinition> {
-  return new Map((curriculum?.templates.activityTemplates || []).map((template) => [template.id, template]));
-}
-
-function resolveActivityTemplates(
-  curriculum: CurriculumPackageV1 | null,
-  objectiveIds: string[]
-): {
-  templates: ActivityTemplateDefinition[];
-  refs: string[];
-  unresolvedRefs: string[];
-} {
-  const templateIndex = buildTemplateIndex(curriculum);
-  const objectives =
-    curriculum?.objectives.filter((objective) => objectiveIds.includes(objective.id)) || [];
-  const refs = dedupeStrings(objectives.flatMap((objective) => objective.templateRefs || []));
-  const templates = refs
-    .map((ref) => templateIndex.get(ref))
-    .filter((template): template is ActivityTemplateDefinition => Boolean(template));
-  const unresolvedRefs = refs.filter((ref) => !templateIndex.has(ref));
-
-  return {
-    templates,
-    refs,
-    unresolvedRefs,
-  };
 }
 
 function describeInteractionContract(
