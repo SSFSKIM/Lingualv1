@@ -47,10 +47,13 @@ const AI_AVATAR = '/imgs/avatars/ai.svg';
 const CHAT_AVATAR_ENABLED_KEY = 'lingual:chat:avatarEnabled';
 const TEXT_AVATAR_SPEAK_MIN_MS = 1200;
 const TEXT_AVATAR_SPEAK_MAX_MS = 4200;
-const LIVE2D_CHAT_ENABLED = (import.meta.env.VITE_ENABLE_LIVE2D_CHAT ?? 'false') !== 'false';
+declare const __CUBISM_SDK_AVAILABLE__: boolean;
+const LIVE2D_CHAT_ENABLED =
+  import.meta.env.VITE_ENABLE_LIVE2D_CHAT !== undefined
+    ? import.meta.env.VITE_ENABLE_LIVE2D_CHAT !== 'false'
+    : __CUBISM_SDK_AVAILABLE__;
 const REALTIME_AVATAR_DIRECTIVES_ENABLED = (import.meta.env.VITE_ENABLE_REALTIME_AVATAR_DIRECTIVES ?? 'false') === 'true';
 
-const AvatarPerformancePanel = lazy(() => import('@/components/avatar/AvatarPerformancePanel'));
 const Live2DAvatarPanel = lazy(() => import('@/components/avatar/Live2DAvatarPanel'));
 
 type AvatarActivity = 'idle' | 'listening' | 'thinking' | 'speaking';
@@ -796,8 +799,8 @@ export function AppChatPage() {
 
       {/* Main Content: Avatar (5) + Chat (3) */}
       <div className="flex h-full min-h-0 min-w-0 flex-1 gap-3">
-        {/* Virtual Avatar Panel */}
-        {isAvatarEnabled && isDesktop && (
+        {/* Virtual Avatar Panel — only available when Live2D SDK is present */}
+        {LIVE2D_CHAT_ENABLED && isAvatarEnabled && isDesktop && (
           <div className="hidden h-full min-h-0 flex-[5] overflow-hidden rounded-2xl border-3 border-foreground bg-card shadow-stamp lg:flex lg:flex-col">
             <Suspense
               fallback={
@@ -812,28 +815,18 @@ export function AppChatPage() {
                 </div>
               }
             >
-              {LIVE2D_CHAT_ENABLED ? (
-                <Live2DAvatarPanel
-                  enabled={isAvatarEnabled}
-                  avatarState={live2dAvatarState}
-                  avatarReaction={null}
-                  performanceFrame={live2dPerformance}
-                  audioLevel={live2dPerformance.debug.audioLevel}
-                  avatarDiagnostics={live2dDiagnostics}
-                  fallbackSrc={AI_AVATAR}
-                  statusLabel={avatarStatusLabel}
-                  title={t('app.learn.chat.title')}
-                  onAvatarHit={mode === 'realtime' ? queueAvatarHit : undefined}
-                />
-              ) : (
-                <AvatarPerformancePanel
-                  enabled={isAvatarEnabled}
-                  source={avatarSource}
-                  statusLabel={avatarStatusLabel}
-                  fallbackSrc={AI_AVATAR}
-                  title={t('app.learn.chat.title')}
-                />
-              )}
+              <Live2DAvatarPanel
+                enabled={isAvatarEnabled}
+                avatarState={live2dAvatarState}
+                avatarReaction={null}
+                performanceFrame={live2dPerformance}
+                audioLevel={live2dPerformance.debug.audioLevel}
+                avatarDiagnostics={live2dDiagnostics}
+                fallbackSrc={AI_AVATAR}
+                statusLabel={avatarStatusLabel}
+                title={t('app.learn.chat.title')}
+                onAvatarHit={mode === 'realtime' ? queueAvatarHit : undefined}
+              />
             </Suspense>
           </div>
         )}
@@ -841,7 +834,7 @@ export function AppChatPage() {
         {/* Chat Panel */}
         <div className={clsx(
           'relative flex h-full min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl border-3 border-foreground bg-card shadow-stamp',
-          isAvatarEnabled ? 'flex-[3]' : 'flex-1'
+          LIVE2D_CHAT_ENABLED && isAvatarEnabled ? 'flex-[3]' : 'flex-1'
         )}>
           <div className="z-10 flex items-center justify-between border-b-3 border-foreground bg-card p-4">
             <div className="min-w-0 flex-1">
@@ -915,20 +908,22 @@ export function AppChatPage() {
               >
                 <Menu size={14} strokeWidth={2.5} />
               </button>
-              <button
-                type="button"
-                onClick={() => setIsAvatarEnabled((prev) => !prev)}
-                aria-label={isAvatarEnabled ? 'Hide avatar' : 'Show avatar'}
-                title={isAvatarEnabled ? 'Hide avatar' : 'Show avatar'}
-                className={clsx(
-                  'hidden lg:inline-flex h-8 w-8 items-center justify-center rounded-xl border-2 transition-colors',
-                  isAvatarEnabled
-                    ? 'border-primary bg-primary/10 text-primary'
-                    : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-secondary hover:border-border'
-                )}
-              >
-                <MonitorPlay size={16} strokeWidth={2.5} />
-              </button>
+              {LIVE2D_CHAT_ENABLED && (
+                <button
+                  type="button"
+                  onClick={() => setIsAvatarEnabled((prev) => !prev)}
+                  aria-label={isAvatarEnabled ? 'Hide avatar' : 'Show avatar'}
+                  title={isAvatarEnabled ? 'Hide avatar' : 'Show avatar'}
+                  className={clsx(
+                    'hidden lg:inline-flex h-8 w-8 items-center justify-center rounded-xl border-2 transition-colors',
+                    isAvatarEnabled
+                      ? 'border-primary bg-primary/10 text-primary'
+                      : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-secondary hover:border-border'
+                  )}
+                >
+                  <MonitorPlay size={16} strokeWidth={2.5} />
+                </button>
+              )}
               <button
                 type="button"
                 onClick={createNewChat}

@@ -2,6 +2,10 @@ import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import path from 'path'
+import fs from 'fs'
+
+const cubismSdkPath = path.resolve(__dirname, '../CubismSdkForWeb-5-r.4/Framework/dist')
+const hasCubismSdk = fs.existsSync(cubismSdkPath)
 
 function manualChunks(id: string): string | undefined {
   if (id.includes('/node_modules/react/') || id.includes('/node_modules/react-dom/') || id.includes('/node_modules/react-router')) {
@@ -69,6 +73,9 @@ function manualChunks(id: string): string | undefined {
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   base: '/',
+  define: {
+    __CUBISM_SDK_AVAILABLE__: JSON.stringify(hasCubismSdk),
+  },
   build: {
     // The remaining chunk above Vite's default 500 kB warning is the isolated
     // Three.js vendor bundle used by the avatar renderer. We keep it split
@@ -83,7 +90,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
-      '@cubism': path.resolve(__dirname, '../CubismSdkForWeb-5-r.4/Framework/dist'),
+      ...(hasCubismSdk ? { '@cubism': cubismSdkPath } : {}),
     },
   },
   test: {
