@@ -1,19 +1,30 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   AlertTriangle,
   ArrowLeft,
   BarChart3,
+  Calendar,
   CheckCircle2,
   ClipboardList,
+  Filter,
   Loader2,
   MessageSquareText,
   ShieldCheck,
   Users,
+  X,
 } from 'lucide-react';
 import { getClassAnalytics } from '@/api/teacher';
 import { Alert, AlertDescription, Badge, Button, Card } from '@/components/ui';
+import { OnboardingHint } from '@/components/ui/OnboardingHint';
 import type { ClassAnalyticsData } from '@/types';
+
+const STATUS_OPTIONS = [
+  { value: '', label: 'All statuses' },
+  { value: 'published', label: 'Published' },
+  { value: 'draft', label: 'Draft' },
+  { value: 'archived', label: 'Archived' },
+];
 
 export function TeacherClassAnalyticsPage() {
   const { classId } = useParams<{ classId: string }>();
@@ -22,37 +33,71 @@ export function TeacherClassAnalyticsPage() {
   const [error, setError] = useState<string | null>(null);
   const [analytics, setAnalytics] = useState<ClassAnalyticsData | null>(null);
 
-  useEffect(() => {
-    let isActive = true;
+  // Filter state
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [appliedDateFrom, setAppliedDateFrom] = useState('');
+  const [appliedDateTo, setAppliedDateTo] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
 
+  const load = useCallback(
+    async (filters?: { dateFrom?: string; dateTo?: string }) => {
+      if (!classId) return;
+      setLoading(true);
+      try {
+        const data = await getClassAnalytics(classId, filters);
+        setAnalytics(data);
+        setError(null);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to load class analytics.');
+      } finally {
+        setLoading(false);
+      }
+    },
+    [classId],
+  );
+
+  useEffect(() => {
     if (!classId) {
       setLoading(false);
       setError('Class id is required.');
       return;
     }
-
-    const load = async () => {
-      setLoading(true);
-      try {
-        const data = await getClassAnalytics(classId);
-        if (!isActive) return;
-        setAnalytics(data);
-        setError(null);
-      } catch (err) {
-        if (!isActive) return;
-        setError(err instanceof Error ? err.message : 'Failed to load class analytics.');
-      } finally {
-        if (isActive) setLoading(false);
-      }
-    };
-
     void load();
-    return () => {
-      isActive = false;
-    };
-  }, [classId]);
+  }, [classId, load]);
 
-  if (loading) {
+  const applyDateFilter = () => {
+    setAppliedDateFrom(dateFrom);
+    setAppliedDateTo(dateTo);
+    const filters: { dateFrom?: string; dateTo?: string } = {};
+    if (dateFrom) filters.dateFrom = new Date(dateFrom).toISOString();
+    if (dateTo) {
+      // Set to end of day
+      const end = new Date(dateTo);
+      end.setHours(23, 59, 59, 999);
+      filters.dateTo = end.toISOString();
+    }
+    void load(filters);
+  };
+
+  const clearDateFilter = () => {
+    setDateFrom('');
+    setDateTo('');
+    setAppliedDateFrom('');
+    setAppliedDateTo('');
+    void load();
+  };
+
+  const hasActiveDateFilter = appliedDateFrom || appliedDateTo;
+
+  // Client-side assignment status filter
+  const filteredAssignments = useMemo(() => {
+    if (!analytics) return [];
+    if (!statusFilter) return analytics.assignments;
+    return analytics.assignments.filter((a) => a.status === statusFilter);
+  }, [analytics, statusFilter]);
+
+  if (loading && !analytics) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -81,6 +126,8 @@ export function TeacherClassAnalyticsPage() {
     { label: 'Self-corrections', value: analytics.summary.selfCorrectionCount, icon: CheckCircle2, accent: 'bg-primary/5 text-foreground' },
     { label: 'Repeated errors', value: analytics.summary.repeatedErrorCount, icon: AlertTriangle, accent: 'bg-destructive/10 text-destructive' },
   ];
+
+  const selectStyle = 'h-9 rounded-xl border-2 border-border bg-card px-3 text-sm text-foreground focus:border-primary focus:outline-none';
 
   return (
     <div className="space-y-6">
@@ -123,6 +170,95 @@ export function TeacherClassAnalyticsPage() {
         </Alert>
       ))}
 
+      {analytics && (
+        <>
+          <OnboardingHint
+            show={analytics.summary.enrolledStudentCount === 0}
+            message="Share the join code with your students to get started."
+            ctaLabel="Manage Join Code"
+            ctaTo={`/app/teacher`}
+          />
+          <OnboardingHint
+            show={analytics.summary.enrolledStudentCount > 0 && analytics.assignments.length === 0}
+            message="Map your curriculum to create assignments."
+            ctaLabel="Map Curriculum"
+            ctaTo={`/app/teacher/classes/${classId}/assignments`}
+          />
+          <OnboardingHint
+            show={analytics.summary.enrolledStudentCount > 0 && analytics.assignments.length > 0 && analytics.assignments.every((a: { sessionCount?: number }) => (a.sessionCount ?? 0) === 0)}
+            message="Your assignments are ready — students can start practicing."
+          />
+        </>
+      )}
+
+      {/* Date range filter */}
+      <Card className="border-2 border-border p-4">
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+            <Filter size={16} />
+            Filters
+          </div>
+          <label className="space-y-1">
+            <span className="text-xs font-medium text-muted-foreground">From</span>
+            <div className="relative">
+              <Calendar className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+              <input
+                type="date"
+                value={dateFrom}
+                onChange={(e) => setDateFrom(e.target.value)}
+                className={selectStyle + ' pl-8 w-[160px]'}
+              />
+            </div>
+          </label>
+          <label className="space-y-1">
+            <span className="text-xs font-medium text-muted-foreground">To</span>
+            <div className="relative">
+              <Calendar className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+              <input
+                type="date"
+                value={dateTo}
+                onChange={(e) => setDateTo(e.target.value)}
+                className={selectStyle + ' pl-8 w-[160px]'}
+              />
+            </div>
+          </label>
+          <Button size="sm" onClick={applyDateFilter} disabled={loading || (!dateFrom && !dateTo)}>
+            {loading ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : null}
+            Apply
+          </Button>
+          {hasActiveDateFilter && (
+            <Button variant="ghost" size="sm" onClick={clearDateFilter} disabled={loading}>
+              <X size={14} className="mr-1" />
+              Clear dates
+            </Button>
+          )}
+          <div className="ml-auto">
+            <label className="space-y-1">
+              <span className="text-xs font-medium text-muted-foreground">Assignment status</span>
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                className={selectStyle + ' w-[150px]'}
+              >
+                {STATUS_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+        </div>
+        {hasActiveDateFilter && (
+          <p className="mt-2 text-xs text-muted-foreground">
+            Showing sessions from{' '}
+            <strong>{appliedDateFrom || 'the beginning'}</strong>
+            {' to '}
+            <strong>{appliedDateTo || 'now'}</strong>
+          </p>
+        )}
+      </Card>
+
       {/* Summary stats */}
       <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-6">
         {stats.map((stat) => (
@@ -147,17 +283,22 @@ export function TeacherClassAnalyticsPage() {
             </div>
             <div>
               <h2 className="text-xl font-display font-bold text-foreground">Assignments</h2>
-              <p className="text-sm text-muted-foreground">Per-assignment practice activity</p>
+              <p className="text-sm text-muted-foreground">
+                Per-assignment practice activity
+                {statusFilter ? ` (${statusFilter})` : ''}
+              </p>
             </div>
           </div>
 
           <div className="mt-6 space-y-3">
-            {analytics.assignments.length === 0 ? (
+            {filteredAssignments.length === 0 ? (
               <div className="rounded-2xl border-2 border-dashed border-border bg-secondary/40 p-5 text-sm text-muted-foreground">
-                No assignments have been created for this class yet.
+                {statusFilter
+                  ? `No ${statusFilter} assignments found.`
+                  : 'No assignments have been created for this class yet.'}
               </div>
             ) : (
-              analytics.assignments.map((assignment) => (
+              filteredAssignments.map((assignment) => (
                 <div
                   key={assignment.id}
                   className="cursor-pointer rounded-2xl border-2 border-border bg-secondary/40 p-4 transition-colors hover:border-foreground/30"
