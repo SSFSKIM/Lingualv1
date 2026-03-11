@@ -1,7 +1,7 @@
 # School Integration Limitations
 
 Status: Active
-Last updated: 2026-03-09
+Last updated: 2026-03-10
 Owner: Engineering
 
 ## Purpose
@@ -32,9 +32,9 @@ Planned follow-up: org settings, invite flows, and role management.
 Impact: teachers can generate/regenerate/deactivate 6-character join codes, students can join via `/app/join`, and teachers can view the roster and remove students. However, LMS roster sync, CSV import, bulk invite, and email-based invitations are not yet implemented.
 Planned follow-up: LMS integration (Google Classroom / Canvas), CSV roster import, and email-based invitations.
 
-3. Teacher analytics are available at class, assignment, and student level, but are still heuristic-based.
-Impact: teachers can now navigate from the dashboard to class analytics (aggregated across assignments), student drill-down (per-student across assignments), and per-assignment analytics. However, all metrics (speaking time, rubric scores, error detection) are still heuristic estimates from transcript-level signals, not model-verified or provider-accurate.
-Planned follow-up: dashboard date range filters, cross-class trends, richer visualization, and model-backed scoring calibration.
+3. Teacher analytics are available at class, assignment, and student level with basic filtering, but are still heuristic-based.
+Impact: teachers can now navigate from the dashboard to class analytics (aggregated across assignments), student drill-down (per-student across assignments), and per-assignment analytics. The dashboard now supports a class filter that recalculates summary stats for a single class, and the class analytics page supports date range filtering (server-side session filtering) and assignment status filtering (client-side). However, all metrics (speaking time, rubric scores, error detection) are still heuristic estimates from transcript-level signals, not model-verified or provider-accurate. The dashboard-level speaking minutes stat remains hardcoded at 0 until session aggregation is wired to the dashboard endpoint.
+Planned follow-up: cross-class trends, richer visualization, dashboard-level session aggregation, and model-backed scoring calibration.
 
 ### Curriculum mapping and assignments
 
@@ -60,10 +60,10 @@ Planned follow-up: realtime usage metering, model-cost accounting, and budget en
 
 ### Compliance and policy
 
-9. Compliance gating and guardian packet operations are now implemented for the beta scope, but the operational tooling is still narrower than the target architecture.
-Impact: voice now fails closed without consent, `textFallbackEnabled` controls assignment downgrade behavior, pronunciation raw-audio retention is policy-aware, teachers/admins can edit consent state from student drill-down, class-scoped compliance roster/bulk operations/audit export are available, and guardian packets can now be issued/resend/canceled from student drill-down with a secure-link public decision flow. However, `downloadable_notice` remains a staff-managed beta path without a rendered handout artifact or offline evidence capture, and deletion requests/execution plus school-wide admin tooling are still missing.
-Planned follow-up: implement Epic B for deletion requests/execution, then expand to broader school-wide admin tooling and richer guardian evidence/export tooling.
+9. Compliance gating, guardian packets, deletion requests, and school-wide admin tooling are now implemented for the beta scope.
+Impact: voice now fails closed without consent, `textFallbackEnabled` controls assignment downgrade behavior, pronunciation raw-audio retention is policy-aware, teachers/admins can edit consent state from student drill-down, class-scoped compliance roster/bulk operations/audit export are available, guardian packets can now be issued/resend/canceled from student drill-down with a secure-link public decision flow, school admins can create/approve/execute/retry deletion requests for student, class, or org scope, and school admins now have an org-wide compliance dashboard with summary metrics, filterable cross-class student roster with bulk consent operations, guardian packet tracking, and org-scoped audit CSV export. However, `downloadable_notice` remains a staff-managed beta path without a rendered handout artifact, deletion execution is synchronous (not async Cloud Tasks), and Firebase Storage audio deletion is a placeholder (no raw audio stored yet).
+Planned follow-up: async deletion execution if needed post-beta, Firebase Storage cleanup when raw audio storage ships, and richer guardian evidence/export tooling.
 
-10. Firestore rules are now school-aware for the current collections, but they have not yet been validated in a Firebase emulator or deployment rehearsal for all school flows.
-Impact: rule logic is materially improved, but still needs environment-level validation before pilot hardening.
-Planned follow-up: emulator validation and deployment verification during hardening.
+10. Firestore rules are now school-aware and validated via Firebase Emulator rule tests (`firebase-tests/`). Deployment rehearsal is still pending before pilot hardening is complete.
+Impact: rule logic is validated against emulator tests covering all school collections and role-based access patterns.
+Planned follow-up: deployment verification during hardening.
