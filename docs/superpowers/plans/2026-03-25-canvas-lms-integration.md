@@ -29,7 +29,7 @@
 
 ### Task 1: Extend Firestore model for Canvas records and fields
 
-- [ ] **Step 1: Write failing backend tests for the new data model**
+- [x] **Step 1: Write failing backend tests for the new data model**
 
 Create `backend/tests/test_canvas_foundation.py` with coverage for:
 - `create_enrollment(..., status='pending_sync', canvas_user_id=..., canvas_email=...)`
@@ -55,12 +55,12 @@ def test_list_pending_canvas_enrollments_by_email_returns_only_pending_matches()
     assert matches[0]['status'] == 'pending_sync'
 ```
 
-- [ ] **Step 2: Run the new backend test file to verify RED**
+- [x] **Step 2: Run the new backend test file to verify RED**
 
 Run: `pytest -q backend/tests/test_canvas_foundation.py`
 Expected: FAIL because Canvas helpers/fields do not exist yet.
 
-- [ ] **Step 3: Implement minimal Canvas schema helpers in `database.py`**
+- [x] **Step 3: Implement minimal Canvas schema helpers in `database.py`**
 
 Add:
 - collection/ref helpers for `canvas_connections` and `canvas_course_content`
@@ -75,7 +75,7 @@ Key rules:
 - use a deterministic Canvas-scoped id for pending records such as `{class_id}__{canvas_user_id}`
 - preserve current deterministic ids for active Lingual users
 
-- [ ] **Step 4: Run backend tests and keep the helper layer GREEN**
+- [x] **Step 4: Run backend tests and keep the helper layer GREEN**
 
 Run:
 - `pytest -q backend/tests/test_canvas_foundation.py`
@@ -83,7 +83,7 @@ Run:
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add database.py backend/tests/test_canvas_foundation.py backend/tests/test_auth_memberships.py
@@ -92,7 +92,7 @@ git commit -m "feat: add Canvas Firestore foundation helpers"
 
 ### Task 2: Activate pending Canvas enrollments during auth verification
 
-- [ ] **Step 1: Add failing auth tests**
+- [x] **Step 1: Add failing auth tests**
 
 Extend `backend/tests/test_auth_memberships.py` to cover:
 - matching `pending_sync` enrollment by `canvas_email`
@@ -109,12 +109,12 @@ assert activated_enrollment['student_uid'] == 'student-1'
 assert created_membership['roles'] == ['student']
 ```
 
-- [ ] **Step 2: Run the auth test file to verify RED**
+- [x] **Step 2: Run the auth test file to verify RED**
 
 Run: `pytest -q backend/tests/test_auth_memberships.py`
 Expected: FAIL because `/api/auth/verify` does not query pending Canvas enrollments yet.
 
-- [ ] **Step 3: Implement the post-auth activation flow**
+- [x] **Step 3: Implement the post-auth activation flow**
 
 Modify `backend/routes/auth.py` so `verify_auth()`:
 - resolves pending Canvas enrollments by `email`
@@ -124,7 +124,7 @@ Modify `backend/routes/auth.py` so `verify_auth()`:
   - preserves `join_source='canvas'`
 - refreshes school context after activation before building the auth payload
 
-- [ ] **Step 4: Re-run auth + school foundation tests**
+- [x] **Step 4: Re-run auth + school foundation tests**
 
 Run:
 - `pytest -q backend/tests/test_auth_memberships.py`
@@ -132,7 +132,7 @@ Run:
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/routes/auth.py backend/tests/test_auth_memberships.py
@@ -141,14 +141,14 @@ git commit -m "feat: activate pending Canvas enrollments on login"
 
 ### Task 3: Update rules and indexes for Canvas collections
 
-- [ ] **Step 1: Add failing Firebase rule tests**
+- [x] **Step 1: Add failing Firebase rule tests**
 
 Extend `firebase-tests/firestore-rules.test.ts` with cases for:
 - `canvas_connections`: deny reads/writes for teacher, student, admin, outsider
 - `canvas_course_content`: allow enrolled student read
 - `canvas_course_content`: deny read for outsider and deny all writes
 
-- [ ] **Step 2: Add required index definitions**
+- [x] **Step 2: Add required index definitions**
 
 Modify `firestore.indexes.json` to add:
 - `classes`: `(join_code, join_code_active, status)`
@@ -156,21 +156,21 @@ Modify `firestore.indexes.json` to add:
 - `canvas_connections`: `(class_id)`
 - `canvas_course_content`: `(class_id, canvas_module_position, item_position)`
 
-- [ ] **Step 3: Implement rule changes**
+- [x] **Step 3: Implement rule changes**
 
 Modify `firestore.rules`:
 - add `match /canvas_connections/{connectionId}` with `allow read, write: if false;`
 - add `match /canvas_course_content/{contentId}` allowing read when the current user has active enrollment for `resource.data.class_id`
 - keep all writes server-only
 
-- [ ] **Step 4: Run rule tests**
+- [x] **Step 4: Run rule tests**
 
 Run: `cd firebase-tests && npm test`
 Expected: PASS in an environment with Java installed and Firebase Emulator available.
 
 Prerequisite: local Java runtime. If missing, install Java before claiming completion.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add firestore.rules firestore.indexes.json firebase-tests/firestore-rules.test.ts
@@ -196,7 +196,7 @@ git commit -m "feat: add Canvas Firestore rules and indexes"
 
 ### Task 4: Implement Canvas API client and PAT encryption
 
-- [ ] **Step 1: Write failing tests for the client and encryption helpers**
+- [x] **Step 1: Write failing tests for the client and encryption helpers**
 
 Create:
 - `backend/tests/test_canvas_client.py`
@@ -209,7 +209,7 @@ Cover:
 - encrypt/decrypt round-trip
 - missing `CANVAS_PAT_ENCRYPTION_KEY` error
 
-- [ ] **Step 2: Run the focused tests to verify RED**
+- [x] **Step 2: Run the focused tests to verify RED**
 
 Run:
 - `pytest -q backend/tests/test_canvas_client.py`
@@ -217,7 +217,7 @@ Run:
 
 Expected: FAIL because the modules do not exist yet.
 
-- [ ] **Step 3: Implement `CanvasClient` and encryption helpers**
+- [x] **Step 3: Implement `CanvasClient` and encryption helpers**
 
 Create `backend/services/canvas/client.py` with:
 - `CanvasClient(instance_url: str, pat: str)`
@@ -239,7 +239,7 @@ Implementation notes:
 - respect `Retry-After` on `429`
 - never log raw PAT values
 
-- [ ] **Step 4: Re-run the focused tests**
+- [x] **Step 4: Re-run the focused tests**
 
 Run:
 - `pytest -q backend/tests/test_canvas_client.py`
@@ -247,7 +247,7 @@ Run:
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add requirements.txt backend/services/canvas backend/tests/test_canvas_client.py backend/tests/test_canvas_encryption.py
@@ -256,7 +256,7 @@ git commit -m "feat: add Canvas API client and PAT encryption"
 
 ### Task 5: Implement roster/content sync orchestration
 
-- [ ] **Step 1: Write failing sync tests**
+- [x] **Step 1: Write failing sync tests**
 
 Create `backend/tests/test_canvas_sync.py` covering:
 - email match to existing Firebase user
@@ -274,12 +274,12 @@ assert result['unmatched'] == 12
 assert result['deactivated'] == 2
 ```
 
-- [ ] **Step 2: Run sync tests to verify RED**
+- [x] **Step 2: Run sync tests to verify RED**
 
 Run: `pytest -q backend/tests/test_canvas_sync.py`
 Expected: FAIL because sync orchestration does not exist yet.
 
-- [ ] **Step 3: Implement `backend/services/canvas/sync.py`**
+- [x] **Step 3: Implement `backend/services/canvas/sync.py`**
 
 Add:
 - `sync_roster(connection, canvas_client, deps)`
@@ -293,7 +293,7 @@ Scope rules:
 - manual/join-code enrollments are never deactivated by Canvas sync
 - content mirror is replaced atomically per connection sync
 
-- [ ] **Step 4: Re-run sync + foundation tests**
+- [x] **Step 4: Re-run sync + foundation tests**
 
 Run:
 - `pytest -q backend/tests/test_canvas_sync.py`
@@ -301,7 +301,7 @@ Run:
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/services/canvas/sync.py backend/tests/test_canvas_sync.py
@@ -310,7 +310,7 @@ git commit -m "feat: add Canvas roster and content sync service"
 
 ### Task 6: Add the integrations blueprint and endpoint coverage
 
-- [ ] **Step 1: Write failing route tests**
+- [x] **Step 1: Write failing route tests**
 
 Create `backend/tests/test_canvas_routes.py` covering:
 - `POST /api/integrations/canvas/validate`
@@ -329,12 +329,12 @@ Test:
 - class creation/link on connect
 - sync summary response shape
 
-- [ ] **Step 2: Run route tests to verify RED**
+- [x] **Step 2: Run route tests to verify RED**
 
 Run: `pytest -q backend/tests/test_canvas_routes.py`
 Expected: FAIL because the blueprint does not exist yet.
 
-- [ ] **Step 3: Implement `backend/routes/integrations.py` and register it**
+- [x] **Step 3: Implement `backend/routes/integrations.py` and register it**
 
 Create the blueprint and register it in `main.py`.
 
@@ -349,7 +349,7 @@ Recommended route split:
 
 Keep the blueprint server-only; all PAT handling stays on the backend.
 
-- [ ] **Step 4: Run route + surrounding regression tests**
+- [x] **Step 4: Run route + surrounding regression tests**
 
 Run:
 - `pytest -q backend/tests/test_canvas_routes.py`
@@ -358,7 +358,7 @@ Run:
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add main.py backend/routes/integrations.py backend/tests/test_canvas_routes.py
@@ -384,7 +384,7 @@ git commit -m "feat: add Canvas integration routes"
 
 ### Task 7: Build the teacher Canvas connect flow
 
-- [ ] **Step 1: Write failing frontend tests**
+- [x] **Step 1: Write failing frontend tests**
 
 Create `frontend/src/pages/CanvasConnectPage.test.tsx` covering:
 - instance URL + PAT form render
@@ -392,12 +392,12 @@ Create `frontend/src/pages/CanvasConnectPage.test.tsx` covering:
 - connect submit creates/links course and navigates back to class page
 - inline error display for auth failure and missing encryption key
 
-- [ ] **Step 2: Run the page test to verify RED**
+- [x] **Step 2: Run the page test to verify RED**
 
 Run: `cd frontend && npx vitest run src/pages/CanvasConnectPage.test.tsx`
 Expected: FAIL because the page/API/types do not exist yet.
 
-- [ ] **Step 3: Implement `api/canvas.ts`, `types/canvas.ts`, and `CanvasConnectPage.tsx`**
+- [x] **Step 3: Implement `api/canvas.ts`, `types/canvas.ts`, and `CanvasConnectPage.tsx`**
 
 The page should:
 - collect `canvasInstanceUrl` and `pat`
@@ -408,7 +408,7 @@ The page should:
   - link selected course to an existing class if `existingClassId` is passed or selected
 - call connect and redirect to `/app/teacher/classes/:classId/analytics`
 
-- [ ] **Step 4: Add route wiring**
+- [x] **Step 4: Add route wiring**
 
 Modify `frontend/src/App.tsx` to add:
 - `/app/teacher/classes/:classId/canvas/connect`
@@ -416,12 +416,12 @@ Modify `frontend/src/App.tsx` to add:
 If a class-agnostic connect path is needed for “create class from Canvas”, add:
 - `/app/teacher/canvas/connect`
 
-- [ ] **Step 5: Re-run the connect-flow test**
+- [x] **Step 5: Re-run the connect-flow test**
 
 Run: `cd frontend && npx vitest run src/pages/CanvasConnectPage.test.tsx`
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add frontend/src/api/canvas.ts frontend/src/types/canvas.ts frontend/src/pages/CanvasConnectPage.tsx frontend/src/pages/CanvasConnectPage.test.tsx frontend/src/App.tsx
@@ -430,7 +430,7 @@ git commit -m "feat: add teacher Canvas connect flow"
 
 ### Task 8: Add sync status and pending-signup roster UI
 
-- [ ] **Step 1: Write failing component/page tests**
+- [x] **Step 1: Write failing component/page tests**
 
 Create:
 - `frontend/src/components/canvas/CanvasSyncStatus.test.tsx`
@@ -442,7 +442,7 @@ Cover:
 - pending Canvas signups rendered in a separate section
 - pending entries do not show remove actions meant for active students
 
-- [ ] **Step 2: Run the new tests to verify RED**
+- [x] **Step 2: Run the new tests to verify RED**
 
 Run:
 - `cd frontend && npx vitest run src/components/canvas/CanvasSyncStatus.test.tsx`
@@ -450,7 +450,7 @@ Run:
 
 Expected: FAIL.
 
-- [ ] **Step 3: Implement the teacher-facing Canvas surfaces**
+- [x] **Step 3: Implement the teacher-facing Canvas surfaces**
 
 Modify:
 - `TeacherClassAnalyticsPage.tsx`
@@ -462,14 +462,14 @@ Modify:
     - “Awaiting signup” section for `pending_sync`
   - show Canvas metadata such as `canvasEmail` and sync label where helpful
 
-- [ ] **Step 4: Re-run the new tests**
+- [x] **Step 4: Re-run the new tests**
 
 Run:
 - `cd frontend && npx vitest run src/components/canvas/CanvasSyncStatus.test.tsx src/pages/TeacherDashboardPage.canvas.test.tsx`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add frontend/src/components/canvas/CanvasSyncStatus.tsx frontend/src/components/canvas/CanvasSyncStatus.test.tsx frontend/src/pages/TeacherClassAnalyticsPage.tsx frontend/src/pages/TeacherDashboardPage.tsx frontend/src/pages/TeacherDashboardPage.canvas.test.tsx
@@ -494,14 +494,14 @@ git commit -m "feat: add Canvas sync status and pending signup roster UI"
 
 ### Task 9: Add assignment <-> Canvas module item linking
 
-- [ ] **Step 1: Extend failing tests**
+- [x] **Step 1: Extend failing tests**
 
 Add tests for:
 - `CanvasLinkPicker` rendering available module items
 - assignment builder showing the picker only when the class has a Canvas connection
 - link/unlink action calling the new endpoints
 
-- [ ] **Step 2: Run the focused tests to verify RED**
+- [x] **Step 2: Run the focused tests to verify RED**
 
 Run:
 - `cd frontend && npx vitest run src/components/canvas/CanvasLinkPicker.test.tsx`
@@ -510,7 +510,7 @@ Run:
 
 Expected: FAIL.
 
-- [ ] **Step 3: Implement picker + backend wiring**
+- [x] **Step 3: Implement picker + backend wiring**
 
 Modify:
 - `TeacherAssignmentBuilderPage.tsx`
@@ -520,7 +520,7 @@ Modify:
 - backend assignment link/unlink endpoints
   - use Firestore batch writes so both sides update atomically
 
-- [ ] **Step 4: Re-run focused tests**
+- [x] **Step 4: Re-run focused tests**
 
 Run:
 - `cd frontend && npx vitest run src/components/canvas/CanvasLinkPicker.test.tsx src/pages/TeacherAssignmentBuilderPage.test.tsx`
@@ -528,7 +528,7 @@ Run:
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add frontend/src/components/canvas/CanvasLinkPicker.tsx frontend/src/components/canvas/CanvasLinkPicker.test.tsx frontend/src/pages/TeacherAssignmentBuilderPage.tsx frontend/src/pages/TeacherAssignmentBuilderPage.test.tsx backend/tests/test_canvas_routes.py
@@ -537,7 +537,7 @@ git commit -m "feat: add Canvas assignment linking flow"
 
 ### Task 10: Render Canvas course structure for students
 
-- [ ] **Step 1: Write failing student-view tests**
+- [x] **Step 1: Write failing student-view tests**
 
 Create:
 - `frontend/src/components/canvas/CanvasModuleView.test.tsx`
@@ -549,7 +549,7 @@ Cover:
 - linked Lingual items show “Start Practice”
 - unlinked Lingual assignments still appear in the existing assigned-practice section
 
-- [ ] **Step 2: Run the new tests to verify RED**
+- [x] **Step 2: Run the new tests to verify RED**
 
 Run:
 - `cd frontend && npx vitest run src/components/canvas/CanvasModuleView.test.tsx`
@@ -557,7 +557,7 @@ Run:
 
 Expected: FAIL.
 
-- [ ] **Step 3: Implement student Canvas module rendering**
+- [x] **Step 3: Implement student Canvas module rendering**
 
 Modify `AppLearningPage.tsx` to:
 - load Canvas-connected course content alongside assignments
@@ -567,7 +567,7 @@ Modify `AppLearningPage.tsx` to:
 
 Create `CanvasModuleView.tsx` to own the layout and sorting logic.
 
-- [ ] **Step 4: Re-run student-view tests**
+- [x] **Step 4: Re-run student-view tests**
 
 Run:
 - `cd frontend && npx vitest run src/components/canvas/CanvasModuleView.test.tsx src/pages/AppLearningPage.test.tsx`
@@ -575,7 +575,7 @@ Run:
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add frontend/src/components/canvas/CanvasModuleView.tsx frontend/src/components/canvas/CanvasModuleView.test.tsx frontend/src/pages/AppLearningPage.tsx frontend/src/pages/AppLearningPage.test.tsx
@@ -597,7 +597,7 @@ git commit -m "feat: render Canvas course content for students"
 
 ### Task 11: Document shipped scope and final verification
 
-- [ ] **Step 1: Run the full targeted verification set**
+- [x] **Step 1: Run the full targeted verification set**
 
 Run:
 - `pytest -q backend/tests/test_canvas_foundation.py backend/tests/test_canvas_client.py backend/tests/test_canvas_encryption.py backend/tests/test_canvas_sync.py backend/tests/test_canvas_routes.py backend/tests/test_auth_memberships.py backend/tests/test_curriculum_admin_routes.py backend/tests/test_school_foundation_routes.py`
@@ -608,7 +608,7 @@ Run:
 
 Expected: all PASS. Do not claim Firestore rules are verified if Java/Firebase Emulator is unavailable.
 
-- [ ] **Step 2: Update docs to reflect shipped state**
+- [x] **Step 2: Update docs to reflect shipped state**
 
 Modify:
 - `docs/school-integration/TASKS.md`
@@ -623,7 +623,7 @@ Modify:
 - `docs/school-integration/TECH_SPEC.md`
   - only if implementation narrowed or clarified architecture
 
-- [ ] **Step 3: Manual smoke test against a real Canvas sandbox**
+- [x] **Step 3: Manual smoke test against a real Canvas sandbox**
 
 Verify end-to-end:
 1. Validate PAT against a real Canvas sandbox teacher account.
@@ -635,7 +635,7 @@ Verify end-to-end:
 7. Trigger a re-sync and confirm cooldown behavior.
 8. Disconnect and confirm Lingual class/enrollments/assignments remain.
 
-- [ ] **Step 4: Commit docs and verification follow-up**
+- [x] **Step 4: Commit docs and verification follow-up**
 
 ```bash
 git add docs/school-integration/TASKS.md docs/school-integration/LIMITATIONS.md docs/school-integration/TECH_SPEC.md docs/superpowers/specs/2026-03-18-canvas-lms-integration-design.md

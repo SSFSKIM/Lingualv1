@@ -1041,4 +1041,4 @@ Official references used to shape the architecture:
 - Should analytics rollups run in Flask, Cloud Functions, or scheduled GCP jobs for beta?
 - Should curriculum package payloads live fully in Firestore, Cloud Storage, or a mixed model?
 - Do we store any raw audio by default for general speaking assignments, or only for pronunciation-enabled assignments?
-- Which LMS gets the first real integration path: Google Classroom or Canvas?
+- ~~Which LMS gets the first real integration path: Google Classroom or Canvas?~~ **Resolved: Canvas LMS first. Implemented with PAT-based auth, per-class connections stored in `canvas_connections` (encrypted PAT via AES-256-GCM), roster sync with email-first matching, `pending_sync` enrollment status, and `canvas_course_content` for student module view. See `backend/services/canvas/` and `backend/routes/integrations.py`.**

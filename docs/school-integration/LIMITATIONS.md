@@ -28,9 +28,9 @@ This is not the product source of truth. Product and architecture decisions stil
 Impact: fast for pilot setup, but not yet suitable for real multi-teacher org administration.
 Planned follow-up: org settings, invite flows, and role management.
 
-2. Student invite/join flow is live via class join codes, but advanced roster workflows are not yet available.
-Impact: teachers can generate/regenerate/deactivate 6-character join codes, students can join via `/app/join`, and teachers can view the roster and remove students. However, LMS roster sync, CSV import, bulk invite, and email-based invitations are not yet implemented.
-Planned follow-up: LMS integration (Google Classroom / Canvas), CSV roster import, and email-based invitations.
+2. Student invite/join flow supports class join codes and Canvas LMS roster sync, but advanced roster workflows are not yet complete.
+Impact: teachers can generate/regenerate/deactivate join codes, students can join via `/app/join`, and teachers can view the roster and remove students. Canvas LMS roster sync is now available — matched students get active enrollments, unmatched students get `pending_sync` enrollments that auto-activate on login. However, CSV import, bulk invite, and email-based invitations are not yet implemented.
+Planned follow-up: CSV roster import, email-based invitations, and Google Classroom integration.
 
 3. Teacher analytics are available at class, assignment, and student level with basic filtering, but are still heuristic-based.
 Impact: teachers can now navigate from the dashboard to class analytics (aggregated across assignments), student drill-down (per-student across assignments), and per-assignment analytics. The dashboard now supports a class filter that recalculates summary stats for a single class, and the class analytics page supports date range filtering (server-side session filtering) and assignment status filtering (client-side). However, all metrics (speaking time, rubric scores, error detection) are still heuristic estimates from transcript-level signals, not model-verified or provider-accurate. The dashboard-level speaking minutes stat remains hardcoded at 0 until session aggregation is wired to the dashboard endpoint.
@@ -67,6 +67,12 @@ Planned follow-up: async deletion execution if needed post-beta, Firebase Storag
 10. Firestore rules are now school-aware and validated via Firebase Emulator rule tests (`firebase-tests/`). Deployment rehearsal is still pending before pilot hardening is complete.
 Impact: rule logic is validated against emulator tests covering all school collections and role-based access patterns.
 Planned follow-up: deployment verification during hardening.
+
+### Canvas LMS integration
+
+12. Canvas LMS integration is implemented for beta scope with the following constraints:
+Impact: PAT-based auth (one connection per class), manual re-sync only (no webhooks), email-first identity matching with pending_sync for unmatched students. Canvas connections store encrypted PATs server-side (AES-256-GCM). Students see synced course content via `canvas_course_content` collection. Assignment-to-Canvas item linking is available but not yet wired into the assignment builder page UI. Firebase emulator rule tests require Java runtime which may not be available in all environments.
+Planned follow-up: OAuth2 flow for Canvas auth, automatic webhook-based sync, SIS ID fallback matching, assignment builder integration for link picker, and sync cooldown enforcement.
 
 11. Disclosure logging covers two endpoints (teacher student analytics drill-down, admin compliance roster) but not all sensitive read paths.
 Impact: the admin roster view logs a single org-scoped event (`student_uid=''`) rather than per-student events to avoid N+1 writes. Other endpoints that surface student data (e.g., class analytics, student drill-down compliance tab, guardian packet views) do not yet emit disclosure events.

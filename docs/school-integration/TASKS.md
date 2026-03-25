@@ -55,10 +55,20 @@ Owner: Engineering + Product
 
 ### LMS / roster import
 
-- [ ] Decide first LMS integration order.
-- [!] Choose first-party priority between Google Classroom and Canvas.
-- [ ] Implement LMS connection record model.
-- [ ] Implement roster import service abstraction.
+- [x] Decide first LMS integration order — Canvas LMS first.
+- [x] Choose first-party priority between Google Classroom and Canvas — Canvas chosen.
+- [x] Implement LMS connection record model (`canvas_connections`, `canvas_course_content` collections).
+- [x] Implement Canvas API client with pagination and typed errors (`backend/services/canvas/client.py`).
+- [x] Implement PAT encryption with AES-256-GCM (`backend/services/canvas/encryption.py`).
+- [x] Implement roster sync service with email match and pending_sync flow (`backend/services/canvas/sync.py`).
+- [x] Implement Canvas integration routes: validate, connect, sync, status, disconnect, link/unlink (`backend/routes/integrations.py`).
+- [x] Activate pending Canvas enrollments on student login (`backend/routes/auth.py`).
+- [x] Add Firestore rules for Canvas collections (deny-all for connections, enrolled-student read for content).
+- [x] Build teacher Canvas connect flow (two-step: validate PAT + select course) (`CanvasConnectPage.tsx`).
+- [x] Build Canvas sync status component for class analytics page (`CanvasSyncStatus.tsx`).
+- [x] Build Canvas assignment link picker (`CanvasLinkPicker.tsx`).
+- [x] Build student Canvas module view component (`CanvasModuleView.tsx`).
+- [x] Add Canvas link button to teacher dashboard class cards.
 - [ ] Add manual CSV fallback if LMS setup is delayed.
 
 ## Phase 3: Curriculum mapping and assignment authoring
