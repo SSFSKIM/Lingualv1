@@ -100,10 +100,12 @@ Schema:
     - class_id: str
     - student_uid: str
     - student_membership_id: str (optional)
-    - status: str
-    - join_source: str
+    - status: str ('active' | 'inactive' | 'pending_sync')
+    - join_source: str ('manual' | 'join_code' | 'canvas')
     - student_number: str (optional)
     - guardian_contact_required: bool
+    - canvas_user_id: str (optional, Canvas integration)
+    - canvas_email: str (optional, Canvas integration)
     - created_at: timestamp
     - updated_at: timestamp
 
@@ -339,6 +341,16 @@ def get_deletion_execution_runs_collection():
     return get_db().collection('deletion_execution_runs')
 
 
+def get_canvas_connections_collection():
+    """Get canvas connections collection."""
+    return get_db().collection('canvas_connections')
+
+
+def get_canvas_course_content_collection():
+    """Get canvas course content collection."""
+    return get_db().collection('canvas_course_content')
+
+
 def get_practice_sessions_collection():
     """Get practice sessions collection."""
     return get_db().collection('practice_sessions')
@@ -402,6 +414,16 @@ def get_deletion_request_ref(request_id):
 def get_deletion_execution_run_ref(run_id):
     """Get deletion execution run document reference."""
     return get_deletion_execution_runs_collection().document(run_id)
+
+
+def get_canvas_connection_ref(connection_id):
+    """Get canvas connection document reference."""
+    return get_canvas_connections_collection().document(connection_id)
+
+
+def get_canvas_course_content_ref(content_id):
+    """Get canvas course content document reference."""
+    return get_canvas_course_content_collection().document(content_id)
 
 
 def get_practice_session_ref(session_id):
@@ -774,6 +796,7 @@ def create_class(
     grade_band='',
     status='active',
     class_id=None,
+    canvas_course_id='',
 ):
     """Create a class document."""
     doc_ref = get_class_ref(class_id) if class_id else get_classes_collection().document()
@@ -786,6 +809,7 @@ def create_class(
         'teacher_membership_ids': _normalize_string_list(teacher_membership_ids or []),
         'grade_band': grade_band,
         'status': status,
+        'canvas_course_id': canvas_course_id or '',
         'created_at': firestore.SERVER_TIMESTAMP,
         'updated_at': firestore.SERVER_TIMESTAMP,
     }
@@ -850,6 +874,8 @@ def create_enrollment(
     student_number='',
     guardian_contact_required=False,
     enrollment_id=None,
+    canvas_user_id='',
+    canvas_email='',
 ):
     """Create an enrollment document."""
     deterministic_enrollment_id = enrollment_id or f'{class_id}_{student_uid}'
@@ -862,6 +888,8 @@ def create_enrollment(
         'join_source': join_source,
         'student_number': student_number,
         'guardian_contact_required': bool(guardian_contact_required),
+        'canvas_user_id': canvas_user_id or '',
+        'canvas_email': canvas_email or '',
         'created_at': firestore.SERVER_TIMESTAMP,
         'updated_at': firestore.SERVER_TIMESTAMP,
     }
@@ -1252,6 +1280,7 @@ def create_assignment(
     success_criteria=None,
     created_by_uid='',
     assignment_id=None,
+    canvas_module_item_id='',
 ):
     """Create an assignment document."""
     doc_ref = get_assignment_ref(assignment_id) if assignment_id else get_assignments_collection().document()
@@ -1269,6 +1298,7 @@ def create_assignment(
         'task_type': task_type,
         'success_criteria': _normalize_string_list(success_criteria or []),
         'created_by_uid': created_by_uid,
+        'canvas_module_item_id': canvas_module_item_id or '',
         'created_at': firestore.SERVER_TIMESTAMP,
         'updated_at': firestore.SERVER_TIMESTAMP,
     }
@@ -1943,3 +1973,221 @@ def list_deletion_execution_runs(request_id, limit=20):
         runs.append(data)
     runs.sort(key=lambda r: r.get('attempt_number', 0))
     return runs[:limit]
+
+
+# ── Canvas LMS integration helpers ──────────────────────────────────────
+
+
+def create_canvas_connection(
+    membership_id,
+    org_id,
+    class_id,
+    canvas_instance_url,
+    canvas_course_id,
+    canvas_course_name='',
+    encrypted_pat='',
+    connection_id=None,
+):
+    """Create a canvas connection record (server-only, never client-readable)."""
+    doc_ref = get_canvas_connection_ref(connection_id) if connection_id else get_canvas_connections_collection().document()
+    connection_data = {
+        'membership_id': membership_id,
+        'org_id': org_id,
+        'class_id': class_id,
+        'canvas_instance_url': canvas_instance_url,
+        'canvas_course_id': str(canvas_course_id),
+        'canvas_course_name': canvas_course_name or '',
+        'encrypted_pat': encrypted_pat,
+        'last_synced_at': None,
+        'sync_status': 'idle',
+        'created_at': firestore.SERVER_TIMESTAMP,
+        'updated_at': firestore.SERVER_TIMESTAMP,
+    }
+    doc_ref.set(connection_data)
+    return doc_ref.id
+
+
+def get_canvas_connection(connection_id):
+    """Get a canvas connection by ID."""
+    doc = get_canvas_connection_ref(connection_id).get()
+    if not doc.exists:
+        return None
+    data = doc.to_dict() or {}
+    data['id'] = doc.id
+    return data
+
+
+def get_canvas_connection_by_class(class_id):
+    """Get the canvas connection for a class (at most one per class)."""
+    docs = (
+        get_canvas_connections_collection()
+        .where('class_id', '==', class_id)
+        .limit(1)
+        .stream()
+    )
+    for doc in docs:
+        data = doc.to_dict() or {}
+        data['id'] = doc.id
+        return data
+    return None
+
+
+def update_canvas_connection(connection_id, updates):
+    """Update a canvas connection record."""
+    payload = dict(updates or {})
+    payload['updated_at'] = firestore.SERVER_TIMESTAMP
+    get_canvas_connection_ref(connection_id).update(payload)
+
+
+def delete_canvas_connection(connection_id):
+    """Delete a canvas connection and its associated course content."""
+    connection = get_canvas_connection(connection_id)
+    if not connection:
+        return
+    # Delete all course content for this connection
+    docs = (
+        get_canvas_course_content_collection()
+        .where('connection_id', '==', connection_id)
+        .stream()
+    )
+    batch = get_db().batch()
+    count = 0
+    for doc in docs:
+        batch.delete(doc.reference)
+        count += 1
+        if count >= 400:
+            batch.commit()
+            batch = get_db().batch()
+            count = 0
+    if count > 0:
+        batch.commit()
+    # Delete the connection itself
+    get_canvas_connection_ref(connection_id).delete()
+
+
+def replace_canvas_course_content_for_connection(connection_id, class_id, items):
+    """Atomically replace all canvas course content for a connection.
+
+    Deletes existing content, then writes new items in batches.
+    Each item is a dict with Canvas module/item fields.
+    """
+    # Delete existing content
+    existing = (
+        get_canvas_course_content_collection()
+        .where('connection_id', '==', connection_id)
+        .stream()
+    )
+    batch = get_db().batch()
+    count = 0
+    for doc in existing:
+        batch.delete(doc.reference)
+        count += 1
+        if count >= 400:
+            batch.commit()
+            batch = get_db().batch()
+            count = 0
+    if count > 0:
+        batch.commit()
+
+    # Write new items
+    batch = get_db().batch()
+    count = 0
+    now = firestore.SERVER_TIMESTAMP
+    for item in items:
+        doc_ref = get_canvas_course_content_collection().document()
+        doc_data = {
+            'connection_id': connection_id,
+            'class_id': class_id,
+            'canvas_module_id': str(item.get('canvas_module_id', '')),
+            'canvas_module_name': item.get('canvas_module_name', ''),
+            'canvas_module_position': item.get('canvas_module_position', 0),
+            'item_id': str(item.get('item_id', '')) if item.get('item_id') else None,
+            'item_title': item.get('item_title', ''),
+            'item_type': item.get('item_type', ''),
+            'item_position': item.get('item_position', 0),
+            'item_html_url': item.get('item_html_url', ''),
+            'due_at': item.get('due_at'),
+            'lingual_assignment_id': item.get('lingual_assignment_id'),
+            'updated_at': now,
+        }
+        batch.set(doc_ref, doc_data)
+        count += 1
+        if count >= 400:
+            batch.commit()
+            batch = get_db().batch()
+            count = 0
+    if count > 0:
+        batch.commit()
+
+
+def list_canvas_course_content_for_class(class_id):
+    """List canvas course content for a class, ordered by module then item position."""
+    docs = (
+        get_canvas_course_content_collection()
+        .where('class_id', '==', class_id)
+        .order_by('canvas_module_position')
+        .order_by('item_position')
+        .stream()
+    )
+    items = []
+    for doc in docs:
+        data = doc.to_dict() or {}
+        data['id'] = doc.id
+        items.append(data)
+    return items
+
+
+def list_pending_canvas_enrollments_by_email(email):
+    """Find pending_sync enrollments by canvas_email (for login-time activation)."""
+    if not email:
+        return []
+    docs = (
+        get_enrollments_collection()
+        .where('canvas_email', '==', email)
+        .where('status', '==', 'pending_sync')
+        .stream()
+    )
+    results = []
+    for doc in docs:
+        data = doc.to_dict() or {}
+        data['id'] = doc.id
+        results.append(data)
+    return results
+
+
+def activate_pending_canvas_enrollment(enrollment_id, student_uid, student_membership_id):
+    """Convert a pending_sync enrollment to active with a real student uid."""
+    get_enrollment_ref(enrollment_id).update({
+        'student_uid': student_uid,
+        'student_membership_id': student_membership_id,
+        'status': 'active',
+        'updated_at': firestore.SERVER_TIMESTAMP,
+    })
+
+
+def link_assignment_to_canvas_item(assignment_id, canvas_content_id, canvas_module_item_id):
+    """Atomically link a Lingual assignment to a Canvas module item using a batch write."""
+    batch = get_db().batch()
+    batch.update(get_assignment_ref(assignment_id), {
+        'canvas_module_item_id': canvas_module_item_id,
+        'updated_at': firestore.SERVER_TIMESTAMP,
+    })
+    batch.update(get_canvas_course_content_ref(canvas_content_id), {
+        'lingual_assignment_id': assignment_id,
+        'updated_at': firestore.SERVER_TIMESTAMP,
+    })
+    batch.commit()
+
+
+def unlink_assignment_from_canvas_item(assignment_id, canvas_content_id):
+    """Atomically unlink a Lingual assignment from a Canvas module item."""
+    batch = get_db().batch()
+    batch.update(get_assignment_ref(assignment_id), {
+        'canvas_module_item_id': '',
+        'updated_at': firestore.SERVER_TIMESTAMP,
+    })
+    batch.update(get_canvas_course_content_ref(canvas_content_id), {
+        'lingual_assignment_id': None,
+        'updated_at': firestore.SERVER_TIMESTAMP,
+    })
+    batch.commit()
