@@ -337,3 +337,14 @@ export type {
   ActivityTemplateDefinition,
   CurriculumPackageV1,
 } from './curriculum';
+
+export type {
+  CanvasConnectResult,
+  CanvasConnectionStatus,
+  CanvasCourse,
+  CanvasCourseContentItem,
+  CanvasSyncResult,
+  CanvasSyncRosterResult,
+  CanvasTeacher,
+  CanvasValidateResult,
+} from './canvas';

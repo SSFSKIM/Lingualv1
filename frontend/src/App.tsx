@@ -33,6 +33,7 @@ const TeacherAssignmentAnalyticsPage = lazy(() => import('./pages/TeacherAssignm
 const TeacherClassAnalyticsPage = lazy(() => import('./pages/TeacherClassAnalyticsPage').then((module) => ({ default: module.TeacherClassAnalyticsPage })));
 const TeacherClassCompliancePage = lazy(() => import('./pages/TeacherClassCompliancePage').then((module) => ({ default: module.TeacherClassCompliancePage })));
 const TeacherStudentDrillDownPage = lazy(() => import('./pages/TeacherStudentDrillDownPage').then((module) => ({ default: module.TeacherStudentDrillDownPage })));
+const CanvasConnectPage = lazy(() => import('./pages/CanvasConnectPage').then((module) => ({ default: module.CanvasConnectPage })));
 const StudentJoinClassPage = lazy(() => import('./pages/StudentJoinClassPage').then((module) => ({ default: module.StudentJoinClassPage })));
 const AssignmentLaunchPage = lazy(() => import('./pages/AssignmentLaunchPage').then((module) => ({ default: module.AssignmentLaunchPage })));
 const GuardianConsentPage = lazy(() => import('./pages/GuardianConsentPage').then((module) => ({ default: module.GuardianConsentPage })));
@@ -126,6 +127,22 @@ function AnimatedRoutes() {
             element={withRouteSuspense(
               <TeacherRoute>
                 <TeacherClassCompliancePage />
+              </TeacherRoute>
+            )}
+          />
+          <Route
+            path="teacher/classes/:classId/canvas/connect"
+            element={withRouteSuspense(
+              <TeacherRoute>
+                <CanvasConnectPage />
+              </TeacherRoute>
+            )}
+          />
+          <Route
+            path="teacher/canvas/connect"
+            element={withRouteSuspense(
+              <TeacherRoute>
+                <CanvasConnectPage />
               </TeacherRoute>
             )}
           />
