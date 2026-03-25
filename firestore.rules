@@ -167,6 +167,16 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    match /canvas_connections/{connectionId} {
+      allow read, write: if false;
+    }
+
+    match /canvas_course_content/{contentId} {
+      allow read: if resource.data.class_id is string
+        && hasStudentEnrollmentForClass(resource.data.class_id);
+      allow write: if false;
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }

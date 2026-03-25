@@ -91,6 +91,25 @@ beforeEach(async () => {
     await setDoc(doc(db, 'deletion_execution_runs', 'run1'), {
       org_id: 'org1',
     });
+
+    // Canvas connection (server-only, deny-all for clients)
+    await setDoc(doc(db, 'canvas_connections', 'conn1'), {
+      membership_id: 'mem_teacher1',
+      org_id: 'org1',
+      class_id: 'class1',
+      canvas_instance_url: 'https://school.instructure.com',
+      canvas_course_id: '12345',
+      encrypted_pat: 'encrypted_data_here',
+    });
+
+    // Canvas course content (enrolled students can read)
+    await setDoc(doc(db, 'canvas_course_content', 'content1'), {
+      connection_id: 'conn1',
+      class_id: 'class1',
+      canvas_module_position: 1,
+      item_position: 1,
+      title: 'Module 1 - Item 1',
+    });
   });
 });
 
@@ -331,6 +350,55 @@ describe('deletion_execution_runs/{runId}', () => {
   it('nobody can write', async () => {
     const db = authedDb('admin1');
     await assertFails(setDoc(doc(db, 'deletion_execution_runs', 'run1'), { status: 'completed' }));
+  });
+});
+
+describe('canvas_connections/{connectionId}', () => {
+  it('teacher cannot read (server-only)', async () => {
+    const db = authedDb('teacher1');
+    await assertFails(getDoc(doc(db, 'canvas_connections', 'conn1')));
+  });
+
+  it('admin cannot read (server-only)', async () => {
+    const db = authedDb('admin1');
+    await assertFails(getDoc(doc(db, 'canvas_connections', 'conn1')));
+  });
+
+  it('student cannot read', async () => {
+    const db = authedDb('student1');
+    await assertFails(getDoc(doc(db, 'canvas_connections', 'conn1')));
+  });
+
+  it('outsider cannot read', async () => {
+    const db = authedDb('outsider');
+    await assertFails(getDoc(doc(db, 'canvas_connections', 'conn1')));
+  });
+
+  it('nobody can write', async () => {
+    const db = authedDb('teacher1');
+    await assertFails(setDoc(doc(db, 'canvas_connections', 'conn1'), { encrypted_pat: 'stolen' }));
+  });
+});
+
+describe('canvas_course_content/{contentId}', () => {
+  it('enrolled student can read', async () => {
+    const db = authedDb('student1');
+    await assertSucceeds(getDoc(doc(db, 'canvas_course_content', 'content1')));
+  });
+
+  it('teacher cannot read (server-only access for writes, student-only for reads)', async () => {
+    const db = authedDb('teacher1');
+    await assertFails(getDoc(doc(db, 'canvas_course_content', 'content1')));
+  });
+
+  it('outsider cannot read', async () => {
+    const db = authedDb('outsider');
+    await assertFails(getDoc(doc(db, 'canvas_course_content', 'content1')));
+  });
+
+  it('nobody can write', async () => {
+    const db = authedDb('student1');
+    await assertFails(setDoc(doc(db, 'canvas_course_content', 'content1'), { title: 'hacked' }));
   });
 });
 

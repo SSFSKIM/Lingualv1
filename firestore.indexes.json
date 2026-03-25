@@ -85,6 +85,38 @@
           "order": "DESCENDING"
         }
       ]
+    },
+    {
+      "collectionGroup": "enrollments",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "canvas_email",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "canvas_course_content",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "class_id",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "canvas_module_position",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "item_position",
+          "order": "ASCENDING"
+        }
+      ]
     }
   ],
   "fieldOverrides": []
