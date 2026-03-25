@@ -12,6 +12,7 @@ import {
   Plus,
   School,
   Trash2,
+  Link as LinkIcon,
   UserPlus,
   Users,
 } from 'lucide-react';
@@ -504,6 +505,14 @@ export function TeacherDashboardPage() {
                       onClick={() => navigate(`/app/teacher/classes/${classSummary.id}/assignments`)}
                     >
                       Build assignments
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => navigate(`/app/teacher/classes/${classSummary.id}/canvas/connect`)}
+                    >
+                      <LinkIcon size={14} className="mr-1.5" />
+                      Canvas
                     </Button>
                   </div>
                 </div>

@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { getClassAnalytics } from '@/api/teacher';
 import { Alert, AlertDescription, Badge, Button, Card } from '@/components/ui';
+import { CanvasSyncStatus } from '@/components/canvas/CanvasSyncStatus';
 import { OnboardingHint } from '@/components/ui/OnboardingHint';
 import type { ClassAnalyticsData } from '@/types';
 
@@ -150,6 +151,7 @@ export function TeacherClassAnalyticsPage() {
             Compliance ops
           </Button>
         </div>
+        {classId && <CanvasSyncStatus classId={classId} />}
         <h1 className="text-3xl font-display font-bold text-foreground">{analytics.class.name}</h1>
         <p className="mt-2 text-sm text-muted-foreground">
           {analytics.class.subject || 'Language practice'} · {analytics.class.term || 'Current term'}
