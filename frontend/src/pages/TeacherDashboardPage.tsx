@@ -611,7 +611,7 @@ export function TeacherDashboardPage() {
                   <p className="text-center text-sm text-success font-medium">Copied to clipboard!</p>
                 )}
                 <p className="text-center text-sm text-muted-foreground">
-                  Students go to <strong>/app/join</strong> and enter this code.
+                  Students go to <strong>l1ngual.com/app/join</strong> and enter this code.
                 </p>
               </div>
             ) : (
