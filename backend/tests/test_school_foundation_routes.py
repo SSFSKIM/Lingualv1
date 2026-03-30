@@ -27,6 +27,7 @@ class FakeSchoolDb:
                 'name': 'Teacher User',
                 'email': 'teacher@example.com',
                 'profile': {'display_name': 'Teacher User', 'age': 32},
+                'lingual_admin': True,
             },
             'student-1': {
                 'uid': 'student-1',
@@ -149,6 +150,12 @@ class FakeSchoolDb:
 
     def get_user(self, uid):
         return self.users.get(uid)
+
+    def get_user_field(self, uid, field):
+        user = self.users.get(uid)
+        if user:
+            return user.get(field)
+        return None
 
     def get_organization(self, org_id):
         return self.organizations.get(org_id)

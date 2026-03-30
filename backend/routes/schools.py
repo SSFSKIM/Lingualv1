@@ -151,6 +151,14 @@ def create_schools_blueprint(deps: RouteDeps) -> Blueprint:
     def api_create_school():
         try:
             uid = deps.get_current_user_uid()
+
+            # Gate: only lingual_admin can create schools directly
+            if not deps.db.get_user_field(uid, 'lingual_admin'):
+                return jsonify({
+                    "success": False,
+                    "error": "School creation requires Lingual approval. Submit a request at /app/request-school."
+                }), 403
+
             data = request.get_json() or {}
 
             org_name = _normalize_string(data.get("orgName"))
