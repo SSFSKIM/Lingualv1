@@ -403,6 +403,10 @@ def create_test_harness_blueprint(deps: RouteDeps) -> Blueprint:
         profile = user.get("profile", {}) if isinstance(user.get("profile"), dict) else {}
         user_payload["profile"] = profile
 
+        # Include lingual_admin flag if set
+        if user.get("lingual_admin"):
+            user_payload["lingualAdmin"] = True
+
         return jsonify({"success": True, "user": user_payload})
 
     return bp
