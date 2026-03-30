@@ -8,6 +8,7 @@ import { LearningLocaleProvider } from './contexts/LearningLocaleContext';
 import { ProtectedRoute } from './components/layout/ProtectedRoute';
 import { AppProtectedRoute } from './components/layout/AppProtectedRoute';
 import { TeacherRoute } from './components/layout/TeacherRoute';
+import { LingualAdminRoute } from './components/layout/LingualAdminRoute';
 import { LoadingSpinner } from './components/common';
 
 const LandingPage = lazy(() => import('./pages/LandingPage').then((module) => ({ default: module.LandingPage })));
@@ -15,6 +16,8 @@ const AuthPage = lazy(() => import('./pages/AuthPage').then((module) => ({ defau
 const GeneralPage = lazy(() => import('./pages/GeneralPage').then((module) => ({ default: module.GeneralPage })));
 const InitialOnboardingPage = lazy(() => import('./pages/InitialOnboardingPage').then((module) => ({ default: module.InitialOnboardingPage })));
 const SchoolOnboardingPage = lazy(() => import('./pages/SchoolOnboardingPage').then((module) => ({ default: module.SchoolOnboardingPage })));
+const SchoolRequestPage = lazy(() => import('./pages/SchoolRequestPage').then((module) => ({ default: module.SchoolRequestPage })));
+const LingualSchoolRequestsPage = lazy(() => import('./pages/LingualSchoolRequestsPage').then((module) => ({ default: module.LingualSchoolRequestsPage })));
 const AssessmentPage = lazy(() => import('./pages/AssessmentPage').then((module) => ({ default: module.AssessmentPage })));
 const CategoriesPage = lazy(() => import('./pages/CategoriesPage').then((module) => ({ default: module.CategoriesPage })));
 const ProfilePage = lazy(() => import('./pages/ProfilePage').then((module) => ({ default: module.ProfilePage })));
@@ -70,7 +73,7 @@ function AnimatedRoutes() {
         <Route element={<ProtectedRoute />}>
           <Route path="/general" element={withRouteSuspense(<GeneralPage />)} />
           <Route path="/onboarding" element={withRouteSuspense(<InitialOnboardingPage />)} />
-          <Route path="/school/setup" element={withRouteSuspense(<SchoolOnboardingPage />)} />
+          <Route path="/school/setup" element={withRouteSuspense(<SchoolRequestPage />)} />
           <Route path="/assessment" element={withRouteSuspense(<AssessmentPage />)} />
           <Route path="/categories" element={withRouteSuspense(<CategoriesPage />)} />
           <Route path="/chat" element={<Navigate to="/app/chat" replace />} />
@@ -177,6 +180,14 @@ function AnimatedRoutes() {
               <TeacherRoute>
                 <AdminCompliancePage />
               </TeacherRoute>
+            )}
+          />
+          <Route
+            path="admin/school-requests"
+            element={withRouteSuspense(
+              <LingualAdminRoute>
+                <LingualSchoolRequestsPage />
+              </LingualAdminRoute>
             )}
           />
         </Route>
