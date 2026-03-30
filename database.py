@@ -351,6 +351,16 @@ def get_canvas_course_content_collection():
     return get_db().collection('canvas_course_content')
 
 
+def get_school_requests_collection():
+    """Get school requests collection."""
+    return get_db().collection('school_requests')
+
+
+def get_school_request_ref(request_id):
+    """Get school request document reference."""
+    return get_school_requests_collection().document(request_id)
+
+
 def get_practice_sessions_collection():
     """Get practice sessions collection."""
     return get_db().collection('practice_sessions')
@@ -492,6 +502,14 @@ def get_or_create_user(uid, email, name):
     if user is None:
         user = create_user(uid, email, name)
     return user
+
+
+def get_user_field(uid, field):
+    """Get a single field from a user document."""
+    user = get_user(uid)
+    if user:
+        return user.get(field)
+    return None
 
 
 def get_user_by_email(email):
@@ -2220,3 +2238,71 @@ def unlink_assignment_from_canvas_item(assignment_id, canvas_content_id):
         'updated_at': firestore.SERVER_TIMESTAMP,
     })
     batch.commit()
+
+
+def create_school_request(requester_uid, requester_email, requester_name,
+                          school_name, org_type, website_url='', canvas_instance_url=''):
+    """Create a school join request."""
+    doc_ref = get_school_requests_collection().document()
+    doc_ref.set({
+        'requester_uid': requester_uid,
+        'requester_email': requester_email,
+        'requester_name': requester_name,
+        'school_name': school_name,
+        'org_type': org_type,
+        'website_url': website_url or '',
+        'canvas_instance_url': canvas_instance_url or '',
+        'status': 'pending',
+        'reviewed_by_uid': None,
+        'reviewed_at': None,
+        'rejection_reason': None,
+        'created_org_id': None,
+        'created_at': firestore.SERVER_TIMESTAMP,
+    })
+    return doc_ref.id
+
+
+def get_school_request(request_id):
+    """Get a school request by ID."""
+    doc = get_school_request_ref(request_id).get()
+    if not doc.exists:
+        return None
+    data = doc.to_dict() or {}
+    data['id'] = doc.id
+    return data
+
+
+def get_user_school_request(uid):
+    """Get the most recent school request for a user."""
+    docs = (
+        get_school_requests_collection()
+        .where('requester_uid', '==', uid)
+        .order_by('created_at', direction=firestore.Query.DESCENDING)
+        .limit(1)
+        .stream()
+    )
+    for doc in docs:
+        data = doc.to_dict() or {}
+        data['id'] = doc.id
+        return data
+    return None
+
+
+def list_school_requests(status_filter=None):
+    """List school requests, optionally filtered by status."""
+    query = get_school_requests_collection()
+    if status_filter:
+        query = query.where('status', '==', status_filter)
+    docs = query.order_by('created_at', direction=firestore.Query.DESCENDING).stream()
+    results = []
+    for doc in docs:
+        data = doc.to_dict() or {}
+        data['id'] = doc.id
+        results.append(data)
+    return results
+
+
+def update_school_request(request_id, updates):
+    """Update fields on a school request."""
+    updates['updated_at'] = firestore.SERVER_TIMESTAMP
+    get_school_request_ref(request_id).update(updates)
