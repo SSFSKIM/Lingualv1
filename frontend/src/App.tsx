@@ -45,6 +45,8 @@ const AdminDeletionRequestsPage = lazy(() => import('./pages/AdminDeletionReques
 const AdminCompliancePage = lazy(() => import('./pages/AdminCompliancePage').then((module) => ({ default: module.AdminCompliancePage })));
 const CompliancePage = lazy(() => import('./pages/CompliancePage'));
 const CanvasPracticeBuilderPage = lazy(() => import('./pages/CanvasPracticeBuilderPage').then((module) => ({ default: module.CanvasPracticeBuilderPage })));
+const LtiLinkAccountPage = lazy(() => import('./pages/LtiLinkAccountPage').then((m) => ({ default: m.LtiLinkAccountPage })));
+const LtiAssignmentPickerPage = lazy(() => import('./pages/LtiAssignmentPickerPage').then((m) => ({ default: m.LtiAssignmentPickerPage })));
 
 function RouteLoadingScreen() {
   return (
@@ -69,6 +71,8 @@ function AnimatedRoutes() {
         <Route path="/auth" element={withRouteSuspense(<AuthPage />)} />
         <Route path="/guardian/consent/:token" element={withRouteSuspense(<GuardianConsentPage />)} />
         <Route path="/compliance" element={withRouteSuspense(<CompliancePage />)} />
+        <Route path="/lti/link-account" element={withRouteSuspense(<LtiLinkAccountPage />)} />
+        <Route path="/lti/assignment-picker" element={withRouteSuspense(<LtiAssignmentPickerPage />)} />
 
         {/* Protected Routes */}
         <Route element={<ProtectedRoute />}>
