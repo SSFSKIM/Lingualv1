@@ -161,5 +161,5 @@ function groupByModule(items: CanvasCourseContentItem[]): ModuleGroup[] {
     }
     map[item.canvasModuleId].items.push(item);
   }
-  return Object.values(map).sort((a, b) => a.position - b.position);
+  return Object.values(map).sort((a, b) => b.position - a.position);
 }
