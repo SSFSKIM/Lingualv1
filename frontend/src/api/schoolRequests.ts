@@ -120,9 +120,9 @@ export const rejectTeacherInvitation = async (
 // --- Join school as teacher ---
 
 export interface JoinSchoolAsTeacherResult {
-  membershipId: string;
-  orgId: string;
+  invitationId: string;
   orgName: string;
+  status: string;
 }
 
 export const joinSchoolAsTeacher = async (
@@ -133,8 +133,8 @@ export const joinSchoolAsTeacher = async (
     { inviteCode },
   );
   return {
-    membershipId: response.data.membershipId,
-    orgId: response.data.orgId,
+    invitationId: response.data.invitationId,
     orgName: response.data.orgName,
+    status: response.data.status,
   };
 };

@@ -38,6 +38,7 @@ const TeacherClassCompliancePage = lazy(() => import('./pages/TeacherClassCompli
 const TeacherStudentDrillDownPage = lazy(() => import('./pages/TeacherStudentDrillDownPage').then((module) => ({ default: module.TeacherStudentDrillDownPage })));
 const CanvasConnectPage = lazy(() => import('./pages/CanvasConnectPage').then((module) => ({ default: module.CanvasConnectPage })));
 const StudentJoinClassPage = lazy(() => import('./pages/StudentJoinClassPage').then((module) => ({ default: module.StudentJoinClassPage })));
+const TeacherJoinSchoolPage = lazy(() => import('./pages/TeacherJoinSchoolPage').then((module) => ({ default: module.TeacherJoinSchoolPage })));
 const AssignmentLaunchPage = lazy(() => import('./pages/AssignmentLaunchPage').then((module) => ({ default: module.AssignmentLaunchPage })));
 const GuardianConsentPage = lazy(() => import('./pages/GuardianConsentPage').then((module) => ({ default: module.GuardianConsentPage })));
 const AdminDeletionRequestsPage = lazy(() => import('./pages/AdminDeletionRequestsPage').then((module) => ({ default: module.AdminDeletionRequestsPage })));
@@ -94,6 +95,7 @@ function AnimatedRoutes() {
           <Route path="assignments/:assignmentId" element={withRouteSuspense(<AssignmentLaunchPage />)} />
           <Route path="profile" element={withRouteSuspense(<AppProfilePage />)} />
           <Route path="settings" element={withRouteSuspense(<AppSettingsPage />)} />
+          <Route path="teacher/join" element={withRouteSuspense(<TeacherJoinSchoolPage />)} />
           <Route
             path="teacher"
             element={withRouteSuspense(
