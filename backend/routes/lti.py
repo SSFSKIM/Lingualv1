@@ -380,4 +380,145 @@ def create_lti_blueprint(deps: RouteDeps) -> Blueprint:
             print(f'LTI platform deletion error: {exc}')
             return jsonify({'success': False, 'error': str(exc)}), 500
 
+    # ══════════════════════════════════════════════════════════════════
+    # 7. POST /api/lti/link-account — Manual account linking
+    # ══════════════════════════════════════════════════════════════════
+
+    @bp.route('/api/lti/link-account', methods=['POST'])
+    @deps.login_required
+    def api_link_lti_account():
+        uid = deps.get_current_user_uid()
+        pending = session.get('lti_pending_link')
+        if not pending:
+            return jsonify({'success': False, 'error': 'No pending LTI link.'}), 400
+
+        issuer = pending.get('issuer', '')
+        canvas_user_id = pending.get('canvas_user_id', '')
+        email = pending.get('email', '')
+        roles = pending.get('roles', [])
+        canvas_course_id = pending.get('canvas_course_id', '')
+        canvas_course_title = pending.get('canvas_course_title', '')
+
+        # Find the platform for this issuer
+        platform = deps.db.get_lti_platform_by_issuer(issuer)
+        if not platform:
+            return jsonify({'success': False, 'error': 'LTI platform not found for issuer.'}), 400
+
+        org_id = platform.get('org_id', '')
+
+        # Store the LTI identity link on the user record
+        user = deps.db.get_user(uid) or {}
+        lti_identities = user.get('lti_identities', [])
+        lti_identities.append({
+            'issuer': issuer,
+            'canvas_user_id': canvas_user_id,
+            'email': email,
+            'platform_id': platform['id'],
+        })
+        deps.db.update_user(uid, {'lti_identities': lti_identities})
+
+        session.pop('lti_pending_link', None)
+
+        is_instructor = _is_instructor(roles)
+        redirect_to = '/app/teacher' if is_instructor else '/app/learn'
+
+        return jsonify({'success': True, 'redirectTo': redirect_to})
+
+    # ══════════════════════════════════════════════════════════════════
+    # 8. GET /api/lti/deep-link/assignments — List assignments for picker
+    # ══════════════════════════════════════════════════════════════════
+
+    @bp.route('/api/lti/deep-link/assignments')
+    @deps.login_required
+    def api_deep_link_assignments():
+        try:
+            deep_link_info = session.get('lti_deep_link')
+            if not deep_link_info:
+                return jsonify({'success': False, 'error': 'No deep link session. Launch from Canvas first.'}), 400
+
+            canvas_course_id = deep_link_info.get('canvas_course_id', '')
+
+            # Find the class linked to this Canvas course
+            issuer = deep_link_info.get('issuer', '')
+            platform = deps.db.get_lti_platform_by_issuer(issuer)
+            if not platform:
+                return jsonify({'success': False, 'error': 'LTI platform not found.'}), 400
+
+            org_id = platform.get('org_id', '')
+            org_classes = deps.db.list_org_classes(org_id)
+            class_id = None
+            for cls in org_classes:
+                if cls.get('canvas_course_id') == str(canvas_course_id):
+                    class_id = cls['id']
+                    break
+
+            if not class_id:
+                return jsonify({'success': True, 'assignments': []})
+
+            assignments = deps.db.list_class_assignments(class_id)
+            serialized = []
+            for a in assignments:
+                if a.get('status') == 'published':
+                    serialized.append({
+                        'id': a.get('id', ''),
+                        'title': a.get('title', 'Untitled'),
+                        'status': a.get('status', ''),
+                        'taskType': a.get('task_type', ''),
+                    })
+
+            return jsonify({'success': True, 'assignments': serialized})
+        except Exception as exc:
+            import traceback
+            traceback.print_exc()
+            return jsonify({'success': False, 'error': str(exc)}), 500
+
+    # ══════════════════════════════════════════════════════════════════
+    # 9. POST /api/lti/deep-link/respond — Submit deep link response
+    # ══════════════════════════════════════════════════════════════════
+
+    @bp.route('/api/lti/deep-link/respond', methods=['POST'])
+    @deps.login_required
+    def api_deep_link_respond():
+        try:
+            from pylti1p3.contrib.flask import FlaskMessageLaunch, FlaskRequest
+
+            data = request.get_json() or {}
+            assignment_id = data.get('assignmentId', '')
+            points = data.get('points')
+            launch_info = session.get('lti_deep_link')
+
+            if not launch_info or not assignment_id:
+                return jsonify({'success': False, 'error': 'Missing context.'}), 400
+
+            assignment = deps.db.get_assignment(assignment_id)
+            if not assignment:
+                return jsonify({'success': False, 'error': 'Assignment not found.'}), 404
+
+            from pylti1p3.deep_link_resource import DeepLinkResource
+            resource = DeepLinkResource()
+            resource.set_url(request.host_url.rstrip('/') + '/lti/callback')
+            resource.set_custom_params({'lingual_assignment_id': assignment_id})
+            resource.set_title(assignment.get('title', 'Lingual Practice'))
+
+            if points:
+                from pylti1p3.lineitem import LineItem
+                lineitem = LineItem()
+                lineitem.set_tag('lingual-grade')
+                lineitem.set_score_maximum(float(points))
+                lineitem.set_label(assignment.get('title', 'Lingual Practice'))
+                resource.set_lineitem(lineitem)
+
+            tool_conf = FirestoreToolConf(deps.db)
+            flask_req = FlaskRequest()
+            launch = FlaskMessageLaunch.from_cache(launch_info['launch_id'], flask_req, tool_conf)
+            deep_link = launch.get_deep_link()
+            html = deep_link.output_response_form_html([resource])
+
+            session.pop('lti_deep_link', None)
+            return jsonify({'success': True, 'responseHtml': html})
+        except Exception as exc:
+            import traceback
+            traceback.print_exc()
+            return jsonify({'success': False, 'error': str(exc)}), 500
+
     return bp
