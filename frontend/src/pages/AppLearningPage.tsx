@@ -164,7 +164,7 @@ export function AppLearningPage() {
             {t('app.dashboard.nextStep') || 'Pick your next practice route.'}
           </p>
         </div>
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-5">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
           <ServiceNavigationCard
             title={t('app.dashboard.card.chat.title') || 'AI Chat'}
             description={t('app.dashboard.card.chat.description') || 'Practice conversation with your AI tutor'}
@@ -173,25 +173,11 @@ export function AppLearningPage() {
             color="primary"
           />
           <ServiceNavigationCard
-            title={t('app.dashboard.card.curriculum.title') || 'Curriculum'}
-            description={t('app.dashboard.card.curriculum.description') || 'Sample AP French units and guided voice practice'}
-            icon={<BookOpen size={22} strokeWidth={2.5} />}
-            href="/app/curriculum"
-            color="success"
-          />
-          <ServiceNavigationCard
             title={t('app.dashboard.card.games.title') || 'Practice Games'}
             description={t('app.dashboard.card.games.description') || 'Flashcards, word matching, and more'}
             icon={<Gamepad2 size={22} strokeWidth={2.5} />}
             href="/app/games"
             color="accent"
-          />
-          <ServiceNavigationCard
-            title={t('app.dashboard.card.pronunciation.title') || 'Pronunciation'}
-            description={t('app.dashboard.card.pronunciation.description') || 'Practice speaking and get feedback'}
-            icon={<Mic size={22} strokeWidth={2.5} />}
-            href="/app/practice"
-            color="success"
           />
           <ServiceNavigationCard
             title={t('app.dashboard.card.progress.title') || 'Progress'}
