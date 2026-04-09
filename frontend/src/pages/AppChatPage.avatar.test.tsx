@@ -343,6 +343,14 @@ describe('AppChatPage live2d avatar wiring', () => {
       removeEventListener: vi.fn(),
       dispatchEvent: vi.fn(),
     })) as typeof window.matchMedia;
+
+    // AppChatPage reads its avatar-enabled preference from localStorage and
+    // defaults to `false` when nothing is stored. The avatar panel is only
+    // rendered when the preference is truthy, so explicitly opt in for this
+    // test suite — this matches the real-user flow where someone toggles the
+    // avatar on and the preference persists across sessions.
+    window.localStorage.clear();
+    window.localStorage.setItem('lingual:chat:avatarEnabled', 'true');
   });
 
   it('passes live2d avatar state, reaction, and audio level into the new avatar panel', async () => {
