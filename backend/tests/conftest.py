@@ -536,9 +536,56 @@ class FakeDbBase:
         a = self.assignments.get(assignment_id)
         return dict(a) if a else None
 
-    def create_assignment(self, **kwargs) -> str:
-        aid = self._next_id("assign")
-        self.assignments[aid] = {"id": aid, **kwargs, "created_at": datetime.now(UTC), "updated_at": datetime.now(UTC)}
+    def create_assignment(
+        self,
+        org_id,
+        class_id,
+        mapping_id=None,
+        title='',
+        description='',
+        status='draft',
+        release_at='',
+        due_at='',
+        modality_override=None,
+        max_attempts=None,
+        task_type='decision_making',
+        success_criteria=None,
+        created_by_uid='',
+        assignment_id=None,
+        canvas_module_item_id='',
+        instructions='',
+        canvas_module_item_ref=None,
+        objectives=None,
+        target_expressions=None,
+        focus_grammar=None,
+        generated_scenario='',
+    ) -> str:
+        aid = assignment_id or self._next_id("assign")
+        self.assignments[aid] = {
+            'id': aid,
+            'org_id': org_id,
+            'class_id': class_id,
+            'mapping_id': mapping_id,
+            'title': title,
+            'description': description or '',
+            'status': status,
+            'release_at': release_at or '',
+            'due_at': due_at or '',
+            'modality_override': modality_override or {},
+            'max_attempts': max_attempts,
+            'task_type': task_type,
+            'success_criteria': list(success_criteria or []),
+            'created_by_uid': created_by_uid,
+            'canvas_module_item_id': canvas_module_item_id or '',
+            'instructions': instructions,
+            'canvas_module_item_ref': canvas_module_item_ref,
+            'objectives': list(objectives or []),
+            'target_expressions': list(target_expressions or []),
+            'focus_grammar': list(focus_grammar or []),
+            'generated_scenario': generated_scenario,
+            'created_at': datetime.now(UTC),
+            'updated_at': datetime.now(UTC),
+        }
         return aid
 
     def list_class_assignments(self, class_id: str):

@@ -1316,8 +1316,8 @@ def list_class_curriculum_mappings(class_id):
 def create_assignment(
     org_id,
     class_id,
-    mapping_id,
-    title,
+    mapping_id=None,
+    title='',
     description='',
     status='draft',
     release_at='',
@@ -1329,6 +1329,12 @@ def create_assignment(
     created_by_uid='',
     assignment_id=None,
     canvas_module_item_id='',
+    instructions='',
+    canvas_module_item_ref=None,
+    objectives=None,
+    target_expressions=None,
+    focus_grammar=None,
+    generated_scenario='',
 ):
     """Create an assignment document."""
     doc_ref = get_assignment_ref(assignment_id) if assignment_id else get_assignments_collection().document()
@@ -1347,6 +1353,13 @@ def create_assignment(
         'success_criteria': _normalize_string_list(success_criteria or []),
         'created_by_uid': created_by_uid,
         'canvas_module_item_id': canvas_module_item_id or '',
+        # New direct scenario fields — preferred over curriculum_mappings path.
+        'instructions': instructions,
+        'canvas_module_item_ref': canvas_module_item_ref,
+        'objectives': list(objectives or []),
+        'target_expressions': list(target_expressions or []),
+        'focus_grammar': list(focus_grammar or []),
+        'generated_scenario': generated_scenario,
         'created_at': firestore.SERVER_TIMESTAMP,
         'updated_at': firestore.SERVER_TIMESTAMP,
     }
