@@ -1,11 +1,15 @@
 import { useEffect, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import * as Tabs from '@radix-ui/react-tabs';
-import { User, Bell, Shield, Lock, Smartphone, Settings } from 'lucide-react';
+import { User, Bell, Shield, Lock, Smartphone, Settings, ChevronRight, Mic } from 'lucide-react';
 import { clsx } from 'clsx';
 import { toast } from 'sonner';
 import { useAuth } from '@/hooks/useAuth';
 import { getUserProfile, updateProfile } from '@/api/user';
+import { getStudentCompliance } from '@/api/voiceConsent';
+import { Badge } from '@/components/ui';
 import type { LearningLocale, UserProfile } from '@/types';
+import type { StudentComplianceRecord } from '@/types/school';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useLearningLocale } from '@/contexts/LearningLocaleContext';
 import { DEFAULT_LEARNING_LOCALE, LEARNING_LOCALES } from '@/lib/learningLocales';
@@ -13,11 +17,13 @@ import { DEFAULT_LEARNING_LOCALE, LEARNING_LOCALES } from '@/lib/learningLocales
 export function AppSettingsPage() {
   const { t } = useLanguage();
   const { user } = useAuth();
+  const navigate = useNavigate();
   const { learningLocale, setLearningLocale } = useLearningLocale();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [selectedLocale, setSelectedLocale] = useState<LearningLocale>(learningLocale);
+  const [compliance, setCompliance] = useState<StudentComplianceRecord | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
 
@@ -41,6 +47,24 @@ export function AppSettingsPage() {
 
     loadProfile();
   }, [user?.name, t, learningLocale]);
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const record = await getStudentCompliance();
+        if (active) setCompliance(record);
+      } catch (err) {
+        // Silent: students not in a school org get 400 here. Fine to skip.
+        if (active) setCompliance(null);
+        // eslint-disable-next-line no-console
+        console.debug('compliance fetch skipped:', err);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const handleSave = async () => {
     if (!profile) return;
@@ -278,22 +302,46 @@ export function AppSettingsPage() {
               </div>
 
               <div className="space-y-4">
-                <div className="flex items-center justify-between p-4 border-2 border-border rounded-xl">
-                  <span className="font-bold text-foreground">
-                    {t('app.settings.privacy.audio')}
-                  </span>
-                  <label className="relative inline-flex items-center cursor-pointer">
-                    <input
-                      type="checkbox"
-                      defaultChecked
-                      className="sr-only peer"
-                      aria-label={t('app.settings.privacy.audio')}
-                    />
-                    <div className="w-12 h-7 bg-secondary border-2 border-border peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-5 peer-checked:after:border-foreground after:content-[''] after:absolute after:top-[3px] after:left-[3px] after:bg-card after:border-2 after:border-border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-success peer-checked:border-foreground"></div>
-                  </label>
-                </div>
-                <p className="text-sm text-muted-foreground ml-0">
-                  {t('app.settings.privacy.audioNote')}
+                <button
+                  type="button"
+                  onClick={() => navigate('/app/consent/voice')}
+                  className="flex w-full items-center justify-between gap-3 rounded-xl border-2 border-border p-4 text-left transition-colors hover:border-foreground"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-xl border-2 border-border bg-primary/10 text-primary">
+                      <Mic size={18} strokeWidth={2.5} />
+                    </div>
+                    <div>
+                      <div className="font-bold text-foreground">Voice practice consent</div>
+                      <div className="text-xs text-muted-foreground">
+                        Manage whether your audio is sent to the AI tutor.
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {compliance ? (
+                      <Badge
+                        variant={
+                          compliance.voiceConsentStatus === 'granted'
+                            ? 'success'
+                            : compliance.voiceConsentStatus === 'revoked'
+                              ? 'destructive'
+                              : 'outline'
+                        }
+                        size="sm"
+                      >
+                        {compliance.voiceConsentStatus}
+                      </Badge>
+                    ) : null}
+                    <ChevronRight size={18} className="text-muted-foreground" />
+                  </div>
+                </button>
+
+                <p className="text-sm text-muted-foreground">
+                  <Link to="/compliance" className="underline">
+                    See Lingual's full data policy
+                  </Link>{' '}
+                  for retention, who can see what, and how deletion works.
                 </p>
               </div>
 
