@@ -627,7 +627,7 @@ export function AssignmentLaunchPage() {
             ) : null}
 
             <div className="mt-6 flex flex-wrap gap-3">
-              <Button onClick={startAssignmentPractice} loading={isStartingPractice} disabled={!canStartPractice}>
+              <Button onClick={() => chatId && navigate(`/app/chat?chatId=${encodeURIComponent(chatId)}`)} loading={isStartingPractice} disabled={!canStartPractice}>
                 <PlayCircle size={16} className="mr-2" />
                 {isTextLaunch ? 'Start text practice' : 'Start assignment practice'}
               </Button>
@@ -640,13 +640,6 @@ export function AssignmentLaunchPage() {
                   {isConnected ? 'End session' : isConnecting ? 'Connecting…' : 'Reconnect'}
                 </Button>
               ) : null}
-              <Button
-                variant="outline"
-                onClick={() => chatId && navigate(`/app/chat?chatId=${encodeURIComponent(chatId)}`)}
-                disabled={!chatId}
-              >
-                Open saved chat
-              </Button>
             </div>
 
             <div className="mt-5 rounded-2xl border-2 border-border bg-secondary/40 p-4">
