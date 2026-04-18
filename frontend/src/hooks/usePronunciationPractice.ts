@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from 'react';
 import { getSpeechToken } from '@/api/pronunciation';
+import type * as SpeechSDKTypes from 'microsoft-cognitiveservices-speech-sdk';
 import type {
   LearningLocale,
   PronunciationAttempt,
@@ -13,7 +14,19 @@ type AssessOptions = {
 };
 
 const TOKEN_REFRESH_BUFFER_MS = 60_000;
-let speechSdkModule: any | null = null;
+type SpeechSdkModule = typeof SpeechSDKTypes;
+type RecognitionEvent = {
+  result?: {
+    text?: string;
+    reason?: unknown;
+  };
+};
+type CancellationEvent = {
+  reason?: unknown;
+  errorDetails?: unknown;
+};
+
+let speechSdkModule: SpeechSdkModule | null = null;
 
 const parseScores = (assessment?: Record<string, unknown>): PronunciationScoreSet => ({
   accuracy: typeof assessment?.AccuracyScore === 'number' ? assessment.AccuracyScore : undefined,
@@ -221,20 +234,22 @@ const logRawWordPhonemePayload = (
 const formatNoMatchReason = (reason: number | string | undefined) => {
   if (reason === undefined || reason === null) return '';
   if (typeof reason === 'string') return reason;
-  return speechSdkModule?.NoMatchReason?.[reason] ?? `${reason}`;
+  const noMatchReasonMap = speechSdkModule?.NoMatchReason as Record<number | string, string> | undefined;
+  return noMatchReasonMap?.[reason] ?? `${reason}`;
 };
 
 const formatCancellationReason = (reason: number | string | undefined) => {
   if (reason === undefined || reason === null) return '';
   if (typeof reason === 'string') return reason;
-  return speechSdkModule?.CancellationReason?.[reason] ?? `${reason}`;
+  const cancellationReasonMap = speechSdkModule?.CancellationReason as Record<number | string, string> | undefined;
+  return cancellationReasonMap?.[reason] ?? `${reason}`;
 };
 
-const loadSpeechSdk = async (): Promise<any> => {
+const loadSpeechSdk = async (): Promise<SpeechSdkModule> => {
   if (speechSdkModule) return speechSdkModule;
   try {
     const moduleName = 'microsoft-cognitiveservices-speech-sdk';
-    speechSdkModule = await import(/* @vite-ignore */ moduleName);
+    speechSdkModule = await import(/* @vite-ignore */ moduleName) as SpeechSdkModule;
     return speechSdkModule;
   } catch {
     throw new Error(
@@ -250,9 +265,12 @@ const getMicrophoneStream = async (): Promise<MediaStream> => {
   return navigator.mediaDevices.getUserMedia({ audio: true });
 };
 
-const createAudioConfigFromStream = (stream: MediaStream, SpeechSDK: any): any => {
+const createAudioConfigFromStream = (
+  stream: MediaStream,
+  SpeechSDK: SpeechSdkModule
+): SpeechSDKTypes.AudioConfig => {
   const maybeFromStream = (SpeechSDK.AudioConfig as {
-    fromStreamInput?: (input: MediaStream) => any;
+    fromStreamInput?: (input: MediaStream) => SpeechSDKTypes.AudioConfig;
   }).fromStreamInput;
   if (typeof maybeFromStream === 'function') {
     return maybeFromStream(stream);
@@ -302,7 +320,7 @@ export function usePronunciationPractice() {
         '2000'
       );
 
-      let audioConfig: any;
+      let audioConfig: SpeechSDKTypes.AudioConfig;
       let micStream: MediaStream | null = null;
       let mediaRecorder: MediaRecorder | null = null;
       let audioBlobPromise: Promise<Blob | null> | null = null;
@@ -362,20 +380,20 @@ export function usePronunciationPractice() {
       pronunciationConfig.applyTo(recognizer);
 
       // Helpful debug hooks for NoMatch issues
-      recognizer.recognizing = (_sender: any, event: any) => {
+      recognizer.recognizing = (_sender: unknown, event: RecognitionEvent) => {
         if (event?.result?.text) {
           console.log('Recognizing:', event.result.text);
         }
       };
-      recognizer.recognized = (_sender: any, event: any) => {
+      recognizer.recognized = (_sender: unknown, event: RecognitionEvent) => {
         console.log('Recognized:', event?.result?.text, event?.result?.reason);
       };
-      recognizer.canceled = (_sender: any, event: any) => {
+      recognizer.canceled = (_sender: unknown, event: CancellationEvent) => {
         console.error('Recognition canceled:', event?.reason, event?.errorDetails);
       };
 
       try {
-        const result: any = await new Promise((resolve, reject) => {
+        const result = await new Promise<SpeechSDKTypes.SpeechRecognitionResult>((resolve, reject) => {
           recognizer.recognizeOnceAsync(resolve, reject);
         });
 

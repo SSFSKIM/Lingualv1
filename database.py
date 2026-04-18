@@ -109,29 +109,9 @@ Schema:
     - created_at: timestamp
     - updated_at: timestamp
 
-- curriculum_mappings/{mapping_id}
-    - org_id: str
-    - class_id: str
-    - package_id: str
-    - module_id: str
-    - objective_ids: list[str]
-    - situation_ids: list[str]
-    - target_expressions: list[str]
-    - focus_grammar: list[str]
-    - allowed_context_tags: list[str]
-    - feedback_policy: dict
-    - scaffold_policy: dict
-    - modality_policy: dict
-    - rubric_focus: list[str]
-    - teacher_notes: str
-    - created_by_uid: str
-    - created_at: timestamp
-    - updated_at: timestamp
-
 - assignments/{assignment_id}
     - org_id: str
     - class_id: str
-    - mapping_id: str
     - title: str
     - description: str
     - status: str ('draft' | 'published' | 'archived')
@@ -306,11 +286,6 @@ def get_enrollments_collection():
     return get_db().collection('enrollments')
 
 
-def get_curriculum_mappings_collection():
-    """Get curriculum mappings collection."""
-    return get_db().collection('curriculum_mappings')
-
-
 def get_assignments_collection():
     """Get assignments collection."""
     return get_db().collection('assignments')
@@ -389,11 +364,6 @@ def get_class_ref(class_id):
 def get_enrollment_ref(enrollment_id):
     """Get enrollment document reference."""
     return get_enrollments_collection().document(enrollment_id)
-
-
-def get_curriculum_mapping_ref(mapping_id):
-    """Get curriculum mapping document reference."""
-    return get_curriculum_mappings_collection().document(mapping_id)
 
 
 def get_assignment_ref(assignment_id):
@@ -1239,85 +1209,10 @@ def find_guardian_consent_packet_by_token_hash(token_hash):
     return data
 
 
-def create_curriculum_mapping(
-    org_id,
-    class_id,
-    package_id,
-    module_id,
-    objective_ids=None,
-    situation_ids=None,
-    target_expressions=None,
-    focus_grammar=None,
-    allowed_context_tags=None,
-    feedback_policy=None,
-    scaffold_policy=None,
-    output_policy=None,
-    modality_policy=None,
-    rubric_focus=None,
-    teacher_notes='',
-    created_by_uid='',
-    mapping_id=None,
-    generated_scenario='',
-    canvas_content_id='',
-    source_canvas_item_title='',
-    source_canvas_item_type='',
-):
-    """Create a curriculum mapping document."""
-    doc_ref = get_curriculum_mapping_ref(mapping_id) if mapping_id else get_curriculum_mappings_collection().document()
-    mapping_data = {
-        'org_id': org_id,
-        'class_id': class_id,
-        'package_id': package_id,
-        'module_id': module_id,
-        'objective_ids': _normalize_string_list(objective_ids or []),
-        'situation_ids': _normalize_string_list(situation_ids or []),
-        'target_expressions': _normalize_string_list(target_expressions or []),
-        'focus_grammar': _normalize_string_list(focus_grammar or []),
-        'allowed_context_tags': _normalize_string_list(allowed_context_tags or []),
-        'feedback_policy': feedback_policy or {},
-        'scaffold_policy': scaffold_policy or {},
-        'output_policy': output_policy or {},
-        'modality_policy': modality_policy or {},
-        'rubric_focus': _normalize_string_list(rubric_focus or []),
-        'teacher_notes': teacher_notes or '',
-        'created_by_uid': created_by_uid,
-        'generated_scenario': generated_scenario or '',
-        'canvas_content_id': canvas_content_id or '',
-        'source_canvas_item_title': source_canvas_item_title or '',
-        'source_canvas_item_type': source_canvas_item_type or '',
-        'created_at': firestore.SERVER_TIMESTAMP,
-        'updated_at': firestore.SERVER_TIMESTAMP,
-    }
-    doc_ref.set(mapping_data)
-    return doc_ref.id
-
-
-def get_curriculum_mapping(mapping_id):
-    """Get a curriculum mapping by id."""
-    doc = get_curriculum_mapping_ref(mapping_id).get()
-    if not doc.exists:
-        return None
-    data = doc.to_dict() or {}
-    data['id'] = doc.id
-    return data
-
-
-def list_class_curriculum_mappings(class_id):
-    """List curriculum mappings for a class."""
-    docs = get_curriculum_mappings_collection().where('class_id', '==', class_id).stream()
-    mappings = []
-    for doc in docs:
-        data = doc.to_dict() or {}
-        data['id'] = doc.id
-        mappings.append(data)
-    return mappings
-
-
 def create_assignment(
     org_id,
     class_id,
-    mapping_id,
-    title,
+    title='',
     description='',
     status='draft',
     release_at='',
@@ -1329,13 +1224,25 @@ def create_assignment(
     created_by_uid='',
     assignment_id=None,
     canvas_module_item_id='',
+    instructions='',
+    canvas_module_item_ref=None,
+    objectives=None,
+    target_expressions=None,
+    focus_grammar=None,
+    generated_scenario='',
+    teacher_notes='',
 ):
-    """Create an assignment document."""
+    """Create an assignment document.
+
+    After C2, scenario fields live directly on the assignment document — the
+    ``curriculum_mappings`` collection has been deleted. Canvas content
+    metadata still hangs off the assignment via ``canvas_module_item_id`` and
+    ``canvas_module_item_ref``.
+    """
     doc_ref = get_assignment_ref(assignment_id) if assignment_id else get_assignments_collection().document()
     assignment_data = {
         'org_id': org_id,
         'class_id': class_id,
-        'mapping_id': mapping_id,
         'title': title,
         'description': description or '',
         'status': status,
@@ -1347,6 +1254,14 @@ def create_assignment(
         'success_criteria': _normalize_string_list(success_criteria or []),
         'created_by_uid': created_by_uid,
         'canvas_module_item_id': canvas_module_item_id or '',
+        # Direct scenario fields (C2 — curriculum_mappings is gone).
+        'instructions': instructions or '',
+        'canvas_module_item_ref': canvas_module_item_ref,
+        'objectives': list(objectives or []),
+        'target_expressions': list(target_expressions or []),
+        'focus_grammar': list(focus_grammar or []),
+        'generated_scenario': generated_scenario or '',
+        'teacher_notes': teacher_notes or '',
         'created_at': firestore.SERVER_TIMESTAMP,
         'updated_at': firestore.SERVER_TIMESTAMP,
     }

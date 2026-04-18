@@ -151,7 +151,6 @@ def make_assignment(
     assignment_id: str | None = None,
     org_id: str = "org-1",
     class_id: str = "class-1",
-    mapping_id: str = "mapping-1",
     title: str = "Practice 1",
     status: str = "published",
     task_type: str = "information_gap",
@@ -161,7 +160,6 @@ def make_assignment(
         "id": assignment_id or _next_id("assign"),
         "org_id": org_id,
         "class_id": class_id,
-        "mapping_id": mapping_id,
         "title": title,
         "description": extra.pop("description", ""),
         "status": status,
@@ -172,38 +170,12 @@ def make_assignment(
         "max_attempts": None,
         "success_criteria": [],
         "created_by_uid": extra.pop("created_by_uid", ""),
-        "created_at": datetime.now(UTC),
-        "updated_at": datetime.now(UTC),
-        **extra,
-    }
-
-
-def make_mapping(
-    mapping_id: str | None = None,
-    org_id: str = "org-1",
-    class_id: str = "class-1",
-    package_id: str = "ap-french-sample",
-    module_id: str = "mod-1",
-    **extra,
-) -> dict[str, Any]:
-    return {
-        "id": mapping_id or _next_id("mapping"),
-        "org_id": org_id,
-        "class_id": class_id,
-        "package_id": package_id,
-        "module_id": module_id,
-        "objective_ids": extra.pop("objective_ids", ["obj-1"]),
-        "situation_ids": extra.pop("situation_ids", ["sit-1"]),
+        # Direct scenario fields (C2 — curriculum_mappings is gone).
+        "instructions": extra.pop("instructions", "Default test instructions."),
+        "generated_scenario": extra.pop("generated_scenario", "Default test scenario."),
         "target_expressions": extra.pop("target_expressions", []),
         "focus_grammar": extra.pop("focus_grammar", []),
-        "allowed_context_tags": extra.pop("allowed_context_tags", []),
-        "feedback_policy": extra.pop("feedback_policy", {"mode": "balanced"}),
-        "scaffold_policy": extra.pop("scaffold_policy", {}),
-        "output_policy": extra.pop("output_policy", {}),
-        "modality_policy": extra.pop("modality_policy", {"mode": "hybrid"}),
-        "rubric_focus": extra.pop("rubric_focus", []),
         "teacher_notes": extra.pop("teacher_notes", ""),
-        "created_by_uid": extra.pop("created_by_uid", ""),
         "created_at": datetime.now(UTC),
         "updated_at": datetime.now(UTC),
         **extra,
@@ -378,13 +350,13 @@ class FakeDbBase:
         self.consent_events: list[dict] = []
         self.guardian_packets: dict[str, dict] = {}
         self.assignments: dict[str, dict] = {}
-        self.mappings: dict[str, dict] = {}
         self.practice_sessions: dict[str, dict] = {}
         self.learning_events: list[dict] = []
         self.deletion_requests: dict[str, dict] = {}
         self.deletion_execution_runs: dict[str, dict] = {}
         self.user_active_memberships: dict[str, str] = {}
         self._counters: dict[str, int] = {}
+        self.canvas_course_content: dict[str, dict] = {}
 
     def _next_id(self, prefix: str) -> str:
         self._counters[prefix] = self._counters.get(prefix, 0) + 1
@@ -536,9 +508,56 @@ class FakeDbBase:
         a = self.assignments.get(assignment_id)
         return dict(a) if a else None
 
-    def create_assignment(self, **kwargs) -> str:
-        aid = self._next_id("assign")
-        self.assignments[aid] = {"id": aid, **kwargs, "created_at": datetime.now(UTC), "updated_at": datetime.now(UTC)}
+    def create_assignment(
+        self,
+        org_id,
+        class_id,
+        title='',
+        description='',
+        status='draft',
+        release_at='',
+        due_at='',
+        modality_override=None,
+        max_attempts=None,
+        task_type='decision_making',
+        success_criteria=None,
+        created_by_uid='',
+        assignment_id=None,
+        canvas_module_item_id='',
+        instructions='',
+        canvas_module_item_ref=None,
+        objectives=None,
+        target_expressions=None,
+        focus_grammar=None,
+        generated_scenario='',
+        teacher_notes='',
+    ) -> str:
+        aid = assignment_id or self._next_id("assign")
+        self.assignments[aid] = {
+            'id': aid,
+            'org_id': org_id,
+            'class_id': class_id,
+            'title': title,
+            'description': description or '',
+            'status': status,
+            'release_at': release_at or '',
+            'due_at': due_at or '',
+            'modality_override': modality_override or {},
+            'max_attempts': max_attempts,
+            'task_type': task_type,
+            'success_criteria': list(success_criteria or []),
+            'created_by_uid': created_by_uid,
+            'canvas_module_item_id': canvas_module_item_id or '',
+            'instructions': instructions or '',
+            'canvas_module_item_ref': canvas_module_item_ref,
+            'objectives': list(objectives or []),
+            'target_expressions': list(target_expressions or []),
+            'focus_grammar': list(focus_grammar or []),
+            'generated_scenario': generated_scenario or '',
+            'teacher_notes': teacher_notes or '',
+            'created_at': datetime.now(UTC),
+            'updated_at': datetime.now(UTC),
+        }
         return aid
 
     def list_class_assignments(self, class_id: str):
@@ -555,17 +574,16 @@ class FakeDbBase:
             results.append(dict(a))
         return results
 
-    def get_curriculum_mapping(self, mapping_id: str):
-        m = self.mappings.get(mapping_id)
-        return dict(m) if m else None
+    # -- Canvas course content --
 
-    def create_curriculum_mapping(self, **kwargs) -> str:
-        mid = self._next_id("mapping")
-        self.mappings[mid] = {"id": mid, **kwargs, "created_at": datetime.now(UTC), "updated_at": datetime.now(UTC)}
-        return mid
+    def get_canvas_course_content(self, content_id: str):
+        doc = self.canvas_course_content.get(content_id)
+        return dict(doc) if doc else None
 
-    def list_class_curriculum_mappings(self, class_id: str):
-        return [dict(m) for m in self.mappings.values() if m.get("class_id") == class_id]
+    def link_assignment_to_canvas_item(self, assignment_id: str, content_id: str, canvas_module_item_id: str):
+        asg = self.assignments.get(assignment_id)
+        if asg is not None:
+            asg['canvas_module_item_id'] = canvas_module_item_id
 
     # -- Practice sessions --
 
@@ -689,10 +707,7 @@ def make_test_deps(
         login_required=passthrough_login_required,
         get_user_proficiency_context=lambda: "",
         build_system_prompt=lambda _ctx: "",
-        load_sample_curriculum_package=lambda: package,
-        get_curriculum_practice_context=lambda module_id, situation_id: get_sample_curriculum_practice_context(module_id, situation_id),
-        build_curriculum_system_prompt=lambda **kw: "SYSTEM PROMPT PLACEHOLDER",
-        get_school_request_context=get_school_request_context,
+            get_school_request_context=get_school_request_context,
         set_active_school_membership=set_active_school_membership,
         allowed_learning_locales={"ko-KR", "es-ES", "fr-FR"},
         allowed_minigame_types={"listening_quiz", "grammar_challenge"},

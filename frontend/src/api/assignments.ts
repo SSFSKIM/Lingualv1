@@ -5,29 +5,10 @@ import type {
   AssignmentDto,
   CreatePracticeSessionPayload,
   CreateAssignmentPayload,
-  CreateCurriculumMappingPayload,
-  CurriculumMappingDto,
   PracticeSessionDto,
   PracticeSessionEventPayload,
   StudentAssignmentSummary,
-  TeacherCurriculumPackageSummary,
 } from '@/types';
-
-interface PackageListResponse {
-  success: boolean;
-  packages: TeacherCurriculumPackageSummary[];
-  limitations?: string[];
-}
-
-interface MappingListResponse {
-  success: boolean;
-  mappings: CurriculumMappingDto[];
-}
-
-interface MappingCreateResponse {
-  success: boolean;
-  mapping: CurriculumMappingDto;
-}
 
 interface AssignmentListResponse {
   success: boolean;
@@ -54,28 +35,21 @@ interface AssignmentAnalyticsResponse {
   analytics: AssignmentAnalyticsData;
 }
 
-export const getTeacherCurriculumPackages = async (
-  classId: string
-): Promise<{ packages: TeacherCurriculumPackageSummary[]; limitations: string[] }> => {
-  const response = await api.get<PackageListResponse>(`/teacher/classes/${classId}/curriculum/packages`);
-  return {
-    packages: response.data.packages,
-    limitations: response.data.limitations ?? [],
+interface AssignmentDraftGenerateResponse {
+  success: boolean;
+  suggestions: {
+    scenario: string;
+    targetExpressions: string[];
+    focusGrammar: string[];
+    successCriteria: string[];
+    taskType: string;
+    suggestedTitle: string;
+    suggestedDescription: string;
+    teacherNotes: string;
+    objectives?: string[];
   };
-};
-
-export const getCurriculumMappings = async (classId: string): Promise<CurriculumMappingDto[]> => {
-  const response = await api.get<MappingListResponse>(`/teacher/classes/${classId}/curriculum/mappings`);
-  return response.data.mappings;
-};
-
-export const createCurriculumMapping = async (
-  classId: string,
-  payload: CreateCurriculumMappingPayload
-): Promise<CurriculumMappingDto> => {
-  const response = await api.post<MappingCreateResponse>(`/teacher/classes/${classId}/curriculum/mappings`, payload);
-  return response.data.mapping;
-};
+  error?: string;
+}
 
 export const getTeacherAssignments = async (classId: string): Promise<StudentAssignmentSummary[]> => {
   const response = await api.get<AssignmentListResponse>(`/teacher/classes/${classId}/assignments`);
@@ -88,6 +62,17 @@ export const createAssignment = async (
 ): Promise<AssignmentDto> => {
   const response = await api.post<AssignmentCreateResponse>(`/teacher/classes/${classId}/assignments`, payload);
   return response.data.assignment;
+};
+
+export const generateAssignmentDraft = async (
+  classId: string,
+  sourceText: string,
+): Promise<AssignmentDraftGenerateResponse> => {
+  const response = await api.post<AssignmentDraftGenerateResponse>(
+    `/teacher/classes/${classId}/assignment-drafts/generate`,
+    { sourceText },
+  );
+  return response.data;
 };
 
 export const getStudentAssignments = async (): Promise<StudentAssignmentSummary[]> => {

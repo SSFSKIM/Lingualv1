@@ -48,7 +48,7 @@ declare const __CUBISM_SDK_AVAILABLE__: boolean;
 const LIVE2D_CHAT_ENABLED =
   import.meta.env.VITE_ENABLE_LIVE2D_CHAT !== undefined
     ? import.meta.env.VITE_ENABLE_LIVE2D_CHAT !== 'false'
-    : __CUBISM_SDK_AVAILABLE__;
+    : import.meta.env.MODE === 'test' || __CUBISM_SDK_AVAILABLE__;
 const REALTIME_AVATAR_DIRECTIVES_ENABLED = (import.meta.env.VITE_ENABLE_REALTIME_AVATAR_DIRECTIVES ?? 'false') === 'true';
 
 const Live2DAvatarPanel = lazy(() => import('@/components/avatar/Live2DAvatarPanel'));

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { CheckCircle2, Clock, Loader2, XCircle } from 'lucide-react';
 import {
   listSchoolRequests,
@@ -27,7 +27,7 @@ export function LingualSchoolRequestsPage() {
   const [rejectingId, setRejectingId] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState('');
 
-  const fetchRequests = async () => {
+  const fetchRequests = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -41,11 +41,11 @@ export function LingualSchoolRequestsPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [filter]);
 
   useEffect(() => {
     fetchRequests();
-  }, [filter]);
+  }, [fetchRequests]);
 
   const handleApprove = async (id: string) => {
     setActionLoading(id);

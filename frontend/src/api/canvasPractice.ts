@@ -9,6 +9,9 @@ export interface CanvasPracticeSuggestions {
   suggestedTitle: string;
   suggestedDescription: string;
   teacherNotes: string;
+  // Optional — the backend may or may not return suggested learning objectives
+  // alongside the other fields. Teachers can still author objectives manually.
+  objectives?: string[];
 }
 
 export interface CanvasItemContext {
@@ -35,6 +38,7 @@ export interface CreateCanvasPracticePayload {
   targetExpressions: string[];
   focusGrammar: string[];
   successCriteria: string[];
+  objectives: string[];
   taskType: string;
   teacherNotes: string;
   status: 'draft' | 'published';
@@ -51,11 +55,18 @@ export const generateCanvasPractice = async (
   return response.data;
 };
 
+export interface CreateCanvasPracticeResult {
+  success: boolean;
+  assignmentId: string;
+  status: string;
+  error?: string;
+}
+
 export const createCanvasPractice = async (
   classId: string,
   payload: CreateCanvasPracticePayload,
-): Promise<{ success: boolean; assignmentId: string; mappingId: string; status: string }> => {
-  const response = await api.post(
+): Promise<CreateCanvasPracticeResult> => {
+  const response = await api.post<CreateCanvasPracticeResult>(
     `/teacher/classes/${classId}/canvas-practice/create`,
     payload,
   );
