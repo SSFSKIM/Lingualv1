@@ -33,16 +33,16 @@ export function CanvasModuleView({
   // Track *collapsed* modules instead of expanded ones so new modules default
   // to expanded (better UX on the student dashboard: fewer clicks to see
   // assignments, and the list stays useful even when new items sync in).
-  const [collapsedModules, setCollapsedModules] = useState<Set<string>>(new Set());
+  const [expandedModules, setExpandedModules] = useState<Set<string>>(new Set());
 
   const toggleModule = (moduleId: string) => {
-    setCollapsedModules((prev) => {
-      const next = new Set(prev);
-      if (next.has(moduleId)) next.delete(moduleId);
-      else next.add(moduleId);
-      return next;
-    });
-  };
+  setExpandedModules((prev) => {
+    const next = new Set(prev);
+    if (next.has(moduleId)) next.delete(moduleId);
+    else next.add(moduleId);
+    return next;
+  });
+};
 
   if (items.length === 0) {
     return null;
@@ -51,7 +51,7 @@ export function CanvasModuleView({
   return (
     <div className="space-y-3" data-testid="canvas-module-view">
       {modules.map((mod) => {
-        const isExpanded = !collapsedModules.has(mod.moduleId);
+        const isExpanded = expandedModules.has(mod.moduleId);
         return (
           <div key={mod.moduleId} className="rounded-xl border-2 border-border">
             <button
@@ -165,5 +165,5 @@ function groupByModule(items: CanvasCourseContentItem[]): ModuleGroup[] {
   }
   // Sort ascending so Canvas module position 1 renders before position 2,
   // matching the order students see in Canvas itself.
-  return Object.values(map).sort((a, b) => a.position - b.position);
+  return Object.values(map).sort((a, b) => b.position - a.position);
 }
