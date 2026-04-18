@@ -64,6 +64,11 @@ export function TeacherAssignmentBuilderPage() {
   const [canvasFocusGrammar, setCanvasFocusGrammar] = useState<string[]>([]);
   const [canvasSuccessCriteria, setCanvasSuccessCriteria] = useState<string[]>([]);
   const [canvasObjectives, setCanvasObjectives] = useState<string[]>([]);
+  // Track whether objectives were pre-populated by the AI suggestions response.
+  // The backend only sometimes returns objectives, so the "AI-generated" badge
+  // on the Objectives field can otherwise falsely claim ownership of teacher-
+  // authored items.
+  const [canvasObjectivesFromAI, setCanvasObjectivesFromAI] = useState(false);
   const [canvasTeacherNotes, setCanvasTeacherNotes] = useState('');
   // Default to 'draft' so a misclick on Publish doesn't ship an un-reviewed
   // assignment live to students. Teachers must explicitly choose Published.
@@ -134,6 +139,7 @@ export function TeacherAssignmentBuilderPage() {
     setCanvasFocusGrammar([]);
     setCanvasSuccessCriteria([]);
     setCanvasObjectives([]);
+    setCanvasObjectivesFromAI(false);
     setCanvasTeacherNotes('');
     setCanvasStatus('draft');
   };
@@ -159,7 +165,9 @@ export function TeacherAssignmentBuilderPage() {
     setCanvasSuccessCriteria(suggestions.successCriteria || []);
     // Pre-fill objectives when the backend provides them. If it doesn't,
     // teachers can still add them manually via the TagListEditor below.
-    setCanvasObjectives(suggestions.objectives || []);
+    const providedObjectives = suggestions.objectives || [];
+    setCanvasObjectives(providedObjectives);
+    setCanvasObjectivesFromAI(providedObjectives.length > 0);
     setCanvasTeacherNotes(suggestions.teacherNotes || '');
   };
 
@@ -748,7 +756,7 @@ export function TeacherAssignmentBuilderPage() {
                   <div className="space-y-2">
                     <div className="flex items-center gap-2">
                       <p className="text-base font-semibold text-foreground">Objectives</p>
-                      {advancedEntryMode !== 'manual' && (
+                      {advancedEntryMode !== 'manual' && canvasObjectivesFromAI && (
                         <Badge variant="accent" size="sm">AI-generated</Badge>
                       )}
                     </div>
