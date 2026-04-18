@@ -12,8 +12,6 @@ const sendChatMessageMock = vi.fn();
 const connectMock = vi.fn();
 const disconnectMock = vi.fn();
 const clearMessagesMock = vi.fn();
-let capturedSessionParams: unknown;
-let capturedOnMessage: ((role: 'user' | 'assistant', content: string) => void) | undefined;
 
 vi.mock('react-router-dom', async () => {
   const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom');
@@ -37,9 +35,7 @@ vi.mock('@/api/chat', () => ({
 }));
 
 vi.mock('@/hooks/useRealtimeChat', () => ({
-  useRealtimeChat: (options: { onMessage?: (role: 'user' | 'assistant', content: string) => void; sessionParams?: unknown }) => {
-    capturedSessionParams = options?.sessionParams;
-    capturedOnMessage = options?.onMessage;
+  useRealtimeChat: () => {
     return {
       isConnected: false,
       isListening: false,
@@ -232,8 +228,6 @@ describe('AssignmentLaunchPage — blocked state and teacher preview', () => {
     connectMock.mockReset();
     disconnectMock.mockReset();
     clearMessagesMock.mockReset();
-    capturedSessionParams = undefined;
-    capturedOnMessage = undefined;
 
     bootstrapStudentAssignmentMock.mockResolvedValue(BOOTSTRAP);
     createChatSessionMock.mockResolvedValue({

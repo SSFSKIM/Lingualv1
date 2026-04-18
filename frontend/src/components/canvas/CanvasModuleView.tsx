@@ -24,7 +24,6 @@ interface ModuleGroup {
 
 export function CanvasModuleView({
   items,
-  canvasInstanceUrl: _,
   linkedAssignments = {},
   onLaunchAssignment,
   isTeacherView = false,
