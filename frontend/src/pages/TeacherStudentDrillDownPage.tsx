@@ -168,7 +168,7 @@ export function TeacherStudentDrillDownPage() {
   };
 
   const handleIssueGuardianPacket = async () => {
-    if (!classId || !studentUid || !compliance?.isMinor) return;
+    if (!classId || !studentUid) return;
     setGuardianPacketError(null);
     setGuardianPacketStatus(null);
     setIsIssuingGuardianPacket(true);
@@ -417,24 +417,6 @@ export function TeacherStudentDrillDownPage() {
 
                 <div className="grid gap-4 sm:grid-cols-2">
                   <label className="space-y-2 text-sm font-medium text-foreground">
-                    <span>Student status</span>
-                    <select
-                      value={complianceDraft.isMinor ? 'minor' : 'adult'}
-                      onChange={(event) => setComplianceDraft((current) => ({
-                        ...current,
-                        isMinor: event.target.value === 'minor',
-                        guardianConsentStatus: event.target.value === 'minor'
-                          ? current.guardianConsentStatus
-                          : 'not_required',
-                      }))}
-                      className="w-full rounded-2xl border-2 border-border bg-background px-4 py-3 text-sm text-foreground focus:border-foreground focus:outline-none"
-                    >
-                      <option value="minor">Minor</option>
-                      <option value="adult">Adult</option>
-                    </select>
-                  </label>
-
-                  <label className="space-y-2 text-sm font-medium text-foreground">
                     <span>Voice consent</span>
                     <select
                       value={complianceDraft.voiceConsentStatus}
@@ -445,23 +427,6 @@ export function TeacherStudentDrillDownPage() {
                       className="w-full rounded-2xl border-2 border-border bg-background px-4 py-3 text-sm text-foreground focus:border-foreground focus:outline-none"
                     >
                       {CONSENT_OPTIONS.filter((option) => option.value !== 'not_required').map((option) => (
-                        <option key={option.value} value={option.value}>{option.label}</option>
-                      ))}
-                    </select>
-                  </label>
-
-                  <label className="space-y-2 text-sm font-medium text-foreground">
-                    <span>Guardian consent</span>
-                    <select
-                      value={complianceDraft.isMinor ? complianceDraft.guardianConsentStatus : 'not_required'}
-                      onChange={(event) => setComplianceDraft((current) => ({
-                        ...current,
-                        guardianConsentStatus: event.target.value as ConsentStatus,
-                      }))}
-                      disabled={!complianceDraft.isMinor}
-                      className="w-full rounded-2xl border-2 border-border bg-background px-4 py-3 text-sm text-foreground focus:border-foreground focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      {CONSENT_OPTIONS.map((option) => (
                         <option key={option.value} value={option.value}>{option.label}</option>
                       ))}
                     </select>
@@ -540,12 +505,7 @@ export function TeacherStudentDrillDownPage() {
                     ) : null}
                   </div>
 
-                  {!compliance.isMinor ? (
-                    <div className="mt-4 rounded-2xl border-2 border-dashed border-border bg-secondary/40 p-4 text-sm text-muted-foreground">
-                      This student is currently marked as an adult, so guardian packet issuance is disabled.
-                    </div>
-                  ) : (
-                    <div className="mt-4 space-y-4">
+                  <div className="mt-4 space-y-4">
                       {guardianPacket ? (
                         <div className="grid gap-3 rounded-2xl border-2 border-border bg-secondary/30 p-4 text-sm text-muted-foreground sm:grid-cols-2">
                           <p>
@@ -661,7 +621,6 @@ export function TeacherStudentDrillDownPage() {
                         </div>
                       ) : null}
                     </div>
-                  )}
                 </div>
               </div>
             ) : (

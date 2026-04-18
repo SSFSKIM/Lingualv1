@@ -37,11 +37,11 @@ export default function CompliancePage() {
 
         <Section icon={Shield} title="How consent works">
           <ul className="list-disc pl-5 space-y-1">
-            <li>Voice-enabled practice requires explicit consent before any session can start.</li>
-            <li>If voice consent is not granted, sessions are blocked or downgraded to text-only when the teacher has enabled text fallback.</li>
-            <li>Guardian consent can be collected via secure-link packets issued by school staff.</li>
+            <li>Voice-enabled practice requires explicit student consent before any session can start.</li>
+            <li>Students self-consent on their own profile — teachers and admins can also grant or revoke consent on their behalf.</li>
+            <li>If voice consent is not granted, sessions are downgraded to text-only practice (typing with the AI tutor) where the assignment allows it.</li>
             <li>Consent status is tracked per student per organization with a full audit trail.</li>
-            <li>Teachers and school admins can review and update consent within their authorized scope.</li>
+            <li>Schools can issue secure-link guardian notices as supplementary parent communication.</li>
           </ul>
         </Section>
 
@@ -56,9 +56,9 @@ export default function CompliancePage() {
 
         <Section icon={Clock} title="Data retention defaults">
           <ul className="list-disc pl-5 space-y-1">
-            <li><strong>Raw audio:</strong> 30 days (when stored)</li>
+            <li><strong>Raw audio:</strong> 30 days (when stored under the standard school policy; can be set to zero via the <em>no-raw-audio</em> policy)</li>
             <li><strong>Transcripts and session summaries:</strong> 365 days</li>
-            <li><strong>Aggregated analytics:</strong> academic term length plus 1 year</li>
+            <li><strong>Aggregated analytics:</strong> 730 days (2 years)</li>
           </ul>
           <p>Retention policies are configurable per organization. These are conservative defaults.</p>
         </Section>
@@ -68,8 +68,6 @@ export default function CompliancePage() {
             <li>School administrators can submit deletion requests for student, class, or organization scope.</li>
             <li>Requests go through an approval gate before execution.</li>
             <li>Execution is auditable with detailed summaries of what was deleted.</li>
-            <li>Failed or partial deletions can be retried.</li>
-            <li>Target SLA: 7 days from approval to completion.</li>
           </ul>
         </Section>
 
