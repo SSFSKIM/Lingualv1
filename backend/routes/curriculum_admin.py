@@ -18,6 +18,7 @@ from backend.services.assignment_resolver import (
 from backend.services.canvas.practice_generator import generate_canvas_practice
 from backend.services.compliance import (
     create_consent_event,
+    resolve_student_compliance_record,
     serialize_student_compliance_record,
     upsert_student_compliance_record,
 )
@@ -281,6 +282,26 @@ def create_curriculum_admin_blueprint(deps: RouteDeps) -> Blueprint:
             return jsonify({'success': False, 'error': str(exc)}), 403
         except Exception as exc:
             print(f'Assignment creation error: {exc}')
+            return jsonify({'success': False, 'error': str(exc)}), 500
+
+    @bp.route('/api/student/compliance', methods=['GET'])
+    @deps.login_required
+    def api_student_compliance():
+        try:
+            uid = deps.get_current_user_uid()
+            if not uid:
+                return jsonify({'success': False, 'error': 'not_authenticated'}), 401
+            context = deps.get_school_request_context()
+            org_id = getattr(context, 'active_organization_id', None) if context else None
+            if not org_id:
+                return jsonify({'success': False, 'error': 'no_active_org'}), 400
+            record = resolve_student_compliance_record(deps, org_id=org_id, student_uid=uid)
+            return jsonify({
+                'success': True,
+                'compliance': serialize_student_compliance_record(record),
+            })
+        except Exception as exc:
+            print(f'Student compliance fetch error: {exc}')
             return jsonify({'success': False, 'error': str(exc)}), 500
 
     @bp.route('/api/student/voice-consent', methods=['POST'])

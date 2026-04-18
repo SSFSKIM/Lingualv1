@@ -667,6 +667,15 @@ class CurriculumAdminRoutesTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.get_json()['error'], 'invalid_status')
 
+    def test_student_can_fetch_own_compliance(self):
+        self._set_session_user('student-1', 'mem-student')
+        response = self.client.get('/api/student/compliance')
+        self.assertEqual(response.status_code, 200)
+        body = response.get_json()
+        self.assertTrue(body['success'])
+        self.assertIn('retentionPolicy', body['compliance'])
+        self.assertEqual(body['compliance']['retentionPolicy']['id'], 'standard_school')
+
     def test_student_self_consent_logs_event(self):
         self._reset_student_voice_consent()
         self._set_session_user('student-1', 'mem-student')

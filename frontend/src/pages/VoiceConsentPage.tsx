@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { ArrowLeft, CheckCircle2, Loader2, Mic, ShieldAlert } from 'lucide-react';
 import { Alert, AlertDescription, Badge, Button, Card } from '@/components/ui';
-import { submitVoiceConsent } from '@/api/voiceConsent';
-import type { StudentComplianceRecord } from '@/types/school';
+import { getStudentCompliance, submitVoiceConsent } from '@/api/voiceConsent';
+import type { StudentComplianceRecord, RetentionPolicySummary } from '@/types/school';
 
 type ConsentStatus = 'granted' | 'revoked' | 'unknown' | 'pending' | string;
 
@@ -13,12 +13,45 @@ function statusBadgeVariant(status: ConsentStatus): 'success' | 'destructive' | 
   return 'outline';
 }
 
+function retentionSummaryText(policy: RetentionPolicySummary | undefined): string {
+  if (!policy) return 'Standard school retention policy applies.';
+  const parts: string[] = [];
+  if (policy.rawAudioStorageAllowed) {
+    const days = policy.rawAudioRetentionDays ?? 0;
+    parts.push(`Raw audio is kept for ${days} day${days === 1 ? '' : 's'}, then deleted`);
+  } else {
+    parts.push('Raw audio is not stored — only transcripts');
+  }
+  if (policy.transcriptRetentionDays) {
+    parts.push(`transcripts are kept for ${policy.transcriptRetentionDays} day${policy.transcriptRetentionDays === 1 ? '' : 's'}`);
+  }
+  return parts.join('; ') + '.';
+}
+
 export function VoiceConsentPage() {
   const navigate = useNavigate();
   const [compliance, setCompliance] = useState<StudentComplianceRecord | null>(null);
+  const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState<'granted' | 'revoked' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [successFlash, setSuccessFlash] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const record = await getStudentCompliance();
+        if (active) setCompliance(record);
+      } catch (err) {
+        if (active) setError(err instanceof Error ? err.message : 'Could not load your compliance record.');
+      } finally {
+        if (active) setLoading(false);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (!successFlash) return;
@@ -42,6 +75,8 @@ export function VoiceConsentPage() {
 
   const currentStatus: ConsentStatus = compliance?.voiceConsentStatus || 'unknown';
   const guardianRevoked = compliance?.guardianConsentStatus === 'revoked';
+  const retentionPolicy = compliance?.retentionPolicy;
+  const retentionLabel = retentionPolicy?.label || 'Standard school retention';
 
   return (
     <div className="mx-auto max-w-2xl space-y-6 px-4 py-8">
@@ -61,7 +96,6 @@ export function VoiceConsentPage() {
             <p className="text-sm text-muted-foreground">
               Voice practice lets you speak with the AI tutor in real time. Your audio is sent to
               our speech-AI provider to transcribe what you say and generate the tutor's response.
-              Transcripts are stored under your school's retention policy.
             </p>
             <p className="text-sm text-muted-foreground">
               If you don't consent, you can still complete assignments via text practice — typing
@@ -71,9 +105,33 @@ export function VoiceConsentPage() {
               <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                 Your status
               </span>
-              <Badge variant={statusBadgeVariant(currentStatus)}>{String(currentStatus)}</Badge>
+              {loading ? (
+                <Badge variant="outline">loading…</Badge>
+              ) : (
+                <Badge variant={statusBadgeVariant(currentStatus)}>{String(currentStatus)}</Badge>
+              )}
             </div>
           </div>
+        </div>
+      </Card>
+
+      <Card className="border-3 border-foreground p-6 shadow-stamp">
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+              Retention policy
+            </h2>
+            <Badge variant="outline">{retentionLabel}</Badge>
+          </div>
+          <p className="text-sm text-foreground/80">
+            {loading ? 'Loading retention details…' : retentionSummaryText(retentionPolicy)}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            <Link to="/compliance" className="underline">
+              See Lingual's full data policy
+            </Link>{' '}
+            for details on what is collected, how it's used, and how to request deletion.
+          </p>
         </div>
       </Card>
 
@@ -105,7 +163,7 @@ export function VoiceConsentPage() {
         <Button
           className="flex-1"
           size="lg"
-          disabled={submitting !== null || currentStatus === 'granted'}
+          disabled={submitting !== null || loading || currentStatus === 'granted'}
           onClick={() => handleSubmit('granted')}
         >
           {submitting === 'granted' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
@@ -115,7 +173,7 @@ export function VoiceConsentPage() {
           className="flex-1"
           variant="outline"
           size="lg"
-          disabled={submitting !== null || currentStatus === 'revoked' || currentStatus === 'unknown'}
+          disabled={submitting !== null || loading || currentStatus !== 'granted'}
           onClick={() => handleSubmit('revoked')}
         >
           {submitting === 'revoked' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
@@ -123,12 +181,7 @@ export function VoiceConsentPage() {
         </Button>
       </div>
 
-      <p className="text-xs text-muted-foreground">
-        You can change this choice at any time.{' '}
-        <Link to="/compliance" className="underline">
-          Read more about how Lingual handles student data.
-        </Link>
-      </p>
+      <p className="text-xs text-muted-foreground">You can change this choice at any time.</p>
     </div>
   );
 }
