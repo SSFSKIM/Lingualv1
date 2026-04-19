@@ -35,7 +35,12 @@ export type AssignmentTaskType =
   | 'opinion_gap'
   | 'decision_making'
   | 'custom_prompt';
-export type TargetLanguageIntensity = 'target_only' | 'mostly_target' | 'bilingual_scaffold';
+export type TargetLanguageIntensity =
+  | 'english_first'
+  | 'english_led'
+  | 'balanced'
+  | 'target_led'
+  | 'target_only';
 
 export interface FeedbackPolicy {
   mode: FeedbackMode;
@@ -136,6 +141,7 @@ export interface AssignmentDto {
   targetVocabulary?: string[];
   focusGrammar?: string[];
   teacherNotes?: string;
+  studentInstructions?: string;
   targetLanguageIntensity?: TargetLanguageIntensity;
   createdAt?: string | null;
   updatedAt?: string | null;
@@ -478,6 +484,7 @@ export interface CreateAssignmentPayload {
   targetVocabulary?: string[];
   focusGrammar?: string[];
   teacherNotes?: string;
+  studentInstructions?: string;
   targetLanguageIntensity?: TargetLanguageIntensity;
   canvasModuleItemRef?: {
     connection_id?: string;

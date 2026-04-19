@@ -235,7 +235,7 @@ Fields:
 - `due_at`
 - `modality_override`
 - `max_attempts`
-- `task_type` (enum: `information_gap`, `opinion_gap`, `decision_making`, `custom_prompt`; default `decision_making`). When `custom_prompt`, the assignment is scaffold-free: `instructions` is used verbatim as the system prompt and scenario/target/grammar scaffolding is skipped. Analytics that depend on target expressions, focus grammar, or rubric dimensions are intentionally N/A for these assignments.
+- `task_type` (enum: `information_gap`, `opinion_gap`, `decision_making`, `custom_prompt`; default `decision_making`). When `custom_prompt`, the assignment is scaffold-free: `instructions` is used as the system prompt with only the `target_language_intensity` policy appended (scenario / target expressions / target vocabulary / focus grammar / objectives / teacher notes / success criteria scaffolding is skipped). Analytics that depend on target expressions, focus grammar, or rubric dimensions are intentionally N/A for these assignments.
 - `success_criteria`
 - `created_by_uid`
 - `instructions`
@@ -244,7 +244,7 @@ Fields:
 - `target_expressions`
 - `focus_grammar`
 - `teacher_notes`
-- `target_language_intensity` (enum: `target_only`, `mostly_target`, `bilingual_scaffold`; default `mostly_target`)
+- `target_language_intensity` (enum: `english_first`, `english_led`, `balanced`, `target_led`, `target_only`; default `balanced`). Mirrors the 5-level language-mix selector used on the free-practice chat page so teachers and students share one mental model. Legacy values `mostly_target` → `target_led` and `bilingual_scaffold` → `english_led` are normalized on read for backward compatibility with pre-widening assignments.
 - `canvas_module_item_ref`
 - `created_at`
 - `updated_at`

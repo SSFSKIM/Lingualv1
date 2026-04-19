@@ -214,6 +214,27 @@ export function AssignmentLaunchPage() {
               </Card>
             </summary>
 
+            {bootstrap.assignment.taskType === 'custom_prompt' && (
+              <Card className="mt-3 border-3 border-foreground p-6 shadow-stamp">
+                <h2 className="text-lg font-display font-bold text-foreground">
+                  Instructions from your teacher
+                </h2>
+                <div className="mt-4 rounded-2xl border-2 border-border bg-secondary/40 p-4">
+                  {bootstrap.assignment.studentInstructions ? (
+                    <p className="whitespace-pre-wrap text-sm text-foreground">
+                      {bootstrap.assignment.studentInstructions}
+                    </p>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">
+                      Your teacher did not provide additional instructions for this practice. Start when you are ready.
+                    </p>
+                  )}
+                </div>
+              </Card>
+            )}
+
+            {bootstrap.assignment.taskType !== 'custom_prompt' && (
+            <>
             <Card className="mt-3 border-3 border-foreground p-6 shadow-stamp">
               <h2 className="text-lg font-display font-bold text-foreground">
                 {bootstrap.curriculum.package?.id === 'canvas-generated' ? 'Practice scope' : 'Curriculum scope'}
@@ -325,6 +346,8 @@ export function AssignmentLaunchPage() {
                 </div>
               </div>
             </Card>
+            </>
+            )}
           </details>
         </div>
 

@@ -808,6 +808,33 @@ def _normalize_string(value: Any) -> str:
     return value.strip()
 
 
+_LANGUAGE_INTENSITY_VALUES = {
+    "english_first",
+    "english_led",
+    "balanced",
+    "target_led",
+    "target_only",
+}
+
+_LANGUAGE_INTENSITY_LEGACY_MAP = {
+    # Pre-widening enum. `mostly_target` was the old default and sat closest
+    # to `target_led`; `bilingual_scaffold` glossed English alongside the
+    # target language and maps best to `english_led`.
+    "mostly_target": "target_led",
+    "bilingual_scaffold": "english_led",
+}
+
+
+def _normalize_language_intensity(value: Any) -> str:
+    if isinstance(value, str):
+        stripped = value.strip()
+        if stripped in _LANGUAGE_INTENSITY_VALUES:
+            return stripped
+        if stripped in _LANGUAGE_INTENSITY_LEGACY_MAP:
+            return _LANGUAGE_INTENSITY_LEGACY_MAP[stripped]
+    return "balanced"
+
+
 def _normalize_string_list(values: Any) -> list[str]:
     if not isinstance(values, list):
         return []
@@ -911,11 +938,14 @@ def serialize_assignment(assignment: dict[str, Any] | None) -> dict[str, Any] | 
     teacher_notes = assignment.get("teacher_notes")
     if isinstance(teacher_notes, str) and teacher_notes:
         serialized["teacherNotes"] = teacher_notes
-    intensity = assignment.get("target_language_intensity")
-    serialized["targetLanguageIntensity"] = (
-        intensity
-        if intensity in ("target_only", "mostly_target", "bilingual_scaffold")
-        else "mostly_target"
+    student_instructions = assignment.get("student_instructions")
+    if isinstance(student_instructions, str) and student_instructions:
+        serialized["studentInstructions"] = student_instructions
+    task_type = assignment.get("task_type")
+    if isinstance(task_type, str) and task_type:
+        serialized["taskType"] = task_type
+    serialized["targetLanguageIntensity"] = _normalize_language_intensity(
+        assignment.get("target_language_intensity")
     )
     canvas_module_item_ref = assignment.get("canvas_module_item_ref")
     if isinstance(canvas_module_item_ref, dict) and canvas_module_item_ref:
@@ -1082,27 +1112,40 @@ def _resolve_canvas_generated_bootstrap(
     if success_criteria:
         prompt_parts.append(f"\n## Success Criteria\n" + "\n".join(f"- {c}" for c in success_criteria))
 
-    intensity = assignment.get("target_language_intensity") or "mostly_target"
-    if intensity not in ("target_only", "mostly_target", "bilingual_scaffold"):
-        intensity = "mostly_target"
+    intensity = _normalize_language_intensity(assignment.get("target_language_intensity"))
     language_name = subject or locale_label
     if intensity == "target_only":
         language_policy = (
-            f"Respond ONLY in {language_name}. Stay in {language_name} for every turn. "
-            f"Use English only if the learner explicitly asks for a translation, "
-            f"then return to {language_name} immediately."
+            f"Respond ONLY in {language_name}. Stay in {language_name} for every turn, including "
+            f"clarifications and corrections. Use English only if the learner explicitly asks for a "
+            f"translation, then return to {language_name} immediately."
         )
-    elif intensity == "bilingual_scaffold":
-        language_policy = (
-            f"Bilingual scaffolding is on. Lead each turn with {language_name}, then add a brief English "
-            f"gloss in parentheses for new vocabulary, idioms, or grammar so the learner can keep up. "
-            f"Accept English replies and gently prompt the learner to retry the same idea in {language_name}."
-        )
-    else:
+    elif intensity == "target_led":
         language_policy = (
             f"Speak primarily in {language_name}. Brief English scaffolding (a single word or short clause) "
             f"is fine when the learner clearly stalls, asks for a translation, or otherwise can't move forward — "
             f"then return to {language_name} immediately. Never switch to a different target language."
+        )
+    elif intensity == "balanced":
+        language_policy = (
+            f"Alternate naturally between English and {language_name}. Run scenario openers and the "
+            f"assignment's target-expression practice in {language_name}; use English for clarifications, "
+            f"metalinguistic hints, or when the learner asks for a translation. Match the learner's language "
+            f"when they reply, then nudge them back into {language_name} before the next target expression."
+        )
+    elif intensity == "english_led":
+        language_policy = (
+            f"English leads the conversation, but {language_name} carries the assignment's target expressions, "
+            f"target vocabulary, and key scenario moves. When the learner replies in English, recast their "
+            f"meaning into {language_name} as a brief model before continuing. The learner should hear "
+            f"{language_name} on every turn but feel safe to reply mostly in English."
+        )
+    else:  # english_first
+        language_policy = (
+            f"Lead each turn in English and keep the scenario accessible for a novice. Introduce any "
+            f"{language_name} phrase or vocabulary with its English meaning first, then model the "
+            f"{language_name} form. Accept learner replies in English as valid understanding; invite them "
+            f"to try the {language_name} version before moving on, but don't block progress if they can't."
         )
     prompt_parts.append(f"\n## Language Mix\n{language_policy}")
     prompt_parts.append(
@@ -1110,7 +1153,11 @@ def _resolve_canvas_generated_bootstrap(
     )
 
     if is_custom_prompt_mode:
-        system_prompt_preview = assignment.get("instructions") or ""
+        # Scaffold-free mode: teacher-authored prompt is the content; the
+        # language-mix policy is still honored so teachers keep that knob
+        # even without scenario scaffolding.
+        raw_instructions = assignment.get("instructions") or ""
+        system_prompt_preview = f"{raw_instructions}\n\n## Language Mix\n{language_policy}"
     else:
         system_prompt_preview = "\n".join(prompt_parts)
 

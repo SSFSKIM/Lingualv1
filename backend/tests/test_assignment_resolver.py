@@ -188,7 +188,9 @@ class TestSerializeAssignment(unittest.TestCase):
         }
         result = serialize_assignment(assignment)
         self.assertEqual(result["id"], "a-1")
-        self.assertNotIn("taskType", result)
+        # taskType is now exposed so the student launch page and teacher
+        # analytics page can switch rendering for scaffold-free assignments.
+        self.assertEqual(result["taskType"], "information_gap")
         self.assertEqual(result["successCriteria"], ["Complete the task"])
 
     def test_returns_none_for_none(self):
@@ -506,10 +508,14 @@ class TestCanvasGeneratedBootstrapFromAssignment(unittest.TestCase):
             ui_language="en",
         )
 
-        self.assertEqual(bootstrap.get("systemPromptPreview", ""), raw_prompt)
-        self.assertNotIn("should not appear", bootstrap.get("systemPromptPreview", ""))
-        self.assertNotIn("## Scenario", bootstrap.get("systemPromptPreview", ""))
-        self.assertNotIn("## Language Mix", bootstrap.get("systemPromptPreview", ""))
+        prompt = bootstrap.get("systemPromptPreview", "")
+        # Raw teacher prompt is at the top; language-mix policy is appended.
+        self.assertTrue(prompt.startswith(raw_prompt))
+        self.assertIn("## Language Mix", prompt)
+        self.assertNotIn("should not appear", prompt)
+        self.assertNotIn("## Scenario", prompt)
+        self.assertNotIn("## Target Expressions", prompt)
+        self.assertNotIn("## Focus Grammar", prompt)
         self.assertEqual(bootstrap["mapping"]["targetExpressions"], [])
         self.assertEqual(bootstrap["mapping"]["focusGrammar"], [])
         self.assertEqual(bootstrap["mapping"]["teacherNotes"], "")
@@ -536,19 +542,27 @@ class TestCanvasGeneratedBootstrapFromAssignment(unittest.TestCase):
             "target_language_intensity": intensity_value,
         }
 
-    def test_language_mix_target_only_emits_strict_directive(self):
-        self._seed_language_mix_assignment("target_only")
+    def _prompt_for_intensity(self, intensity_value):
+        self._seed_language_mix_assignment(intensity_value)
         bootstrap = resolve_assignment_bootstrap_for_user(
             deps=self.deps, uid="u1", context=self.context,
             assignment_id="asg-mix", ui_language="en",
         )
-        prompt = bootstrap["systemPromptPreview"]
+        return bootstrap["systemPromptPreview"]
+
+    def test_language_mix_target_only_emits_strict_directive(self):
+        prompt = self._prompt_for_intensity("target_only")
         self.assertIn("## Language Mix", prompt)
         self.assertIn("Respond ONLY in Spanish", prompt)
-        self.assertNotIn("Bilingual scaffolding is on", prompt)
 
-    def test_language_mix_mostly_target_is_default(self):
-        # Omit target_language_intensity entirely — should default to mostly_target.
+    def test_language_mix_target_led_is_mostly_target_language(self):
+        prompt = self._prompt_for_intensity("target_led")
+        self.assertIn("Speak primarily in Spanish", prompt)
+        self.assertIn("Brief English scaffolding", prompt)
+        self.assertNotIn("Respond ONLY in Spanish", prompt)
+
+    def test_language_mix_balanced_is_the_new_default(self):
+        # Omit target_language_intensity entirely — should default to balanced.
         self._seed_language_mix_assignment("")
         del self.db.assignments["asg-mix"]["target_language_intensity"]
         bootstrap = resolve_assignment_bootstrap_for_user(
@@ -556,19 +570,30 @@ class TestCanvasGeneratedBootstrapFromAssignment(unittest.TestCase):
             assignment_id="asg-mix", ui_language="en",
         )
         prompt = bootstrap["systemPromptPreview"]
-        self.assertIn("Speak primarily in Spanish", prompt)
-        self.assertIn("Brief English scaffolding", prompt)
+        self.assertIn("Alternate naturally between English and Spanish", prompt)
         self.assertNotIn("Respond ONLY in Spanish", prompt)
+        self.assertNotIn("Speak primarily in Spanish", prompt)
 
-    def test_language_mix_bilingual_scaffold_emits_glossing_directive(self):
-        self._seed_language_mix_assignment("bilingual_scaffold")
-        bootstrap = resolve_assignment_bootstrap_for_user(
-            deps=self.deps, uid="u1", context=self.context,
-            assignment_id="asg-mix", ui_language="en",
-        )
-        prompt = bootstrap["systemPromptPreview"]
-        self.assertIn("Bilingual scaffolding is on", prompt)
-        self.assertIn("English gloss in parentheses", prompt)
+    def test_language_mix_english_led_is_english_dominant(self):
+        prompt = self._prompt_for_intensity("english_led")
+        self.assertIn("English leads the conversation", prompt)
+        self.assertIn("Spanish carries the assignment", prompt)
+
+    def test_language_mix_english_first_is_novice_friendly(self):
+        prompt = self._prompt_for_intensity("english_first")
+        self.assertIn("Lead each turn in English", prompt)
+        self.assertIn("scenario accessible for a novice", prompt)
+
+    def test_legacy_mostly_target_normalizes_to_target_led(self):
+        # Existing assignments created before the 5-level widening still have
+        # 'mostly_target' on disk — the resolver should render them using the
+        # new target_led policy.
+        prompt = self._prompt_for_intensity("mostly_target")
+        self.assertIn("Speak primarily in Spanish", prompt)
+
+    def test_legacy_bilingual_scaffold_normalizes_to_english_led(self):
+        prompt = self._prompt_for_intensity("bilingual_scaffold")
+        self.assertIn("English leads the conversation", prompt)
 
 
 if __name__ == "__main__":

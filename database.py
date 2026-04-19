@@ -1235,6 +1235,7 @@ def create_assignment(
     generated_scenario='',
     teacher_notes='',
     target_language_intensity='mostly_target',
+    student_instructions='',
 ):
     """Create an assignment document.
 
@@ -1267,10 +1268,22 @@ def create_assignment(
         'focus_grammar': list(focus_grammar or []),
         'generated_scenario': generated_scenario or '',
         'teacher_notes': teacher_notes or '',
+        'student_instructions': student_instructions or '',
         'target_language_intensity': (
             target_language_intensity
-            if target_language_intensity in ('target_only', 'mostly_target', 'bilingual_scaffold')
-            else 'mostly_target'
+            if target_language_intensity in (
+                'english_first',
+                'english_led',
+                'balanced',
+                'target_led',
+                'target_only',
+                # Legacy values are still accepted on write so older seed
+                # fixtures and restored snapshots keep working; read-path
+                # normalization maps them to their nearest new-enum value.
+                'mostly_target',
+                'bilingual_scaffold',
+            )
+            else 'balanced'
         ),
         'created_at': firestore.SERVER_TIMESTAMP,
         'updated_at': firestore.SERVER_TIMESTAMP,

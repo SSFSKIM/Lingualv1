@@ -64,8 +64,9 @@ export function TeacherAssignmentBuilderPage() {
   // authored items.
   const [canvasObjectivesFromAI, setCanvasObjectivesFromAI] = useState(false);
   const [canvasTeacherNotes, setCanvasTeacherNotes] = useState('');
+  const [customStudentInstructions, setCustomStudentInstructions] = useState('');
   const [canvasTargetLanguageIntensity, setCanvasTargetLanguageIntensity] =
-    useState<TargetLanguageIntensity>('mostly_target');
+    useState<TargetLanguageIntensity>('balanced');
   // Default to 'draft' so a misclick on Publish doesn't ship an un-reviewed
   // assignment live to students. Teachers must explicitly choose Published.
   const [canvasStatus, setCanvasStatus] = useState<'draft' | 'published'>('draft');
@@ -137,7 +138,8 @@ export function TeacherAssignmentBuilderPage() {
     setCanvasObjectives([]);
     setCanvasObjectivesFromAI(false);
     setCanvasTeacherNotes('');
-    setCanvasTargetLanguageIntensity('mostly_target');
+    setCustomStudentInstructions('');
+    setCanvasTargetLanguageIntensity('balanced');
     setCanvasStatus('draft');
   };
 
@@ -240,7 +242,7 @@ export function TeacherAssignmentBuilderPage() {
     setCanvasSuccessCriteria([]);
     setCanvasObjectives([]);
     setCanvasTeacherNotes('');
-    setCanvasTargetLanguageIntensity('mostly_target');
+    setCanvasTargetLanguageIntensity('balanced');
     setCanvasStatus('draft');
     setCanvasPhase('reviewing');
   };
@@ -333,7 +335,8 @@ export function TeacherAssignmentBuilderPage() {
           targetVocabulary: isCustomPrompt ? [] : canvasTargetVocabulary,
           focusGrammar: isCustomPrompt ? [] : canvasFocusGrammar,
           teacherNotes: isCustomPrompt ? '' : canvasTeacherNotes.trim(),
-          targetLanguageIntensity: isCustomPrompt ? undefined : canvasTargetLanguageIntensity,
+          ...(isCustomPrompt ? { studentInstructions: customStudentInstructions.trim() } : {}),
+          targetLanguageIntensity: canvasTargetLanguageIntensity,
         });
       }
       await loadClassData(classId);
@@ -495,8 +498,8 @@ export function TeacherAssignmentBuilderPage() {
                   },
                   {
                     value: 'custom_prompt' as const,
-                    label: 'Scaffold-free prompt',
-                    description: 'Write the full system prompt. No scenario or grammar scaffolding; analytics show N/A.',
+                    label: 'Scaffold-free',
+                    description: 'Write full custom instruction for the AI tutor. Scenario, grammar, whatever you want.',
                   },
                 ].map((option) => (
                   <button
@@ -692,25 +695,46 @@ export function TeacherAssignmentBuilderPage() {
                   />
 
                   {builderMode === 'advanced' && advancedEntryMode === 'custom_prompt' && (
-                    <div className="space-y-2">
-                      <div className="flex items-center gap-2">
-                        <label htmlFor="custom-system-prompt" className="text-base font-semibold text-foreground">
-                          System prompt
-                        </label>
-                        <Badge variant="outline" size="sm">Raw · no scaffold</Badge>
+                    <>
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-2">
+                          <label htmlFor="custom-student-instructions" className="text-base font-semibold text-foreground">
+                            Student instructions
+                          </label>
+                          <Badge variant="outline" size="sm">Optional · shown to students</Badge>
+                        </div>
+                        <textarea
+                          id="custom-student-instructions"
+                          value={customStudentInstructions}
+                          onChange={(event) => setCustomStudentInstructions(event.target.value)}
+                          rows={6}
+                          placeholder="What students should know before they start this practice. Shown on the student assignment page in place of the scope and practice-overlay cards."
+                          className="w-full rounded-xl border-3 border-border bg-card px-4 py-3 text-base text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          If left blank, students see a neutral placeholder.
+                        </p>
                       </div>
-                      <textarea
-                        id="custom-system-prompt"
-                        value={draftInstructions}
-                        onChange={(event) => setDraftInstructions(event.target.value)}
-                        rows={16}
-                        placeholder="Write the complete system prompt the AI tutor will follow. No scenario, target expressions, grammar, or language-mix scaffolding will be added."
-                        className="w-full rounded-xl border-3 border-border bg-card px-4 py-3 text-base text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-                      />
-                      <p className="text-xs text-muted-foreground">
-                        Analytics that depend on target expressions, grammar, or rubric dimensions will show N/A for this assignment.
-                      </p>
-                    </div>
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-2">
+                          <label htmlFor="custom-system-prompt" className="text-base font-semibold text-foreground">
+                            System prompt
+                          </label>
+                          <Badge variant="outline" size="sm">Raw · no scaffold</Badge>
+                        </div>
+                        <textarea
+                          id="custom-system-prompt"
+                          value={draftInstructions}
+                          onChange={(event) => setDraftInstructions(event.target.value)}
+                          rows={16}
+                          placeholder="Write the complete system prompt the AI tutor will follow. No scenario, target expressions, grammar, or language-mix scaffolding will be added."
+                          className="w-full rounded-xl border-3 border-border bg-card px-4 py-3 text-base text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          Analytics that depend on target expressions, grammar, or rubric dimensions will show N/A for this assignment.
+                        </p>
+                      </div>
+                    </>
                   )}
                   {builderMode === 'advanced' && advancedEntryMode !== 'custom_prompt' && (
                     <Textarea
@@ -834,7 +858,6 @@ export function TeacherAssignmentBuilderPage() {
                     </div>
                   )}
 
-                  {advancedEntryMode !== 'custom_prompt' && (
                   <div className="space-y-3 rounded-2xl border-2 border-border bg-secondary/40 p-4">
                     <div className="space-y-1">
                       <p id="canvas-language-mix-label" className="text-base font-semibold text-foreground">
@@ -852,19 +875,29 @@ export function TeacherAssignmentBuilderPage() {
                       {(
                         [
                           {
+                            value: 'english_first',
+                            label: 'English-first',
+                            hint: 'Novice-friendly — English leads, target language introduced alongside English meanings.',
+                          },
+                          {
+                            value: 'english_led',
+                            label: 'English-led',
+                            hint: 'English drives the conversation; target language carries key expressions and scenario moves.',
+                          },
+                          {
+                            value: 'balanced',
+                            label: 'Balanced',
+                            hint: 'Default. Alternates naturally between English and the target language.',
+                          },
+                          {
+                            value: 'target_led',
+                            label: 'Target-language-led',
+                            hint: 'Mostly target language; brief English only when the learner stalls.',
+                          },
+                          {
                             value: 'target_only',
-                            label: 'Target language only',
+                            label: 'Target-language-only',
                             hint: 'Best for advanced classes — AI replies stay in the target language.',
-                          },
-                          {
-                            value: 'mostly_target',
-                            label: 'Mostly target language',
-                            hint: 'Default. Brief English when the learner stalls, then back to the target language.',
-                          },
-                          {
-                            value: 'bilingual_scaffold',
-                            label: 'Bilingual scaffolding',
-                            hint: 'Best for novice classes — AI glosses new words in English in parentheses.',
                           },
                         ] as Array<{ value: TargetLanguageIntensity; label: string; hint: string }>
                       ).map((option) => {
@@ -889,7 +922,6 @@ export function TeacherAssignmentBuilderPage() {
                       })}
                     </div>
                   </div>
-                  )}
 
                   <div className="space-y-3 rounded-2xl border-2 border-border bg-secondary/40 p-4">
                     <p id="canvas-status-label" className="text-base font-semibold text-foreground">Status</p>

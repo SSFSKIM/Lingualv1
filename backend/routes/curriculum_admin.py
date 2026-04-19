@@ -241,7 +241,8 @@ def create_curriculum_admin_blueprint(deps: RouteDeps) -> Blueprint:
             target_vocabulary = _normalize_string_list(data.get('targetVocabulary'))
             focus_grammar = _normalize_string_list(data.get('focusGrammar'))
             teacher_notes = _normalize_string(data.get('teacherNotes'))
-            target_language_intensity = _normalize_string(data.get('targetLanguageIntensity')) or 'mostly_target'
+            student_instructions = _normalize_string(data.get('studentInstructions'))
+            target_language_intensity = _normalize_string(data.get('targetLanguageIntensity')) or 'balanced'
             task_type = _normalize_string(data.get('taskType')) or 'decision_making'
 
             if task_type not in {'information_gap', 'opinion_gap', 'decision_making', 'custom_prompt'}:
@@ -279,6 +280,7 @@ def create_curriculum_admin_blueprint(deps: RouteDeps) -> Blueprint:
                 focus_grammar=focus_grammar,
                 generated_scenario=generated_scenario,
                 teacher_notes=teacher_notes,
+                student_instructions=student_instructions,
                 target_language_intensity=target_language_intensity,
             )
 
