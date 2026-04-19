@@ -847,6 +847,14 @@ class TestAutoGrantVoiceConsentForPilot(unittest.TestCase):
         self.assertEqual(record["voice_consent_status"], "granted")
         self.assertEqual(record["guardian_consent_status"], "granted")
         self.assertTrue(record["voice_allowed"])
+        self.assertEqual(len(db.consent_events), 1)
+        event = db.consent_events[0]
+        self.assertEqual(event["event_type"], "consent.auto_granted_for_pilot")
+        self.assertEqual(event["actor_type"], "system")
+        self.assertEqual(event["actor_id"], "system:pilot_auto_grant")
+        self.assertEqual(event["student_uid"], "stu-1")
+        self.assertEqual(event["payload"]["updates"]["voice_consent_status"], "granted")
+        self.assertEqual(event["payload"]["updates"]["guardian_consent_status"], "granted")
 
     def test_grants_voice_only_for_adult(self):
         db = self._setup_db(student_age=20)
@@ -855,6 +863,11 @@ class TestAutoGrantVoiceConsentForPilot(unittest.TestCase):
         self.assertEqual(record["voice_consent_status"], "granted")
         self.assertEqual(record["guardian_consent_status"], "not_required")
         self.assertTrue(record["voice_allowed"])
+        self.assertEqual(len(db.consent_events), 1)
+        self.assertEqual(
+            db.consent_events[0]["payload"]["updates"],
+            {"voice_consent_status": "granted"},
+        )
 
     def test_does_not_override_revoked_voice(self):
         db = self._setup_db(student_age=15)
@@ -871,6 +884,7 @@ class TestAutoGrantVoiceConsentForPilot(unittest.TestCase):
         self.assertEqual(record["voice_consent_status"], "revoked")
         # No write should have happened — voice is revoked, guardian already granted
         self.assertEqual(db.upserted_records, [])
+        self.assertEqual(db.consent_events, [])
 
     def test_does_not_override_revoked_guardian(self):
         db = self._setup_db(student_age=15)
@@ -892,8 +906,10 @@ class TestAutoGrantVoiceConsentForPilot(unittest.TestCase):
         db = self._setup_db(student_age=15)
         auto_grant_voice_consent_for_pilot(db, org_id="org-1", student_uid="stu-1")
         first_upserts = len(db.upserted_records)
+        first_events = len(db.consent_events)
         auto_grant_voice_consent_for_pilot(db, org_id="org-1", student_uid="stu-1")
         self.assertEqual(len(db.upserted_records), first_upserts)
+        self.assertEqual(len(db.consent_events), first_events)
 
 
 if __name__ == "__main__":

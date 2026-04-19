@@ -32,6 +32,22 @@ class FakeLtiIdentityDb(FakeDbBase):
                 return dict(p)
         return None
 
+    def get_lti_platform_by_issuer_and_client_id(self, issuer: str, client_id: str):
+        for p in self.lti_platforms.values():
+            if p.get('issuer') == issuer and p.get('client_id') == client_id:
+                return dict(p)
+        return None
+
+    def get_lti_platform_by_issuer_client_deployment(self, issuer: str, client_id: str, deployment_id: str):
+        for p in self.lti_platforms.values():
+            if (
+                p.get('issuer') == issuer
+                and p.get('client_id') == client_id
+                and p.get('deployment_id') == deployment_id
+            ):
+                return dict(p)
+        return None
+
     def get_lti_platform_by_org(self, org_id: str):
         for p in self.lti_platforms.values():
             if p.get('org_id') == org_id:
@@ -43,6 +59,13 @@ class FakeLtiIdentityDb(FakeDbBase):
     def get_user_by_email(self, email: str):
         for u in self.users.values():
             if u.get('email') == email:
+                return dict(u)
+        return None
+
+    def get_user_by_lti_identity(self, issuer: str, canvas_user_id: str, client_id: str = ''):
+        key = f'{issuer}|{client_id}|{canvas_user_id}'
+        for u in self.users.values():
+            if key in u.get('lti_identity_keys', []):
                 return dict(u)
         return None
 
@@ -189,6 +212,74 @@ class TestMatchLtiUser(unittest.TestCase):
         )
         self.assertIsNotNone(result)
         self.assertEqual(result['role'], 'student')
+
+    def test_matches_by_lti_identity_when_canvas_email_differs(self):
+        """Manual account links survive later launches where Canvas email differs."""
+        self.db.users['teacher-1']['lti_identity_keys'] = [
+            'https://canvas.example.edu|10000000001|canvas-linked-123'
+        ]
+        self.db.users['teacher-1']['lti_identities'] = [{
+            'issuer': 'https://canvas.example.edu',
+            'client_id': '10000000001',
+            'canvas_user_id': 'canvas-linked-123',
+            'email': 'old-canvas-email@example.edu',
+            'platform_id': 'plat-1',
+        }]
+
+        result = match_lti_user(
+            self.db,
+            issuer='https://canvas.example.edu',
+            client_id='10000000001',
+            email='new-canvas-email@example.edu',
+            canvas_user_id='canvas-linked-123',
+            roles=['http://purl.imsglobal.org/vocab/lis/v2/membership#Instructor'],
+        )
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result['uid'], 'teacher-1')
+        self.assertEqual(result['membership_id'], 'mem-t1')
+        self.assertEqual(result['platform_id'], 'plat-1')
+
+    def test_client_id_disambiguates_same_canvas_issuer_across_orgs(self):
+        """Shared Canvas issuers must resolve to the client-specific Lingual org."""
+        self.db.lti_platforms['plat-2'] = {
+            'id': 'plat-2',
+            'org_id': 'org-2',
+            'issuer': 'https://canvas.example.edu',
+            'client_id': '20000000002',
+            'deployment_id': '2',
+        }
+        self.db.organizations['org-2'] = {
+            'id': 'org-2',
+            'name': 'Second School',
+            'type': 'school',
+            'status': 'active',
+        }
+        self.db.users['teacher-2'] = make_user(
+            uid='teacher-2',
+            name='Terry Teacher',
+            email='terry@example.edu',
+        )
+        self.db.memberships['mem-t2'] = make_membership(
+            membership_id='mem-t2',
+            org_id='org-2',
+            uid='teacher-2',
+            roles=['teacher'],
+        )
+
+        result = match_lti_user(
+            self.db,
+            issuer='https://canvas.example.edu',
+            client_id='20000000002',
+            email='terry@example.edu',
+            canvas_user_id='canvas-222',
+            roles=['http://purl.imsglobal.org/vocab/lis/v2/membership#Instructor'],
+        )
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result['uid'], 'teacher-2')
+        self.assertEqual(result['org_id'], 'org-2')
+        self.assertEqual(result['platform_id'], 'plat-2')
 
 
 # ---------------------------------------------------------------------------

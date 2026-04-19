@@ -10,12 +10,43 @@ from firebase_admin import firestore as _firestore
 from backend.services.compliance import auto_grant_voice_consent_for_pilot
 
 
-def match_lti_user(db, *, issuer, email, canvas_user_id, roles):
+def build_lti_identity_key(issuer: str, client_id: str, canvas_user_id: str) -> str:
+    """Build the deterministic user index key for an LTI platform identity."""
+    return f'{issuer}|{client_id or ""}|{canvas_user_id}'
+
+
+def resolve_lti_platform(db, *, issuer, client_id='', deployment_id=''):
+    """Resolve an LTI platform without collapsing shared Canvas issuers."""
+    if issuer and client_id and deployment_id and hasattr(db, 'get_lti_platform_by_issuer_client_deployment'):
+        platform = db.get_lti_platform_by_issuer_client_deployment(issuer, client_id, deployment_id)
+        if platform:
+            return platform
+    if issuer and client_id and hasattr(db, 'get_lti_platform_by_issuer_and_client_id'):
+        platform = db.get_lti_platform_by_issuer_and_client_id(issuer, client_id)
+        if platform:
+            return platform
+    if issuer and not client_id and hasattr(db, 'get_lti_platform_by_issuer'):
+        return db.get_lti_platform_by_issuer(issuer)
+    return None
+
+
+def _find_user_by_lti_identity(db, *, issuer, client_id, canvas_user_id):
+    if not issuer or not canvas_user_id:
+        return None
+    if hasattr(db, 'get_user_by_lti_identity'):
+        user = db.get_user_by_lti_identity(issuer, canvas_user_id, client_id or '')
+        if user:
+            return user
+    return None
+
+
+def match_lti_user(db, *, issuer, email, canvas_user_id, roles, client_id='', deployment_id=''):
     """Match an LTI launch to a Lingual user account.
 
     Steps:
-      1. Look up the LTI platform by ``issuer`` to get the org_id.
-      2. Find the Lingual user by ``email``.
+      1. Look up the LTI platform by issuer + client_id/deployment_id to get
+         the org_id.
+      2. Find the Lingual user by stored LTI identity, then by ``email``.
       3. Verify the user holds an active/invited membership in that org.
       4. Determine role: "teacher" if any role string contains "Instructor",
          otherwise "student".
@@ -26,20 +57,34 @@ def match_lti_user(db, *, issuer, email, canvas_user_id, roles):
         email: The user's email address from the LTI launch.
         canvas_user_id: The user's ID on Canvas.
         roles: List of LTI role URIs/strings.
+        client_id: The Canvas developer-key client ID from the launch.
+        deployment_id: The LTI deployment ID from the launch.
 
     Returns:
         A dict with ``uid``, ``email``, ``membership_id``, ``org_id``,
         ``platform_id``, and ``role`` — or ``None`` if no match.
     """
-    # 1. Find platform by issuer
-    platform = db.get_lti_platform_by_issuer(issuer)
+    # 1. Find platform by issuer + client/deployment where possible.
+    platform = resolve_lti_platform(
+        db,
+        issuer=issuer,
+        client_id=client_id,
+        deployment_id=deployment_id,
+    )
     if not platform:
         return None
     org_id = platform.get('org_id')
     platform_id = platform.get('id')
 
-    # 2. Find user by email
-    user = db.get_user_by_email(email)
+    # 2. Find linked user first; email is not stable across Canvas accounts.
+    user = _find_user_by_lti_identity(
+        db,
+        issuer=issuer,
+        client_id=client_id or platform.get('client_id', ''),
+        canvas_user_id=canvas_user_id,
+    )
+    if not user:
+        user = db.get_user_by_email(email)
     if not user:
         return None
     uid = user.get('uid')

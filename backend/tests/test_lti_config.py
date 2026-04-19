@@ -28,6 +28,22 @@ class FakeLtiDb(FakeDbBase):
                 return dict(p)
         return None
 
+    def get_lti_platform_by_issuer_and_client_id(self, issuer: str, client_id: str):
+        for p in self.lti_platforms.values():
+            if p.get('issuer') == issuer and p.get('client_id') == client_id:
+                return dict(p)
+        return None
+
+    def get_lti_platform_by_issuer_client_deployment(self, issuer: str, client_id: str, deployment_id: str):
+        for p in self.lti_platforms.values():
+            if (
+                p.get('issuer') == issuer
+                and p.get('client_id') == client_id
+                and p.get('deployment_id') == deployment_id
+            ):
+                return dict(p)
+        return None
+
     def get_lti_platform_by_org(self, org_id: str):
         for p in self.lti_platforms.values():
             if p.get('org_id') == org_id:
@@ -87,6 +103,29 @@ class TestFirestoreToolConfRegistration(unittest.TestCase):
         reg = self.tool_conf.find_registration_by_issuer('https://unknown.example.edu')
         self.assertIsNone(reg)
 
+    def test_find_registration_by_params_uses_client_id_for_shared_issuer(self):
+        """Same Canvas issuer can back multiple org-specific client IDs."""
+        self.db.lti_platforms['plat-2'] = {
+            **SAMPLE_PLATFORM,
+            'id': 'plat-2',
+            'org_id': 'org-2',
+            'client_id': '20000000002',
+            'deployment_id': '2',
+        }
+
+        reg = self.tool_conf.find_registration_by_params(
+            'https://canvas.example.edu',
+            '20000000002',
+        )
+
+        self.assertIsNotNone(reg)
+        self.assertEqual(reg.get_client_id(), '20000000002')
+
+    def test_tool_conf_declares_many_clients_per_issuer(self):
+        """pylti should ask for client_id when resolving shared issuers."""
+        self.assertFalse(self.tool_conf.check_iss_has_one_client('https://canvas.example.edu'))
+        self.assertTrue(self.tool_conf.check_iss_has_many_clients('https://canvas.example.edu'))
+
 
 class TestFirestoreToolConfDeployment(unittest.TestCase):
     """Tests for FirestoreToolConf.find_deployment."""
@@ -106,6 +145,25 @@ class TestFirestoreToolConfDeployment(unittest.TestCase):
         """Returns None when deployment_id does not match."""
         dep = self.tool_conf.find_deployment('https://canvas.example.edu', '999')
         self.assertIsNone(dep)
+
+    def test_find_deployment_by_params_uses_client_id_for_shared_issuer(self):
+        """Deployment lookup must not return the first org on a shared issuer."""
+        self.db.lti_platforms['plat-2'] = {
+            **SAMPLE_PLATFORM,
+            'id': 'plat-2',
+            'org_id': 'org-2',
+            'client_id': '20000000002',
+            'deployment_id': '2',
+        }
+
+        dep = self.tool_conf.find_deployment_by_params(
+            'https://canvas.example.edu',
+            '2',
+            '20000000002',
+        )
+
+        self.assertIsNotNone(dep)
+        self.assertEqual(dep.get_deployment_id(), '2')
 
 
 class TestGetJwks(unittest.TestCase):

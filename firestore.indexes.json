@@ -211,6 +211,38 @@
       ]
     },
     {
+      "collectionGroup": "lti_platforms",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "issuer",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "client_id",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "lti_platforms",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "issuer",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "client_id",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "deployment_id",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
       "collectionGroup": "consent_events",
       "queryScope": "COLLECTION",
       "fields": [

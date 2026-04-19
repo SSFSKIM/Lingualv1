@@ -17,8 +17,14 @@ from __future__ import annotations
 from flask import Blueprint, jsonify, redirect, request, session, url_for
 
 from backend.route_deps import RouteDeps
+from backend.routes.curriculum_admin import _require_assignment_teacher_access
 from backend.services.lti.config import FirestoreToolConf
-from backend.services.lti.identity import auto_enroll_student, match_lti_user
+from backend.services.lti.identity import (
+    auto_enroll_student,
+    build_lti_identity_key,
+    match_lti_user,
+    resolve_lti_platform,
+)
 from backend.services.lti.keys import get_jwks
 from backend.services.membership_context import SchoolContextPermissionError
 
@@ -57,6 +63,21 @@ def create_lti_blueprint(deps: RouteDeps) -> Blueprint:
             'https://purl.imsglobal.org/spec/lti/claim/roles', []
         )
 
+    def _extract_client_id(launch_data):
+        aud = launch_data.get('aud', '')
+        if isinstance(aud, list):
+            azp = launch_data.get('azp', '')
+            if isinstance(azp, str) and azp in aud:
+                return azp
+            return str(aud[0]) if aud else ''
+        return str(aud or '')
+
+    def _extract_deployment_id(launch_data):
+        return str(launch_data.get(
+            'https://purl.imsglobal.org/spec/lti/claim/deployment_id',
+            '',
+        ) or '')
+
     def _extract_context(launch_data):
         return launch_data.get(
             'https://purl.imsglobal.org/spec/lti/claim/context', {}
@@ -71,6 +92,21 @@ def create_lti_blueprint(deps: RouteDeps) -> Blueprint:
         return launch_data.get(
             'https://purl.imsglobal.org/spec/lti/claim/message_type', ''
         )
+
+    def _platform_for_launch(issuer, client_id='', deployment_id=''):
+        return resolve_lti_platform(
+            deps.db,
+            issuer=issuer,
+            client_id=client_id,
+            deployment_id=deployment_id,
+        )
+
+    def _active_context_for_platform(platform):
+        context = deps.get_school_request_context()
+        context.require_any_role(TEACHER_ALLOWED_ROLES)
+        if platform and platform.get('org_id') != context.active_organization_id:
+            raise SchoolContextPermissionError('LTI platform is outside the active organization.')
+        return context
 
     # ══════════════════════════════════════════════════════════════════
     # 1. GET /lti/jwks — Public JWKS endpoint
@@ -126,6 +162,8 @@ def create_lti_blueprint(deps: RouteDeps) -> Blueprint:
 
             # Extract claims
             issuer = _extract_issuer(launch_data)
+            client_id = _extract_client_id(launch_data)
+            deployment_id = _extract_deployment_id(launch_data)
             email = _extract_email(launch_data)
             canvas_user_id = _extract_canvas_user_id(launch_data)
             roles = _extract_roles(launch_data)
@@ -142,6 +180,8 @@ def create_lti_blueprint(deps: RouteDeps) -> Blueprint:
                 session['lti_deep_link'] = {
                     'launch_id': message_launch.get_launch_id(),
                     'issuer': issuer,
+                    'client_id': client_id,
+                    'deployment_id': deployment_id,
                     'email': email,
                     'canvas_user_id': canvas_user_id,
                     'roles': roles,
@@ -154,6 +194,8 @@ def create_lti_blueprint(deps: RouteDeps) -> Blueprint:
             matched_user = match_lti_user(
                 deps.db,
                 issuer=issuer,
+                client_id=client_id,
+                deployment_id=deployment_id,
                 email=email,
                 canvas_user_id=canvas_user_id,
                 roles=roles,
@@ -163,6 +205,8 @@ def create_lti_blueprint(deps: RouteDeps) -> Blueprint:
                 # Store pending link info so the link-account page can use it
                 session['lti_pending_link'] = {
                     'issuer': issuer,
+                    'client_id': client_id,
+                    'deployment_id': deployment_id,
                     'email': email,
                     'canvas_user_id': canvas_user_id,
                     'roles': roles,
@@ -216,7 +260,7 @@ def create_lti_blueprint(deps: RouteDeps) -> Blueprint:
                     deps.db.add_primary_class_to_membership(membership_id, class_id)
 
                     # Create canvas_connection with LTI auth
-                    platform = deps.db.get_lti_platform_by_issuer(issuer)
+                    platform = _platform_for_launch(issuer, client_id, deployment_id)
                     canvas_instance_url = ''
                     deployment_id_val = ''
                     if platform:
@@ -252,7 +296,11 @@ def create_lti_blueprint(deps: RouteDeps) -> Blueprint:
                         break
 
             # ── Check for deep-linked assignment in custom claims ────
-            assignment_id = custom.get('assignment_id', '') or custom.get('assignmentId', '')
+            assignment_id = (
+                custom.get('lingual_assignment_id', '')
+                or custom.get('assignment_id', '')
+                or custom.get('assignmentId', '')
+            )
             if assignment_id:
                 return redirect(f'/app/assignments/{assignment_id}')
 
@@ -291,6 +339,13 @@ def create_lti_blueprint(deps: RouteDeps) -> Blueprint:
                     'success': False,
                     'error': 'All fields are required: issuer, clientId, deploymentId, authLoginUrl, authTokenUrl, keySetUrl.',
                 }), 400
+
+            duplicate = _platform_for_launch(issuer, client_id, deployment_id)
+            if duplicate and duplicate.get('org_id') != org_id:
+                return jsonify({
+                    'success': False,
+                    'error': 'This Canvas issuer, client ID, and deployment ID are already registered to another organization.',
+                }), 409
 
             # Delete existing platform for this org (only one per org)
             existing = deps.db.get_lti_platform_by_org(org_id)
@@ -394,33 +449,94 @@ def create_lti_blueprint(deps: RouteDeps) -> Blueprint:
             return jsonify({'success': False, 'error': 'No pending LTI link.'}), 400
 
         issuer = pending.get('issuer', '')
+        client_id = pending.get('client_id', '')
+        deployment_id = pending.get('deployment_id', '')
         canvas_user_id = pending.get('canvas_user_id', '')
         email = pending.get('email', '')
         roles = pending.get('roles', [])
         canvas_course_id = pending.get('canvas_course_id', '')
         canvas_course_title = pending.get('canvas_course_title', '')
 
-        # Find the platform for this issuer
-        platform = deps.db.get_lti_platform_by_issuer(issuer)
+        # Find the platform for this issuer/client/deployment.
+        platform = _platform_for_launch(issuer, client_id, deployment_id)
         if not platform:
             return jsonify({'success': False, 'error': 'LTI platform not found for issuer.'}), 400
 
         org_id = platform.get('org_id', '')
+        resolved_client_id = client_id or platform.get('client_id', '')
+        resolved_deployment_id = deployment_id or platform.get('deployment_id', '')
+        is_instructor = _is_instructor(roles)
+        role = 'teacher' if is_instructor else 'student'
 
         # Store the LTI identity link on the user record
         user = deps.db.get_user(uid) or {}
-        lti_identities = user.get('lti_identities', [])
-        lti_identities.append({
-            'issuer': issuer,
-            'canvas_user_id': canvas_user_id,
-            'email': email,
-            'platform_id': platform['id'],
+        lti_identities = [
+            identity
+            for identity in (user.get('lti_identities', []) or [])
+            if isinstance(identity, dict)
+        ]
+        identity_key = build_lti_identity_key(issuer, resolved_client_id, canvas_user_id)
+        if not any(
+            identity.get('issuer') == issuer
+            and identity.get('client_id', '') == resolved_client_id
+            and identity.get('canvas_user_id') == canvas_user_id
+            for identity in lti_identities
+        ):
+            lti_identities.append({
+                'issuer': issuer,
+                'client_id': resolved_client_id,
+                'deployment_id': resolved_deployment_id,
+                'canvas_user_id': canvas_user_id,
+                'email': email,
+                'platform_id': platform['id'],
+            })
+        lti_identity_keys = list(user.get('lti_identity_keys', []) or [])
+        if identity_key not in lti_identity_keys:
+            lti_identity_keys.append(identity_key)
+        deps.db.update_user(uid, {
+            'lti_identities': lti_identities,
+            'lti_identity_keys': lti_identity_keys,
         })
-        deps.db.update_user(uid, {'lti_identities': lti_identities})
+
+        membership_id = ''
+        memberships = deps.db.get_user_memberships(uid) if hasattr(deps.db, 'get_user_memberships') else []
+        for membership in memberships:
+            if membership.get('orgId') == org_id:
+                membership_id = membership.get('id', '')
+                break
+        if not membership_id:
+            membership_id = deps.db.create_membership(
+                org_id=org_id,
+                uid=uid,
+                roles=[role],
+                status='active',
+                primary_class_ids=[],
+                membership_id=f'{org_id}_{uid}',
+            )
+
+        user = deps.db.get_user(uid) or user
+        session['user'] = {
+            'uid': uid,
+            'email': user.get('email', ''),
+            'name': user.get('name', ''),
+            'active_membership_id': membership_id,
+        }
+        deps.db.set_user_last_active_membership(uid, membership_id)
+
+        if not is_instructor and canvas_course_id:
+            for cls in deps.db.list_org_classes(org_id):
+                if cls.get('canvas_course_id') == str(canvas_course_id):
+                    auto_enroll_student(
+                        deps.db,
+                        uid=uid,
+                        org_id=org_id,
+                        class_id=cls['id'],
+                        membership_id=membership_id,
+                    )
+                    break
 
         session.pop('lti_pending_link', None)
 
-        is_instructor = _is_instructor(roles)
         redirect_to = '/app/teacher' if is_instructor else '/app/learn'
 
         return jsonify({'success': True, 'redirectTo': redirect_to})
@@ -441,9 +557,12 @@ def create_lti_blueprint(deps: RouteDeps) -> Blueprint:
 
             # Find the class linked to this Canvas course
             issuer = deep_link_info.get('issuer', '')
-            platform = deps.db.get_lti_platform_by_issuer(issuer)
+            client_id = deep_link_info.get('client_id', '')
+            deployment_id = deep_link_info.get('deployment_id', '')
+            platform = _platform_for_launch(issuer, client_id, deployment_id)
             if not platform:
                 return jsonify({'success': False, 'error': 'LTI platform not found.'}), 400
+            _active_context_for_platform(platform)
 
             org_id = platform.get('org_id', '')
             org_classes = deps.db.list_org_classes(org_id)
@@ -468,6 +587,8 @@ def create_lti_blueprint(deps: RouteDeps) -> Blueprint:
                     })
 
             return jsonify({'success': True, 'assignments': serialized})
+        except SchoolContextPermissionError as exc:
+            return jsonify({'success': False, 'error': str(exc)}), 403
         except Exception as exc:
             import traceback
             traceback.print_exc()
@@ -491,9 +612,28 @@ def create_lti_blueprint(deps: RouteDeps) -> Blueprint:
             if not launch_info or not assignment_id:
                 return jsonify({'success': False, 'error': 'Missing context.'}), 400
 
-            assignment = deps.db.get_assignment(assignment_id)
-            if not assignment:
+            issuer = launch_info.get('issuer', '')
+            client_id = launch_info.get('client_id', '')
+            deployment_id = launch_info.get('deployment_id', '')
+            platform = _platform_for_launch(issuer, client_id, deployment_id)
+            if not platform:
+                return jsonify({'success': False, 'error': 'LTI platform not found.'}), 400
+            _active_context_for_platform(platform)
+
+            try:
+                assignment = _require_assignment_teacher_access(deps, assignment_id)
+            except ValueError:
                 return jsonify({'success': False, 'error': 'Assignment not found.'}), 404
+            assignment_class = deps.db.get_class(assignment.get('class_id'))
+            if (
+                not assignment_class
+                or assignment_class.get('org_id') != platform.get('org_id')
+                or (
+                    launch_info.get('canvas_course_id')
+                    and assignment_class.get('canvas_course_id') != str(launch_info.get('canvas_course_id'))
+                )
+            ):
+                return jsonify({'success': False, 'error': 'Assignment is outside this Canvas course.'}), 403
 
             from pylti1p3.deep_link_resource import DeepLinkResource
             resource = DeepLinkResource()
@@ -517,6 +657,8 @@ def create_lti_blueprint(deps: RouteDeps) -> Blueprint:
 
             session.pop('lti_deep_link', None)
             return jsonify({'success': True, 'responseHtml': html})
+        except SchoolContextPermissionError as exc:
+            return jsonify({'success': False, 'error': str(exc)}), 403
         except Exception as exc:
             import traceback
             traceback.print_exc()
@@ -530,8 +672,7 @@ def create_lti_blueprint(deps: RouteDeps) -> Blueprint:
     @deps.login_required
     def api_set_grade_config(assignment_id):
         try:
-            ctx = deps.get_school_request_context()
-            ctx.require_any_role(TEACHER_ALLOWED_ROLES)
+            _require_assignment_teacher_access(deps, assignment_id)
             data = request.get_json() or {}
             metric = data.get('metric')
             points = data.get('points')
@@ -551,6 +692,8 @@ def create_lti_blueprint(deps: RouteDeps) -> Blueprint:
             return jsonify({'success': True})
         except SchoolContextPermissionError as exc:
             return jsonify({'success': False, 'error': str(exc)}), 403
+        except ValueError as exc:
+            return jsonify({'success': False, 'error': str(exc)}), 404
         except Exception as exc:
             return jsonify({'success': False, 'error': str(exc)}), 500
 
@@ -562,14 +705,17 @@ def create_lti_blueprint(deps: RouteDeps) -> Blueprint:
     @deps.login_required
     def api_get_grade_config(assignment_id):
         try:
-            assignment = deps.db.get_assignment(assignment_id)
-            if not assignment:
+            try:
+                assignment = _require_assignment_teacher_access(deps, assignment_id)
+            except ValueError:
                 return jsonify({'success': False, 'error': 'Assignment not found.'}), 404
             return jsonify({
                 'success': True,
                 'metric': assignment.get('grade_metric'),
                 'points': assignment.get('grade_points'),
             })
+        except SchoolContextPermissionError as exc:
+            return jsonify({'success': False, 'error': str(exc)}), 403
         except Exception as exc:
             return jsonify({'success': False, 'error': str(exc)}), 500
 

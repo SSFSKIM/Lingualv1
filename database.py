@@ -494,6 +494,31 @@ def get_user_by_email(email):
     return None
 
 
+def get_user_by_lti_identity(issuer, canvas_user_id, client_id=''):
+    """Look up a user by a deterministic LTI identity key."""
+    key = f'{issuer}|{client_id or ""}|{canvas_user_id}'
+    docs = (
+        get_db()
+        .collection('users')
+        .where('lti_identity_keys', 'array_contains', key)
+        .limit(1)
+        .stream()
+    )
+    for doc in docs:
+        data = doc.to_dict() or {}
+        data['uid'] = doc.id
+        return data
+    return None
+
+
+def update_user(uid, updates):
+    """Update top-level user fields."""
+    payload = dict(updates or {})
+    payload['updated_at'] = firestore.SERVER_TIMESTAMP
+    get_user_ref(uid).set(payload, merge=True)
+    return uid
+
+
 def update_user_profile(uid, display_name=None, age=None, gender=None,
                         rigor=None, frequency=None, frequency_unit=None,
                         level_objective=None, assessment_preference=None,
@@ -2518,6 +2543,39 @@ def get_lti_platform_by_issuer(issuer):
     docs = (
         get_lti_platforms_collection()
         .where('issuer', '==', issuer)
+        .limit(1)
+        .stream()
+    )
+    for doc in docs:
+        data = doc.to_dict() or {}
+        data['id'] = doc.id
+        return data
+    return None
+
+
+def get_lti_platform_by_issuer_and_client_id(issuer, client_id):
+    """Get an LTI platform by issuer and client ID."""
+    docs = (
+        get_lti_platforms_collection()
+        .where('issuer', '==', issuer)
+        .where('client_id', '==', client_id)
+        .limit(1)
+        .stream()
+    )
+    for doc in docs:
+        data = doc.to_dict() or {}
+        data['id'] = doc.id
+        return data
+    return None
+
+
+def get_lti_platform_by_issuer_client_deployment(issuer, client_id, deployment_id):
+    """Get an LTI platform by issuer, client ID, and deployment ID."""
+    docs = (
+        get_lti_platforms_collection()
+        .where('issuer', '==', issuer)
+        .where('client_id', '==', client_id)
+        .where('deployment_id', '==', deployment_id)
         .limit(1)
         .stream()
     )

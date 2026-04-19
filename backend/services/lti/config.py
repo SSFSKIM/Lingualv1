@@ -51,7 +51,10 @@ class FirestoreToolConf(ToolConfAbstract):
     def find_registration_by_params(
         self, iss: str, client_id: str, *args, **kwargs
     ) -> t.Optional[Registration]:
-        platform = self._db.get_lti_platform_by_issuer(iss)
+        if hasattr(self._db, 'get_lti_platform_by_issuer_and_client_id'):
+            platform = self._db.get_lti_platform_by_issuer_and_client_id(iss, client_id)
+        else:
+            platform = self._db.get_lti_platform_by_issuer(iss)
         if not platform:
             return None
         if platform.get('client_id') != client_id:
@@ -82,7 +85,16 @@ class FirestoreToolConf(ToolConfAbstract):
     def find_deployment_by_params(
         self, iss: str, deployment_id: str, client_id: str, *args, **kwargs
     ) -> t.Optional[Deployment]:
-        platform = self._db.get_lti_platform_by_issuer(iss)
+        if hasattr(self._db, 'get_lti_platform_by_issuer_client_deployment'):
+            platform = self._db.get_lti_platform_by_issuer_client_deployment(
+                iss,
+                client_id,
+                deployment_id,
+            )
+        elif hasattr(self._db, 'get_lti_platform_by_issuer_and_client_id'):
+            platform = self._db.get_lti_platform_by_issuer_and_client_id(iss, client_id)
+        else:
+            platform = self._db.get_lti_platform_by_issuer(iss)
         if not platform:
             return None
         if platform.get('client_id') != client_id:
@@ -92,11 +104,11 @@ class FirestoreToolConf(ToolConfAbstract):
     # ── Issuer relation helpers ───────────────────────────────────────
 
     def check_iss_has_one_client(self, iss: str) -> bool:
-        """We enforce one client per issuer."""
-        return True
+        """Shared Canvas issuers can host multiple Lingual org client IDs."""
+        return False
 
     def check_iss_has_many_clients(self, iss: str) -> bool:
-        return False
+        return True
 
     # ── JWKS ──────────────────────────────────────────────────────────
 

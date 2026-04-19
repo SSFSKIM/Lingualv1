@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from typing import Any
 
 SUPPORTED_CONSENT_STATUSES = {"unknown", "granted", "revoked", "not_required"}
@@ -314,6 +315,18 @@ def auto_grant_voice_consent_for_pilot(
         organization=organization,
     )
     db.upsert_student_compliance_record(org_id, student_uid, normalized)
+    create_consent_event(
+        SimpleNamespace(db=db),
+        org_id=org_id,
+        student_uid=student_uid,
+        event_type="consent.auto_granted_for_pilot",
+        actor_type="system",
+        actor_id="system:pilot_auto_grant",
+        payload={
+            "updates": dict(updates),
+            "source": "pilot_auto_grant",
+        },
+    )
 
 
 def create_consent_event(
