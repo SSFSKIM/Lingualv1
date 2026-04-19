@@ -21,6 +21,7 @@ import {
   saveMessageToChat,
   sendChatMessage,
   deleteChatSession,
+  updateChatSettings,
 } from '@/api/chat';
 import { ChatInput } from '@/components/chat';
 import { buildLive2DAvatarStateFromPerformance } from '@/components/avatar/live2dAdapter';
@@ -35,7 +36,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui';
-import type { ChatMessage, ChatSession, AssessmentResults, UserProfile } from '@/types';
+import type {
+  ChatMessage,
+  ChatSession,
+  AssessmentResults,
+  UserProfile,
+  LanguageMixLevel,
+} from '@/types';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuth } from '@/hooks/useAuth';
 
@@ -52,6 +59,7 @@ const LIVE2D_CHAT_ENABLED =
     : import.meta.env.MODE === 'test' || __CUBISM_SDK_AVAILABLE__;
 const REALTIME_AVATAR_DIRECTIVES_ENABLED = (import.meta.env.VITE_ENABLE_REALTIME_AVATAR_DIRECTIVES ?? 'false') === 'true';
 const CHAT_AVATAR_AVAILABLE = PILOT_AVATAR_ENABLED && LIVE2D_CHAT_ENABLED;
+const DEFAULT_LANGUAGE_MIX_LEVEL: LanguageMixLevel = 'balanced';
 
 const Live2DAvatarPanel = lazy(() => import('@/components/avatar/Live2DAvatarPanel'));
 
@@ -102,6 +110,8 @@ export function AppChatPage() {
   const [isConnecting, setIsConnecting] = useState(false);
   const [assessmentResults, setAssessmentResults] = useState<AssessmentResults | null>(null);
   const [profileSummary, setProfileSummary] = useState<UserProfile | null>(null);
+  const [languageMixLevel, setLanguageMixLevel] = useState<LanguageMixLevel>(DEFAULT_LANGUAGE_MIX_LEVEL);
+  const [languageMixNotice, setLanguageMixNotice] = useState<string | null>(null);
 
   // Chat mode state
   type Mode = 'text' | 'realtime';
@@ -226,10 +236,11 @@ export function AppChatPage() {
 
   const realtimeSessionParams = useMemo(
     () => ({
+      chatId: currentChatId,
       uiLanguage: lang,
       avatarDirectives: CHAT_AVATAR_AVAILABLE && isAvatarEnabled && REALTIME_AVATAR_DIRECTIVES_ENABLED,
     }),
-    [isAvatarEnabled, lang]
+    [currentChatId, isAvatarEnabled, lang]
   );
   const legacyRealtimeSession = useRealtimeChat({
     onMessage: handleRealtimeMessage,
@@ -396,6 +407,8 @@ export function AppChatPage() {
       resetRealtimePersistence(formattedMessages.length);
       setHistoryMessages(formattedMessages);
       setCurrentChatId(chatId);
+      setLanguageMixLevel(chat.languageMixLevel || DEFAULT_LANGUAGE_MIX_LEVEL);
+      setLanguageMixNotice(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load chat');
     } finally {
@@ -413,7 +426,7 @@ export function AppChatPage() {
     disconnect();
 
     try {
-      const { chatId, title } = await createChatSession();
+      const { chatId, title, languageMixLevel: createdLanguageMixLevel } = await createChatSession();
       const timestamp = new Date().toISOString();
       const newSession: ChatSession = {
         id: chatId,
@@ -421,11 +434,14 @@ export function AppChatPage() {
         created_at: timestamp,
         updated_at: timestamp,
         message_count: 0,
+        languageMixLevel: createdLanguageMixLevel || DEFAULT_LANGUAGE_MIX_LEVEL,
       };
       resetRealtimePersistence(0);
       setSessions((prev) => [newSession, ...prev]);
       setHistoryMessages([]);
       setCurrentChatId(chatId);
+      setLanguageMixLevel(createdLanguageMixLevel || DEFAULT_LANGUAGE_MIX_LEVEL);
+      setLanguageMixNotice(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create chat');
     } finally {
@@ -541,6 +557,33 @@ export function AppChatPage() {
       disconnect();
     }
     setMode(newMode);
+  };
+
+  const handleLanguageMixChange = async (nextValue: string) => {
+    if (!currentChatId) return;
+
+    const nextLanguageMixLevel = nextValue as LanguageMixLevel;
+    const previousLanguageMixLevel = languageMixLevel;
+    setLanguageMixLevel(nextLanguageMixLevel);
+    setLanguageMixNotice(
+      isConnected ? 'Reconnect voice to apply this language mix.' : null
+    );
+
+    try {
+      const updatedChat = await updateChatSettings(currentChatId, {
+        languageMixLevel: nextLanguageMixLevel,
+      });
+      setLanguageMixLevel(updatedChat.languageMixLevel || nextLanguageMixLevel);
+      setSessions((prev) => prev.map((session) => (
+        session.id === currentChatId
+          ? { ...session, languageMixLevel: updatedChat.languageMixLevel || nextLanguageMixLevel }
+          : session
+      )));
+    } catch (err) {
+      setLanguageMixLevel(previousLanguageMixLevel);
+      setLanguageMixNotice(null);
+      setError(err instanceof Error ? err.message : 'Failed to update language mix');
+    }
   };
 
   const handleSendText = async () => {
@@ -683,6 +726,13 @@ export function AppChatPage() {
   const focusBadgeClass = focusAreas.length > 0
     ? domainBadgeStyles[focusAreas[0]] || 'bg-slate-100 text-slate-600'
     : 'bg-slate-100 text-slate-600';
+  const languageMixOptions: Array<{ value: LanguageMixLevel; label: string }> = [
+    { value: 'english_first', label: t('chat.languageMix.english_first') },
+    { value: 'english_led', label: t('chat.languageMix.english_led') },
+    { value: 'balanced', label: t('chat.languageMix.balanced') },
+    { value: 'target_led', label: t('chat.languageMix.target_led') },
+    { value: 'target_only', label: t('chat.languageMix.target_only') },
+  ];
 
   useEffect(() => {
     if (!CHAT_AVATAR_AVAILABLE) {
@@ -863,6 +913,26 @@ export function AppChatPage() {
               )}
             </div>
             <div className="flex items-center space-x-2 shrink-0 ml-3">
+              <div className="flex flex-col items-end gap-1 mr-1">
+                <select
+                  aria-label={t('chat.languageMix.label')}
+                  value={languageMixLevel}
+                  onChange={(event) => void handleLanguageMixChange(event.target.value)}
+                  disabled={!currentChatId}
+                  className="h-8 rounded-xl border-2 border-border bg-card px-2 text-xs font-bold text-foreground focus:border-primary focus:outline-none"
+                >
+                  {languageMixOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+                {languageMixNotice ? (
+                  <p className="max-w-48 text-right text-[10px] font-medium text-muted-foreground">
+                    {languageMixNotice}
+                  </p>
+                ) : null}
+              </div>
               <div className="flex bg-secondary rounded-xl p-1 border-2 border-border">
                 <button
                   type="button"

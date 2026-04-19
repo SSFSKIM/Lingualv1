@@ -1494,6 +1494,20 @@ def list_assignment_learning_events(assignment_id, event_types=None):
 # CHAT SESSION FUNCTIONS
 # ============================================
 
+CHAT_LANGUAGE_MIX_LEVELS = {
+    'english_first',
+    'english_led',
+    'balanced',
+    'target_led',
+    'target_only',
+}
+
+
+def normalize_chat_language_mix_level(value):
+    if isinstance(value, str) and value in CHAT_LANGUAGE_MIX_LEVELS:
+        return value
+    return 'balanced'
+
 def get_chats_collection(uid):
     """Get reference to user's chats subcollection."""
     return get_user_ref(uid).collection('chats')
@@ -1506,7 +1520,8 @@ def create_chat_session(uid, title=None):
         'title': title or 'New Chat',
         'created_at': firestore.SERVER_TIMESTAMP,
         'updated_at': firestore.SERVER_TIMESTAMP,
-        'messages': []
+        'messages': [],
+        'language_mix_level': 'balanced',
     }
     doc_ref = chats_ref.add(chat_data)
     return doc_ref[1].id  # Returns the document ID
@@ -1576,7 +1591,8 @@ def get_chat_sessions(uid, limit=50):
             'created_at': _timestamp_to_iso(data.get('created_at')),
             'updated_at': _timestamp_to_iso(data.get('updated_at')),
             'message_count': len(messages),
-            'last_message': last_message.get('content', '')[:50] if last_message else None
+            'last_message': last_message.get('content', '')[:50] if last_message else None,
+            'language_mix_level': normalize_chat_language_mix_level(data.get('language_mix_level')),
         })
     return sessions
 
@@ -1594,7 +1610,8 @@ def get_chat_session(uid, chat_id):
             'title': data.get('title', 'New Chat'),
             'created_at': _timestamp_to_iso(data.get('created_at')),
             'updated_at': _timestamp_to_iso(data.get('updated_at')),
-            'messages': messages
+            'messages': messages,
+            'language_mix_level': normalize_chat_language_mix_level(data.get('language_mix_level')),
         }
     return None
 
@@ -1625,6 +1642,15 @@ def update_chat_title(uid, chat_id, title):
         'title': title,
         'updated_at': firestore.SERVER_TIMESTAMP
     })
+
+
+def update_chat_settings(uid, chat_id, *, language_mix_level=None):
+    """Update chat-level settings."""
+    chat_ref = get_chats_collection(uid).document(chat_id)
+    updates = {'updated_at': firestore.SERVER_TIMESTAMP}
+    if language_mix_level is not None:
+        updates['language_mix_level'] = normalize_chat_language_mix_level(language_mix_level)
+    chat_ref.update(updates)
 
 
 def delete_chat_session(uid, chat_id):

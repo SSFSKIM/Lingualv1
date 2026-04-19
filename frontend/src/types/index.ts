@@ -124,6 +124,13 @@ export interface AssessmentResults {
 }
 
 // Chat Types
+export type LanguageMixLevel =
+  | 'english_first'
+  | 'english_led'
+  | 'balanced'
+  | 'target_led'
+  | 'target_only';
+
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
@@ -145,6 +152,7 @@ export interface ChatSession {
   updated_at: string;
   message_count: number;
   last_message?: string;
+  languageMixLevel?: LanguageMixLevel;
 }
 
 export interface ChatSessionDetail {
@@ -153,6 +161,7 @@ export interface ChatSessionDetail {
   created_at: string;
   updated_at: string;
   messages: RawChatMessage[];
+  languageMixLevel?: LanguageMixLevel;
 }
 
 // Pronunciation Types

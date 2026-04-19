@@ -362,7 +362,18 @@ def create_chat_blueprint(deps: RouteDeps) -> Blueprint:
                 proficiency_context = deps.get_user_proficiency_context()
                 profile_context = deps.db.get_user_profile_context(uid) or {}
                 learning_locale = profile_context.get('learning_locale', 'ko-KR')
-                system_instructions = deps.build_system_prompt(proficiency_context, learning_locale)
+                chat_id = payload.get('chatId')
+                chat = (
+                    deps.db.get_chat_session(uid, chat_id.strip())
+                    if isinstance(chat_id, str) and chat_id.strip()
+                    else None
+                )
+                language_mix_level = (chat or {}).get('language_mix_level', 'balanced')
+                system_instructions = deps.build_system_prompt(
+                    proficiency_context,
+                    learning_locale,
+                    language_mix_level,
+                )
 
             response = requests.post(
                 'https://api.openai.com/v1/realtime/sessions',
@@ -527,6 +538,28 @@ def create_chat_blueprint(deps: RouteDeps) -> Blueprint:
         except Exception as e:
             return jsonify({'success': False, 'error': str(e)}), 500
 
+    @bp.route('/api/chats/<chat_id>/settings', methods=['PATCH'])
+    @deps.login_required
+    def api_update_chat_settings(chat_id):
+        """Update chat-level settings."""
+        uid = deps.get_current_user_uid()
+        data = request.get_json() or {}
+
+        try:
+            chat = deps.db.get_chat_session(uid, chat_id)
+            if not chat:
+                return jsonify({'success': False, 'error': 'Chat not found'}), 404
+
+            deps.db.update_chat_settings(
+                uid,
+                chat_id,
+                language_mix_level=data.get('languageMixLevel'),
+            )
+            updated_chat = deps.db.get_chat_session(uid, chat_id)
+            return jsonify({'success': True, 'chat': updated_chat})
+        except Exception as e:
+            return jsonify({'success': False, 'error': str(e)}), 500
+
     @bp.route('/api/chats/<chat_id>/messages/save', methods=['POST'])
     @deps.login_required
     def api_save_message(chat_id):
@@ -672,7 +705,12 @@ def create_chat_blueprint(deps: RouteDeps) -> Blueprint:
                 proficiency_context = deps.get_user_proficiency_context()
                 profile_context = deps.db.get_user_profile_context(uid) or {}
                 learning_locale = profile_context.get('learning_locale', 'ko-KR')
-                system_prompt = deps.build_system_prompt(proficiency_context, learning_locale)
+                language_mix_level = chat.get('language_mix_level', 'balanced')
+                system_prompt = deps.build_system_prompt(
+                    proficiency_context,
+                    learning_locale,
+                    language_mix_level,
+                )
 
             messages = [{'role': 'system', 'content': system_prompt}]
             for msg in chat_messages[-10:]:

@@ -57,6 +57,13 @@ LEARNING_LOCALE_PROMPT_CONFIG = {
         'register_note': 'Respect right-to-left Hebrew script and keep explanations learner-friendly.',
     },
 }
+FREE_PRACTICE_LANGUAGE_MIX_LEVELS = {
+    'english_first',
+    'english_led',
+    'balanced',
+    'target_led',
+    'target_only',
+}
 
 try:
     # For production: use GOOGLE_APPLICATION_CREDENTIALS or default credentials
@@ -218,9 +225,52 @@ USER LEARNING PREFERENCES:
 - Learning Intensity: {rigor.capitalize() if rigor else 'Not specified'}
 - Study Frequency: {frequency_str}
 - Level Objective: {level_objective if level_objective else 'Not specified'}
-"""
+    """
     return context
-def build_system_prompt(proficiency_context, learning_locale='ko-KR'):
+
+
+def normalize_free_practice_language_mix_level(value):
+    if isinstance(value, str) and value in FREE_PRACTICE_LANGUAGE_MIX_LEVELS:
+        return value
+    return 'balanced'
+
+
+def build_free_practice_language_mix_policy(language_name, language_mix_level):
+    if language_mix_level == 'english_first':
+        return (
+            f'The selected language mix level is english_first. Start mostly in English and introduce only a few '
+            f'{language_name} words or short phrases at a time. If the learner starts responding comfortably in '
+            f'{language_name}, adapt somewhat toward the learner while staying English-first. never exceed the bounds '
+            'of the selected language mix level.'
+        )
+    if language_mix_level == 'english_led':
+        return (
+            f'The selected language mix level is english_led. Keep the conversation English-heavy, but start using '
+            f'short {language_name} sentences, recasts, and repeatable phrases. If the learner increasingly replies in '
+            f'{language_name}, adapt somewhat toward the learner without leaving the English-led range. never exceed '
+            'the bounds of the selected language mix level.'
+        )
+    if language_mix_level == 'target_led':
+        return (
+            f'The selected language mix level is target_led. Start mostly in {language_name} and use brief English '
+            f'only when the learner stalls, asks for help, or repeatedly falls back to English. Adapt somewhat toward '
+            f'the learner, but keep the conversation target-language-led. Never exceed the bounds of the selected '
+            'language mix level.'
+        )
+    if language_mix_level == 'target_only':
+        return (
+            f'The selected language mix level is target_only. Stay in {language_name} for almost every turn. Use '
+            'English only if the learner explicitly asks for translation or help, then return to the target language '
+            'immediately. Do not adapt away from target_only unless the learner explicitly asks for translation/help.'
+        )
+    return (
+        f'The selected language mix level is balanced. Use both English and {language_name} regularly. Observe '
+        f'whether the learner is using mostly English, mostly {language_name}, or both, and adapt somewhat toward the '
+        'learner while keeping the conversation balanced. never exceed the bounds of the selected language mix level.'
+    )
+
+
+def build_system_prompt(proficiency_context, learning_locale='ko-KR', language_mix_level='balanced'):
     locale_config = LEARNING_LOCALE_PROMPT_CONFIG.get(
         learning_locale,
         LEARNING_LOCALE_PROMPT_CONFIG['ko-KR'],
@@ -228,6 +278,11 @@ def build_system_prompt(proficiency_context, learning_locale='ko-KR'):
     language_name = locale_config['language_name']
     conversation_note = locale_config['conversation_note']
     register_note = locale_config['register_note']
+    normalized_language_mix_level = normalize_free_practice_language_mix_level(language_mix_level)
+    language_mix_policy = build_free_practice_language_mix_policy(
+        language_name,
+        normalized_language_mix_level,
+    )
 
     return f"""You are Lingu, a friendly and encouraging {language_name} conversation partner for language practice. Your role is to hold a flowing, realistic {language_name} conversation that feels like a real interaction, not a lesson script.
 
@@ -236,6 +291,11 @@ SESSION DEFAULTS:
 - Treat this as the student's default free-practice language unless an assignment or curriculum activity explicitly overrides it.
 
 {proficiency_context}
+
+LANGUAGE MIX POLICY:
+- {language_mix_policy}
+- Let the learner's recent language choice steer your next turn only within the selected language mix level.
+- Keep proficiency-driven complexity independent from the language-mix ratio.
 
 FREE-PRACTICE MODE:
 1. Default to a natural conversation with forward momentum, not repetitive question drills.

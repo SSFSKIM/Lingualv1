@@ -3,6 +3,7 @@ from unittest.mock import patch
 
 from flask import Flask, session
 
+import main
 from backend.route_deps import RouteDeps
 from backend.routes.chat import (
     AVATAR_EXPRESSION_IDS,
@@ -329,6 +330,18 @@ class FakeRealtimeRouteDb:
                 },
             }
         }
+        self.chats = {
+            'student-1': {
+                'chat-existing': {
+                    'id': 'chat-existing',
+                    'title': 'Existing chat',
+                    'created_at': '2026-04-20T00:00:00Z',
+                    'updated_at': '2026-04-20T00:00:00Z',
+                    'messages': [],
+                    'language_mix_level': 'target_led',
+                }
+            }
+        }
         self.consent_events = []
 
     def resolve_user_school_context(self, uid, preferred_active_membership_id=None):
@@ -390,6 +403,61 @@ class FakeRealtimeRouteDb:
         session_record = self.practice_sessions.get(session_id)
         return dict(session_record) if session_record else None
 
+    def create_chat_session(self, uid, title=None):
+        user_chats = self.chats.setdefault(uid, {})
+        chat_id = f'chat-{len(user_chats) + 1}'
+        user_chats[chat_id] = {
+            'id': chat_id,
+            'title': title or 'New Chat',
+            'created_at': '2026-04-20T00:00:00Z',
+            'updated_at': '2026-04-20T00:00:00Z',
+            'messages': [],
+            'language_mix_level': 'balanced',
+        }
+        return chat_id
+
+    def get_chat_sessions(self, uid, limit=50):
+        user_chats = list(self.chats.get(uid, {}).values())
+        return [
+            {
+                'id': chat['id'],
+                'title': chat['title'],
+                'created_at': chat['created_at'],
+                'updated_at': chat['updated_at'],
+                'message_count': len(chat.get('messages', [])),
+                'last_message': None,
+                'language_mix_level': chat.get('language_mix_level', 'balanced'),
+            }
+            for chat in user_chats[:limit]
+        ]
+
+    def get_chat_session(self, uid, chat_id):
+        chat = self.chats.get(uid, {}).get(chat_id)
+        return dict(chat) if chat else None
+
+    def add_message_to_chat(self, uid, chat_id, role, content, timestamp=None, sort_order=None):
+        chat = self.chats[uid][chat_id]
+        message = {
+            'role': role,
+            'content': content,
+            'timestamp': timestamp or '2026-04-20T00:00:00Z',
+        }
+        if sort_order is not None:
+            message['sort_order'] = sort_order
+        chat['messages'].append(message)
+        chat['updated_at'] = message['timestamp']
+        return dict(message)
+
+    def update_chat_title(self, uid, chat_id, title):
+        self.chats[uid][chat_id]['title'] = title
+
+    def update_chat_settings(self, uid, chat_id, *, language_mix_level=None):
+        if language_mix_level is not None:
+            self.chats[uid][chat_id]['language_mix_level'] = language_mix_level
+
+    def delete_chat_session(self, uid, chat_id):
+        self.chats.get(uid, {}).pop(chat_id, None)
+
 
 class FakeRealtimeSessionResponse:
     status_code = 200
@@ -411,6 +479,24 @@ class FakeRealtimeConnectResponse:
 
 
 class RealtimeChatHelpersTestCase(unittest.TestCase):
+    def test_build_system_prompt_defaults_to_balanced_language_mix(self):
+        prompt = main.build_system_prompt('Intermediate Mid', 'es-ES')
+
+        self.assertIn('selected language mix level is balanced', prompt)
+        self.assertIn('adapt somewhat toward the learner', prompt)
+
+    def test_build_system_prompt_emits_target_only_policy(self):
+        prompt = main.build_system_prompt('Intermediate Mid', 'es-ES', 'target_only')
+
+        self.assertIn('target_only', prompt)
+        self.assertIn('explicitly asks for translation', prompt)
+
+    def test_build_system_prompt_normalizes_invalid_language_mix(self):
+        prompt = main.build_system_prompt('Intermediate Mid', 'es-ES', 'invalid')
+
+        self.assertIn('selected language mix level is balanced', prompt)
+        self.assertIn('never exceed the bounds of the selected language mix level', prompt)
+
     def test_build_avatar_directive_tool_exposes_manifest_scoped_enums(self):
         tool = build_avatar_directive_tool()
         properties = tool['parameters']['properties']
@@ -492,6 +578,7 @@ class RealtimeChatRoutesTestCase(unittest.TestCase):
         self.fake_db = FakeRealtimeRouteDb()
         self.app = Flask(__name__)
         self.app.secret_key = 'test-secret'
+        self.build_system_prompt_calls = []
 
         def get_school_request_context():
             uid = (session.get('user') or {}).get('uid')
@@ -501,6 +588,14 @@ class RealtimeChatRoutesTestCase(unittest.TestCase):
                 uid,
                 preferred_active_membership_id=preferred,
             )
+
+        def build_system_prompt(context, learning_locale='ko-KR', language_mix_level='balanced'):
+            self.build_system_prompt_calls.append({
+                'context': context,
+                'learning_locale': learning_locale,
+                'language_mix_level': language_mix_level,
+            })
+            return f'Generic prompt: {context} ({learning_locale}) [{language_mix_level}]'
 
         deps = RouteDeps(
             db=self.fake_db,
@@ -515,9 +610,7 @@ class RealtimeChatRoutesTestCase(unittest.TestCase):
             },
             login_required=passthrough_login_required,
             get_user_proficiency_context=lambda: 'Intermediate Mid',
-            build_system_prompt=lambda context, learning_locale='ko-KR': (
-                f'Generic prompt: {context} ({learning_locale})'
-            ),
+            build_system_prompt=build_system_prompt,
             get_school_request_context=get_school_request_context,
             set_active_school_membership=lambda _membership_id: None,
             allowed_learning_locales={'ko-KR', 'es-ES', 'fr-FR'},
@@ -535,6 +628,63 @@ class RealtimeChatRoutesTestCase(unittest.TestCase):
                 'name': 'Student User',
                 'active_membership_id': 'mem-student',
             }
+
+    def test_create_chat_defaults_language_mix_to_balanced(self):
+        create_response = self.client.post('/api/chats', json={'title': 'Fresh chat'})
+
+        self.assertEqual(create_response.status_code, 200)
+        created = create_response.get_json()
+        self.assertTrue(created['success'])
+
+        chat_response = self.client.get(f"/api/chats/{created['chatId']}")
+        self.assertEqual(chat_response.status_code, 200)
+        chat = chat_response.get_json()['chat']
+        self.assertEqual(chat['language_mix_level'], 'balanced')
+
+    def test_get_chats_includes_language_mix_level(self):
+        response = self.client.get('/api/chats')
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertTrue(payload['success'])
+        self.assertEqual(payload['chats'][0]['language_mix_level'], 'target_led')
+
+    def test_patch_chat_settings_updates_language_mix_level(self):
+        response = self.client.patch(
+            '/api/chats/chat-existing/settings',
+            json={'languageMixLevel': 'english_led'},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertTrue(payload['success'])
+        self.assertEqual(payload['chat']['language_mix_level'], 'english_led')
+
+    def test_realtime_session_uses_chat_language_mix_for_free_practice(self):
+        self.fake_db.chats['student-1']['chat-existing']['language_mix_level'] = 'target_led'
+
+        with patch.dict('os.environ', {'OPENAI_API_KEY': 'test-openai-key'}, clear=False):
+            with patch('backend.routes.chat.requests.post') as mocked_post:
+                mocked_post.return_value = FakeRealtimeSessionResponse()
+
+                response = self.client.post('/api/realtime/session', json={
+                    'uiLanguage': 'en',
+                    'chatId': 'chat-existing',
+                })
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.build_system_prompt_calls[-1]['language_mix_level'], 'target_led')
+
+    def test_text_chat_uses_chat_language_mix_for_free_practice(self):
+        self.fake_db.chats['student-1']['chat-existing']['language_mix_level'] = 'english_first'
+
+        response = self.client.post('/api/chats/chat-existing/messages', json={
+            'message': 'Can you help me practice?',
+            'uiLanguage': 'en',
+        })
+
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(self.build_system_prompt_calls[-1]['language_mix_level'], 'english_first')
 
     def test_realtime_session_uses_assignment_bootstrap_prompt_when_assignment_id_is_present(self):
         # After C2, the Canvas-generated bootstrap is the only path. The
@@ -597,7 +747,7 @@ class RealtimeChatRoutesTestCase(unittest.TestCase):
         request_payload = mocked_post.call_args.kwargs['json']
         instructions = request_payload['instructions']
 
-        self.assertIn('Generic prompt: Intermediate Mid (fr-FR)', instructions)
+        self.assertIn('Generic prompt: Intermediate Mid (fr-FR) [balanced]', instructions)
         self.assertNotIn('Prompt for M1::S1', instructions)
 
     def test_realtime_session_blocks_voice_when_consent_is_missing(self):

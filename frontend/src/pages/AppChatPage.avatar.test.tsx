@@ -1,18 +1,21 @@
 import type { ButtonHTMLAttributes, HTMLAttributes, ReactNode } from 'react';
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { AppChatPage } from '@/pages/AppChatPage';
 import type { AvatarPerformanceFrame } from '@/components/avatar/types';
 
 const getChatSessionsMock = vi.fn();
 const getChatSessionMock = vi.fn();
 const createChatSessionMock = vi.fn();
+const updateChatSettingsMock = vi.fn();
 const saveMessageToChatMock = vi.fn();
 const sendChatMessageMock = vi.fn();
 const deleteChatSessionMock = vi.fn();
 const getUserProfileMock = vi.fn();
 const getAssessmentResultsMock = vi.fn();
 let voiceOnMessage: ((role: 'user' | 'assistant', content: string) => void) | undefined;
-let latestRealtimeOptions: { sessionParams?: { avatarDirectives?: boolean } } | undefined;
+let latestRealtimeOptions: {
+  sessionParams?: { avatarDirectives?: boolean; chatId?: string | null };
+} | undefined;
 
 const legacyRealtimeState = {
   isConnected: true,
@@ -160,7 +163,21 @@ vi.mock('@/components/chat', () => ({
 }));
 
 vi.mock('@/components/learning', () => ({
-  ChatSessionsSidebar: () => <div data-testid="chat-sessions-sidebar" />,
+  ChatSessionsSidebar: ({
+    sessions,
+    onSelectSession,
+  }: {
+    sessions: Array<{ id: string; title: string }>;
+    onSelectSession: (chatId: string) => void;
+  }) => (
+    <div data-testid="chat-sessions-sidebar">
+      {sessions.map((session) => (
+        <button key={session.id} type="button" onClick={() => onSelectSession(session.id)}>
+          {session.title}
+        </button>
+      ))}
+    </div>
+  ),
 }));
 
 vi.mock('@/components/ui', () => ({
@@ -184,6 +201,7 @@ vi.mock('@/api/chat', () => ({
   getChatSessions: (...args: unknown[]) => getChatSessionsMock(...args),
   getChatSession: (...args: unknown[]) => getChatSessionMock(...args),
   createChatSession: (...args: unknown[]) => createChatSessionMock(...args),
+  updateChatSettings: (...args: unknown[]) => updateChatSettingsMock(...args),
   saveMessageToChat: (...args: unknown[]) => saveMessageToChatMock(...args),
   sendChatMessage: (...args: unknown[]) => sendChatMessageMock(...args),
   deleteChatSession: (...args: unknown[]) => deleteChatSessionMock(...args),
@@ -220,6 +238,12 @@ vi.mock('@/contexts/LanguageContext', () => ({
         'app.learn.chat.input.disconnected': 'Disconnected',
         'chat.textMode': 'Text',
         'chat.voiceMode': 'Voice',
+        'chat.languageMix.label': 'Language mix',
+        'chat.languageMix.english_first': 'English-first',
+        'chat.languageMix.english_led': 'English-led',
+        'chat.languageMix.balanced': 'Balanced',
+        'chat.languageMix.target_led': 'Target-language-led',
+        'chat.languageMix.target_only': 'Target-language-only',
         'app.learn.sessions.title': 'Sessions',
         'app.learn.path.title': 'Path',
         'app.learn.chat.loading': 'Loading',
@@ -303,6 +327,7 @@ describe('AppChatPage live2d avatar wiring', () => {
     getChatSessionsMock.mockReset();
     getChatSessionMock.mockReset();
     createChatSessionMock.mockReset();
+    updateChatSettingsMock.mockReset();
     saveMessageToChatMock.mockReset();
     sendChatMessageMock.mockReset();
     deleteChatSessionMock.mockReset();
@@ -318,12 +343,32 @@ describe('AppChatPage live2d avatar wiring', () => {
         created_at: '2026-03-06T00:00:00.000Z',
         updated_at: '2026-03-06T00:00:00.000Z',
         message_count: 0,
+        languageMixLevel: 'target_led',
+      },
+      {
+        id: 'chat-2',
+        title: 'English support chat',
+        created_at: '2026-03-06T00:00:00.000Z',
+        updated_at: '2026-03-06T00:00:00.000Z',
+        message_count: 0,
+        languageMixLevel: 'english_first',
       },
     ]);
-    getChatSessionMock.mockResolvedValue({
+    getChatSessionMock.mockImplementation(async (chatId: string) => ({
+      id: chatId,
+      title: chatId === 'chat-2' ? 'English support chat' : 'Realtime practice',
+      created_at: '2026-03-06T00:00:00.000Z',
+      updated_at: '2026-03-06T00:00:00.000Z',
+      messages: [],
+      languageMixLevel: chatId === 'chat-2' ? 'english_first' : 'target_led',
+    }));
+    updateChatSettingsMock.mockResolvedValue({
       id: 'chat-1',
       title: 'Realtime practice',
+      created_at: '2026-03-06T00:00:00.000Z',
+      updated_at: '2026-03-06T00:00:00.000Z',
       messages: [],
+      languageMixLevel: 'english_led',
     });
     getUserProfileMock.mockResolvedValue({
       assessed: false,
@@ -360,7 +405,7 @@ describe('AppChatPage live2d avatar wiring', () => {
     render(<AppChatPage />);
 
     await waitFor(() => {
-      expect(screen.getByText('Realtime practice')).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: 'Realtime practice' })).toBeInTheDocument();
     });
 
     expect(screen.queryByTestId('live2d-avatar')).not.toBeInTheDocument();
@@ -371,7 +416,7 @@ describe('AppChatPage live2d avatar wiring', () => {
     render(<AppChatPage />);
 
     await waitFor(() => {
-      expect(screen.getByText('Realtime practice')).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: 'Realtime practice' })).toBeInTheDocument();
     });
 
     await act(async () => {
@@ -401,5 +446,65 @@ describe('AppChatPage live2d avatar wiring', () => {
       '좋아요',
       expect.objectContaining({ sortOrder: 2 })
     );
+  });
+
+  it('shows the active chat language mix level', async () => {
+    render(<AppChatPage />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Realtime practice' })).toBeInTheDocument();
+    });
+
+    expect(screen.getByLabelText('Language mix')).toHaveValue('target_led');
+    expect(screen.getByRole('option', { name: 'Target-language-led' })).toBeInTheDocument();
+  });
+
+  it('switching chats updates the visible language mix level', async () => {
+    render(<AppChatPage />);
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Language mix')).toHaveValue('target_led');
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'English support chat' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'English support chat' })).toBeInTheDocument();
+      expect(screen.getByLabelText('Language mix')).toHaveValue('english_first');
+    });
+  });
+
+  it('changing the language mix level saves it for the current chat', async () => {
+    render(<AppChatPage />);
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Language mix')).toHaveValue('target_led');
+    });
+
+    fireEvent.change(screen.getByLabelText('Language mix'), {
+      target: { value: 'english_led' },
+    });
+
+    await waitFor(() => {
+      expect(updateChatSettingsMock).toHaveBeenCalledWith('chat-1', {
+        languageMixLevel: 'english_led',
+      });
+    });
+  });
+
+  it('passes the active chat id into realtime params and shows reconnect notice on mix change', async () => {
+    render(<AppChatPage />);
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Language mix')).toHaveValue('target_led');
+    });
+
+    expect(latestRealtimeOptions?.sessionParams?.chatId).toBe('chat-1');
+
+    fireEvent.change(screen.getByLabelText('Language mix'), {
+      target: { value: 'english_led' },
+    });
+
+    expect(await screen.findByText('Reconnect voice to apply this language mix.')).toBeInTheDocument();
   });
 });
