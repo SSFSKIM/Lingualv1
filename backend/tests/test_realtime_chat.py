@@ -485,6 +485,34 @@ class RealtimeChatHelpersTestCase(unittest.TestCase):
         self.assertIn('selected language mix level is balanced', prompt)
         self.assertIn('adapt somewhat toward the learner', prompt)
 
+    def test_build_system_prompt_english_first_is_explicitly_english_dominant(self):
+        prompt = main.build_system_prompt('Intermediate Mid', 'es-ES', 'english_first')
+
+        self.assertIn('Lead each turn in English', prompt)
+        self.assertIn('Do not let full Spanish sentences dominate the turn', prompt)
+        self.assertIn('Accept English replies as valid progress', prompt)
+
+    def test_build_system_prompt_english_led_keeps_english_in_the_driver_seat(self):
+        prompt = main.build_system_prompt('Intermediate Mid', 'es-ES', 'english_led')
+
+        self.assertIn('English leads the conversation', prompt)
+        self.assertIn('Open most turns in English', prompt)
+        self.assertIn('keep the learner safe to reply mostly in English', prompt)
+
+    def test_build_system_prompt_keeps_proficiency_from_overriding_language_mix(self):
+        prompt = main.build_system_prompt('Intermediate Mid', 'es-ES', 'english_first')
+
+        self.assertIn(
+            "When proficiency guidance and the selected language mix level pull in different directions, follow the selected language mix level for language choice.",
+            prompt,
+        )
+        self.assertIn(
+            'Let proficiency change difficulty, pacing, and correction depth, not the English-vs-target-language ratio.',
+            prompt,
+        )
+        self.assertNotIn('For ACTFL Intermediate learners, use mostly Spanish', prompt)
+        self.assertNotIn('Mix Spanish and English by proficiency', prompt)
+
     def test_build_system_prompt_emits_target_only_policy(self):
         prompt = main.build_system_prompt('Intermediate Mid', 'es-ES', 'target_only')
 

@@ -238,17 +238,21 @@ def normalize_free_practice_language_mix_level(value):
 def build_free_practice_language_mix_policy(language_name, language_mix_level):
     if language_mix_level == 'english_first':
         return (
-            f'The selected language mix level is english_first. Start mostly in English and introduce only a few '
-            f'{language_name} words or short phrases at a time. If the learner starts responding comfortably in '
-            f'{language_name}, adapt somewhat toward the learner while staying English-first. never exceed the bounds '
-            'of the selected language mix level.'
+            f'The selected language mix level is english_first. Lead each turn in English and keep the conversation '
+            f'accessible for a novice. Introduce any {language_name} word or short phrase with an immediate English '
+            f'meaning. Accept English replies as valid progress. Invite short {language_name} attempts, but do not '
+            f'require them to keep the conversation moving. Do not let full {language_name} sentences dominate the '
+            f'turn unless the learner explicitly asks for more immersion or is already sustaining {language_name} '
+            'comfortably. Never exceed the bounds of the selected language mix level.'
         )
     if language_mix_level == 'english_led':
         return (
-            f'The selected language mix level is english_led. Keep the conversation English-heavy, but start using '
-            f'short {language_name} sentences, recasts, and repeatable phrases. If the learner increasingly replies in '
-            f'{language_name}, adapt somewhat toward the learner without leaving the English-led range. never exceed '
-            'the bounds of the selected language mix level.'
+            f'The selected language mix level is english_led. English leads the conversation. Open most turns in '
+            f'English, then model key {language_name} phrases or short sentences with quick English support. Use '
+            f'{language_name} for recasts, repeatable phrases, and scenario moves, but keep the learner safe to reply '
+            f'mostly in English. If the learner increasingly sustains {language_name}, adapt somewhat toward the '
+            f'learner without leaving the English-led range. Never exceed the bounds of the selected language mix '
+            'level.'
         )
     if language_mix_level == 'target_led':
         return (
@@ -295,7 +299,8 @@ SESSION DEFAULTS:
 LANGUAGE MIX POLICY:
 - {language_mix_policy}
 - Let the learner's recent language choice steer your next turn only within the selected language mix level.
-- Keep proficiency-driven complexity independent from the language-mix ratio.
+- When proficiency guidance and the selected language mix level pull in different directions, follow the selected language mix level for language choice.
+- Let proficiency change difficulty, pacing, and correction depth, not the English-vs-target-language ratio.
 
 FREE-PRACTICE MODE:
 1. Default to a natural conversation with forward momentum, not repetitive question drills.
@@ -312,11 +317,11 @@ FREE-PRACTICE MODE:
 TEACHING AND ADAPTATION GUIDELINES:
 1. ADAPT to the user's ACTFL level and use only as much complexity as they can handle
 2. For ACTFL Novice learners, keep output short, high-frequency, and heavily scaffolded
-3. For ACTFL Intermediate learners, use mostly {language_name} with brief English scaffolding as needed
-4. For ACTFL Advanced+ learners, prioritize sustained {language_name} interaction with nuanced vocabulary
+3. For ACTFL Intermediate learners, keep the scenario practical and manageable, but do not drift outside the selected language mix level
+4. For ACTFL Advanced+ learners, raise nuance, precision, and follow-up depth only when it still fits the selected language mix level
 5. If the learner is understandable, accept the meaning, optionally recast briefly, and continue the conversation
 6. ENCOURAGE the user and celebrate their progress without breaking momentum
-7. Mix {language_name} and English by proficiency - more English at Novice, less at higher levels
+7. Let proficiency change difficulty, pacing, and correction depth, not the English-vs-target-language ratio
 8. Focus on their WEAK areas based on the domain scores above
 9. Keep responses conversational and not too long
 10. {conversation_note}
