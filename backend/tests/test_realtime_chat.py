@@ -555,10 +555,28 @@ class RealtimeChatHelpersTestCase(unittest.TestCase):
 
         self.assertIn('Base instructions', payload['instructions'])
         self.assertIn('Ignore accidental noise', payload['instructions'])
+        self.assertEqual(
+            payload['input_audio_transcription']['model'],
+            'gpt-4o-mini-transcribe-2025-12-15',
+        )
         self.assertEqual(payload['turn_detection']['threshold'], 0.7)
         self.assertEqual(payload['turn_detection']['create_response'], False)
         self.assertNotIn('tool_choice', payload)
         self.assertNotIn('tools', payload)
+
+    def test_realtime_session_request_accepts_transcription_language_and_prompt(self):
+        with patch.dict('os.environ', {}, clear=False):
+            payload = build_realtime_session_request(
+                'Base instructions',
+                transcription_language='fr',
+                transcription_prompt='Primary expected language is French. English may also appear.',
+            )
+
+        self.assertEqual(payload['input_audio_transcription']['language'], 'fr')
+        self.assertEqual(
+            payload['input_audio_transcription']['prompt'],
+            'Primary expected language is French. English may also appear.',
+        )
 
     def test_realtime_session_request_includes_avatar_tools_when_enabled(self):
         with patch.dict('os.environ', {'ENABLE_PILOT_AVATAR': 'true', 'ENABLE_REALTIME_AVATAR_DIRECTIVES': 'true'}, clear=False):
@@ -702,6 +720,10 @@ class RealtimeChatRoutesTestCase(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self.build_system_prompt_calls[-1]['language_mix_level'], 'target_led')
+        request_payload = mocked_post.call_args.kwargs['json']
+        self.assertEqual(request_payload['input_audio_transcription']['language'], 'fr')
+        self.assertIn('never translate', request_payload['input_audio_transcription']['prompt'].lower())
+        self.assertIn('english may also appear', request_payload['input_audio_transcription']['prompt'].lower())
 
     def test_text_chat_uses_chat_language_mix_for_free_practice(self):
         self.fake_db.chats['student-1']['chat-existing']['language_mix_level'] = 'english_first'
@@ -748,12 +770,15 @@ class RealtimeChatRoutesTestCase(unittest.TestCase):
         request_payload = mocked_post.call_args.kwargs['json']
         instructions = request_payload['instructions']
 
-        self.assertIn('Assignment title: Restaurant Ordering Practice', instructions)
+        self.assertIn('Restaurant Ordering Practice', instructions)
+        self.assertIn('ASSIGNMENT:', instructions)
         self.assertNotIn('Task type:', instructions)
         # Canvas-generated scenario content flows into the prompt.
         self.assertIn('Parisian bistro', instructions)
         self.assertIn('Could I have', instructions)
         self.assertIn('polite requests', instructions)
+        self.assertEqual(request_payload['input_audio_transcription']['language'], 'fr')
+        self.assertIn('preserve code-switching', request_payload['input_audio_transcription']['prompt'].lower())
 
     def test_realtime_session_curriculum_module_payload_without_assignment_uses_generic_prompt(self):
         with patch.dict('os.environ', {'OPENAI_API_KEY': 'test-openai-key'}, clear=False):
@@ -833,7 +858,8 @@ class RealtimeChatRoutesTestCase(unittest.TestCase):
         request_payload = mocked_post.call_args.kwargs['json']
         instructions = request_payload['instructions']
 
-        self.assertIn('Assignment title: Restaurant Ordering Practice', instructions)
+        self.assertIn('Restaurant Ordering Practice', instructions)
+        self.assertIn('ASSIGNMENT:', instructions)
         self.assertIn('Parisian bistro', instructions)
         self.assertIn('Could I have', instructions)
 

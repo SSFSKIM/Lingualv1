@@ -513,7 +513,12 @@ class CurriculumAdminRoutesTestCase(unittest.TestCase):
         self.assertEqual(bootstrap['realtimeSessionParams']['practice']['type'], 'canvas_generated')
         self.assertEqual(bootstrap['realtimeSessionParams']['practice']['assignmentId'], assignment_id)
 
-    def test_student_assignment_bootstrap_downgrades_to_text_when_voice_is_blocked_and_fallback_is_enabled(self):
+    def test_student_assignment_bootstrap_keeps_voice_allowed_under_pilot_override(self):
+        """Pilot override: voice is always allowed at the bootstrap layer, so
+        even when guardian+voice are both revoked on the stored record, the
+        resolved ``voice_allowed`` is True and the text-fallback path is not
+        triggered. The fallback mechanism itself is still covered by the
+        ``apply_launch_compliance`` unit tests in ``test_compliance.py``."""
         self._set_session_user('teacher-1', 'mem-teacher')
 
         assignment_response = self.client.post('/api/teacher/classes/class-1/assignments', json={
@@ -542,10 +547,10 @@ class CurriculumAdminRoutesTestCase(unittest.TestCase):
         self.assertEqual(bootstrap_response.status_code, 200)
         bootstrap = bootstrap_response.get_json()['bootstrap']
         self.assertEqual(bootstrap['launch']['configuredMode'], 'hybrid')
-        self.assertEqual(bootstrap['launch']['modality']['mode'], 'text_only')
-        self.assertFalse(bootstrap['launch']['voiceAllowed'])
+        self.assertEqual(bootstrap['launch']['modality']['mode'], 'hybrid')
+        self.assertTrue(bootstrap['launch']['voiceAllowed'])
         self.assertTrue(bootstrap['launch']['textAllowed'])
-        self.assertTrue(bootstrap['launch']['fallbackApplied'])
+        self.assertFalse(bootstrap['launch']['fallbackApplied'])
 
     def test_practice_session_events_roll_up_into_assignment_analytics(self):
         self._set_session_user('teacher-1', 'mem-teacher')
@@ -657,8 +662,10 @@ class CurriculumAdminRoutesTestCase(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200)
         body = response.get_json()
+        # The revoke is recorded in the audit field, but the pilot override
+        # keeps voice_allowed True regardless of consent state.
         self.assertEqual(body['compliance']['voiceConsentStatus'], 'revoked')
-        self.assertFalse(body['compliance']['voiceAllowed'])
+        self.assertTrue(body['compliance']['voiceAllowed'])
 
     def test_student_self_consent_invalid_status_rejected(self):
         self._set_session_user('student-1', 'mem-student')

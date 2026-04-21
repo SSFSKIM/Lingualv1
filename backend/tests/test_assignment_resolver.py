@@ -323,7 +323,8 @@ class TestResolveAssignmentBootstrap(unittest.TestCase):
         self.assertIn("possessive adjectives", prompt)
         self.assertIn("es-ES", prompt)
         self.assertIn("Describe family relationships", full_prompt)
-        self.assertIn("TARGET VOCABULARY TO ELICIT", full_prompt)
+        self.assertIn("TARGETS to elicit", full_prompt)
+        self.assertIn("Vocabulary: madre, hermano", full_prompt)
         # Realtime params use the canvas_generated shape.
         self.assertEqual(
             bootstrap["realtimeSessionParams"]["practice"]["type"],
@@ -567,11 +568,14 @@ class TestCanvasGeneratedBootstrapFromAssignment(unittest.TestCase):
             assignment_id="asg-normal", ui_language="en",
         )
         runtime_prompt = build_assignment_system_prompt(bootstrap)
-        self.assertIn("ASSIGNMENT ENVELOPE", runtime_prompt)
-        self.assertIn("ASSIGNMENT OBJECTIVES", runtime_prompt)
-        self.assertIn("TARGET EXPRESSIONS TO ELICIT", runtime_prompt)
-        self.assertIn("FOCUS GRAMMAR", runtime_prompt)
-        self.assertIn("PRIORITY RULES", runtime_prompt)
+        self.assertIn("ASSIGNMENT:", runtime_prompt)
+        self.assertIn("Normal assignment", runtime_prompt)
+        self.assertIn("CONVERSATION STYLE:", runtime_prompt)
+        self.assertIn("TARGETS to elicit", runtime_prompt)
+        self.assertIn("Objectives: Order politely", runtime_prompt)
+        self.assertIn("Expressions: por favor", runtime_prompt)
+        self.assertIn("Grammar: present tense", runtime_prompt)
+        self.assertIn("TUTOR STANCE:", runtime_prompt)
 
     def _seed_language_mix_assignment(self, intensity_value):
         self.db.classes["c1"] = {

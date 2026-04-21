@@ -1400,175 +1400,223 @@ def build_assignment_prompt_bootstrap_from_practice_session(
     }
 
 
+def _build_assignment_spine(assignment: dict[str, Any], classroom: dict[str, Any]) -> str:
+    title = (assignment.get("title") or "").strip() or "Untitled assignment"
+    class_name = (classroom.get("name") or "").strip()
+    header = f"- {title}" + (f" — {class_name}" if class_name else "")
+
+    success = [
+        c
+        for c in assignment.get("successCriteria", [])
+        if isinstance(c, str) and c.strip()
+    ]
+
+    lines = ["ASSIGNMENT:", header]
+    if success:
+        lines.append("- Success: " + "; ".join(success))
+    lines.extend(
+        [
+            "",
+            "CONVERSATION STYLE:",
+            "- Stay inside the assignment scenario unless the learner is genuinely lost.",
+            "- Hold a natural conversation in role — one forward-moving question per turn.",
+            "- Accept usable answers and move the scene forward; do not loop on the same beat.",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _build_assignment_targets(
+    mapping: dict[str, Any], curriculum: dict[str, Any]
+) -> str:
+    expressions = [
+        e
+        for e in mapping.get("targetExpressions", [])
+        if isinstance(e, str) and e.strip()
+    ]
+    vocabulary = [
+        w
+        for w in mapping.get("targetVocabulary", [])
+        if isinstance(w, str) and w.strip()
+    ]
+    grammar = [
+        g
+        for g in mapping.get("focusGrammar", [])
+        if isinstance(g, str) and g.strip()
+    ]
+    objectives = [
+        (o.get("canDo", {}).get("en") or o.get("id"))
+        for o in curriculum.get("objectives", [])
+        if isinstance(o, dict)
+    ]
+    objectives = [o for o in objectives if o]
+
+    if not (objectives or expressions or vocabulary or grammar):
+        return ""
+
+    lines = ["TARGETS to elicit naturally inside the conversation:"]
+    if objectives:
+        lines.append("- Objectives: " + "; ".join(objectives))
+    if expressions:
+        lines.append("- Expressions: " + "; ".join(expressions))
+    if vocabulary:
+        lines.append("- Vocabulary: " + ", ".join(vocabulary))
+    if grammar:
+        lines.append("- Grammar: " + ", ".join(grammar))
+    return "\n".join(lines)
+
+
+def _build_teacher_guidance(mapping: dict[str, Any]) -> str:
+    teacher_notes = mapping.get("teacherNotes")
+    if not isinstance(teacher_notes, str) or not teacher_notes.strip():
+        return ""
+
+    return "TEACHER GUIDANCE:\n- Teacher guidance: " + teacher_notes.strip()
+
+
+def _format_hint_ladder(steps: list[str]) -> str:
+    labels = {
+        "wait": "wait",
+        "context_hint": "context cue",
+        "choice_prompt": "forced choice",
+        "model_and_retry": "model",
+    }
+    rendered = [labels.get(step, _humanize_identifier(step) or step) for step in steps]
+    return " \u2192 ".join(rendered)
+
+
+def _build_tutor_stance(
+    feedback_policy: dict[str, Any],
+    scaffold_policy: dict[str, Any],
+    output_policy: dict[str, Any],
+) -> str:
+    normalized_feedback = normalize_feedback_policy(feedback_policy)
+    normalized_scaffold = normalize_scaffold_policy(scaffold_policy)
+    normalized_output = normalize_output_policy(
+        output_policy,
+        feedback_mode=normalized_feedback["mode"],
+    )
+
+    mode = normalized_feedback["mode"]
+    target_only_strict = normalized_feedback["target_only_strict"]
+    recast_default = normalized_feedback["recast_default"]
+    threshold = normalized_feedback["elicitation_repeat_threshold"]
+    end_review_enabled = normalized_feedback["end_review_enabled"]
+    silence_ms = normalized_scaffold["silence_tolerance_ms"]
+    hint_ladder = normalized_scaffold["hint_ladder"]
+    max_modeling = normalized_scaffold["max_modeling_steps"]
+    min_words = normalized_output["min_student_turn_words"]
+    pressure = normalized_output["follow_up_pressure"]
+    allow_clarification_requests = normalized_output["allow_clarification_requests"]
+
+    feedback_line = {
+        "fluency_first": "Prioritize flow; keep corrections short and embedded.",
+        "accuracy_first": "Prioritize accurate target production; cue self-correction sooner.",
+    }.get(
+        mode,
+        "Balance flow with timely correction; escalate when the same target keeps slipping.",
+    )
+
+    first_repair = "recast briefly" if recast_default else "cue elicitation"
+    repair_line = (
+        f"On a target slip, {first_repair} the first time; if the same error "
+        f"repeats {threshold}+ times, pause to repair and prompt self-correction."
+    )
+
+    scaffold_line = (
+        f"Allow about {silence_ms}ms of productive silence before stepping in, "
+        f"then use the hint ladder ({_format_hint_ladder(hint_ladder)}) "
+        "instead of jumping to the answer."
+    )
+    modeling_line = (
+        "Avoid full modeling unless task completion would otherwise stall completely."
+        if max_modeling <= 0
+        else f"If self-repair stalls, allow up to {max_modeling} modeling step(s) before accepting and moving on."
+    )
+
+    pressure_phrase = {
+        "light": "nudge for one more detail when answers are too short.",
+        "high": "actively press for elaboration, comparison, and justification.",
+    }.get(
+        pressure,
+        "ask for one more detail or reason when answers stay too brief.",
+    )
+    output_line = (
+        f"Aim for ~{min_words}+ word learner turns; do not accept fragments as "
+        f"completion; {pressure_phrase}"
+    )
+    clarification_line = (
+        "Allow the learner to ask for clarification or repetition, but answer in a way that returns responsibility to the learner."
+        if allow_clarification_requests
+        else "Keep clarification support minimal so the learner must stay in productive output mode."
+    )
+    review_line = (
+        "Near the end, summarize 1-3 recurring issues tied to the learner's actual errors."
+        if end_review_enabled
+        else "Do not add a formal end-of-session review block unless the learner explicitly asks for one."
+    )
+
+    scope_line = (
+        "Keep all coaching tied to the mapped targets and success criteria."
+        if target_only_strict
+        else "Favor mapped targets; briefly support adjacent language only if it helps task completion."
+    )
+
+    return (
+        "TUTOR STANCE:\n"
+        f"- {feedback_line}\n"
+        f"- {repair_line}\n"
+        f"- {scaffold_line}\n"
+        f"- {modeling_line}\n"
+        f"- {output_line}\n"
+        f"- {clarification_line}\n"
+        f"- {review_line}\n"
+        f"- {scope_line}"
+    )
+
+
 def build_assignment_system_prompt(bootstrap: dict[str, Any]) -> str:
     base_prompt = bootstrap.get("systemPromptPreview", "").strip()
     assignment = bootstrap.get("assignment", {}) if isinstance(bootstrap, dict) else {}
     # Scaffold-free (custom_prompt) assignments contract to send ONLY the
-    # teacher's raw instructions plus the language-mix policy. The bootstrap
-    # already composed that as systemPromptPreview; appending the pedagogy
-    # overlay / assignment envelope here would leak scenario, target
-    # expressions, rubric policy, and placeholder objectives back into the
-    # prompt and defeat the contract. Early-return before overlay assembly.
+    # teacher's raw instructions plus the language-mix policy already baked
+    # into systemPromptPreview. Early-return before overlay assembly.
     if isinstance(assignment, dict) and assignment.get("taskType") == "custom_prompt":
         return base_prompt
+
     mapping = bootstrap.get("mapping", {}) if isinstance(bootstrap, dict) else {}
     classroom = bootstrap.get("class", {}) if isinstance(bootstrap, dict) else {}
     curriculum = bootstrap.get("curriculum", {}) if isinstance(bootstrap, dict) else {}
-    launch = bootstrap.get("launch", {}) if isinstance(bootstrap, dict) else {}
     pedagogy = curriculum.get("pedagogy", {}) if isinstance(curriculum, dict) else {}
-    rubric_lines = [
-        f"- {rubric.get('title', {}).get('en') or rubric.get('id')}"
-        for rubric in curriculum.get("rubrics", [])
-        if isinstance(rubric, dict)
-    ] or ["- No explicit rubrics were resolved for this assignment."]
-
-    objective_lines = [
-        f"- {objective.get('canDo', {}).get('en') or objective.get('id')}"
-        for objective in curriculum.get("objectives", [])
-        if isinstance(objective, dict)
-    ] or ["- Stay aligned to the mapped learning objectives."]
-
-    target_expression_lines = [
-        f"- {expression}"
-        for expression in mapping.get("targetExpressions", [])
-        if isinstance(expression, str) and expression.strip()
-    ] or ["- No explicit target expressions were configured."]
-
-    target_vocabulary_lines = [
-        f"- {word}"
-        for word in mapping.get("targetVocabulary", [])
-        if isinstance(word, str) and word.strip()
-    ] or ["- No explicit target vocabulary was configured."]
-
-    focus_grammar_lines = [
-        f"- {grammar_point}"
-        for grammar_point in mapping.get("focusGrammar", [])
-        if isinstance(grammar_point, str) and grammar_point.strip()
-    ] or ["- No explicit focus grammar was configured."]
-    communicative_function_lines = [
-        f"- {function_id}"
-        for function_id in pedagogy.get("communicativeFunctions", [])
-        if isinstance(function_id, str) and function_id.strip()
-    ] or ["- No explicit communicative functions were resolved."]
-    discourse_move_lines = [
-        f"- {move_id}"
-        for move_id in pedagogy.get("discourseMoves", [])
-        if isinstance(move_id, str) and move_id.strip()
-    ] or ["- No explicit discourse moves were resolved."]
-    foundation_domain_lines = [
-        f"- {domain_id}"
-        for domain_id in pedagogy.get("foundationDomains", [])
-        if isinstance(domain_id, str) and domain_id.strip()
-    ] or ["- No explicit foundation domains were resolved."]
-
-    success_criteria_lines = [
-        f"- {criterion}"
-        for criterion in assignment.get("successCriteria", [])
-        if isinstance(criterion, str) and criterion.strip()
-    ] or ["- Complete the task with sustained, assignment-aligned output."]
-
-    feedback_policy = mapping.get("feedbackPolicy", {})
-    scaffold_policy = mapping.get("scaffoldPolicy", {})
+    feedback_policy = mapping.get("feedbackPolicy", {}) or {}
+    scaffold_policy = mapping.get("scaffoldPolicy", {}) or {}
     output_policy = normalize_output_policy(
         mapping.get("outputPolicy"),
         task_type="",
         evidence=pedagogy.get("evidence"),
         feedback_mode=feedback_policy.get("mode", "balanced"),
     )
-    modality_policy = launch.get("modality", {})
-    retention_policy = launch.get("retentionPolicy") if isinstance(launch.get("retentionPolicy"), dict) else {}
-    blocked_reasons = launch.get("blockedReasons") if isinstance(launch.get("blockedReasons"), list) else []
 
-    overlay = f"""
-ASSIGNMENT ENVELOPE:
-- Assignment title: {assignment.get('title', '')}
-- Class: {classroom.get('name', '')}
-- Max attempts: {assignment.get('maxAttempts') if assignment.get('maxAttempts') is not None else 'unlimited'}
-- Configured modality mode: {launch.get('configuredMode') or modality_policy.get('mode', 'hybrid')}
-- Voice allowed: {launch.get('voiceAllowed')}
-- Text allowed: {launch.get('textAllowed')}
-- Modality mode: {modality_policy.get('mode', 'hybrid')}
-- Text fallback applied: {launch.get('fallbackApplied', False)}
-- Task model: {pedagogy.get('taskModel') or 'n/a'}
-- Evidence target min turns: {(pedagogy.get('evidence') or {}).get('minTurns') or 'n/a'}
-- Evidence target max turns: {(pedagogy.get('evidence') or {}).get('maxTurns') or 'n/a'}
-- Retention policy: {retention_policy.get('id', 'n/a')}
-- Raw audio storage allowed: {retention_policy.get('rawAudioStorageAllowed', 'n/a')}
-- Launch blockers: {', '.join(str(reason) for reason in blocked_reasons) or 'none'}
+    sections: list[str] = [_build_assignment_spine(assignment, classroom)]
+    targets = _build_assignment_targets(mapping, curriculum)
+    if targets:
+        sections.append(targets)
+    teacher_guidance = _build_teacher_guidance(mapping)
+    if teacher_guidance:
+        sections.append(teacher_guidance)
+    sections.append(_build_tutor_stance(feedback_policy, scaffold_policy, output_policy))
 
-ASSIGNMENT OBJECTIVES:
-{chr(10).join(objective_lines)}
+    task_directive = build_task_template_prompt(
+        task_type="",
+        assignment=assignment,
+        curriculum=curriculum,
+        pedagogy=pedagogy,
+        mapping=mapping,
+    ).strip()
+    if task_directive:
+        sections.append(task_directive)
 
-TARGET EXPRESSIONS TO ELICIT:
-{chr(10).join(target_expression_lines)}
-
-TARGET VOCABULARY TO ELICIT:
-{chr(10).join(target_vocabulary_lines)}
-
-FOCUS GRAMMAR:
-{chr(10).join(focus_grammar_lines)}
-
-COMMUNICATIVE FUNCTIONS TO WATCH:
-{chr(10).join(communicative_function_lines)}
-
-DISCOURSE MOVES TO WATCH:
-{chr(10).join(discourse_move_lines)}
-
-FOUNDATION DOMAINS TO SUPPORT:
-{chr(10).join(foundation_domain_lines)}
-
-RUBRICS IN PLAY:
-{chr(10).join(rubric_lines)}
-
-SUCCESS CRITERIA:
-{chr(10).join(success_criteria_lines)}
-
-TEACHER POLICY:
-- Feedback mode: {feedback_policy.get('mode', 'balanced')}
-- Target-only strict: {feedback_policy.get('targetOnlyStrict', False)}
-- Recast default: {feedback_policy.get('recastDefault', True)}
-- Elicitation repeat threshold: {feedback_policy.get('elicitationRepeatThreshold', 3)}
-- End review enabled: {feedback_policy.get('endReviewEnabled', True)}
-- Silence tolerance ms: {scaffold_policy.get('silenceToleranceMs', 3000)}
-- Hint ladder: {', '.join(scaffold_policy.get('hintLadder', [])) or 'default ladder'}
-- Max modeling steps: {scaffold_policy.get('maxModelingSteps', 1)}
-- Output min student turn words: {output_policy.get('min_student_turn_words', 8)}
-- Output follow-up pressure: {output_policy.get('follow_up_pressure', 'balanced')}
-- Output clarification requests allowed: {output_policy.get('allow_clarification_requests', True)}
-- Teacher notes: {mapping.get('teacherNotes', '') or 'n/a'}
-
-PRIORITY RULES:
-1. Stay inside the assignment scenario, objectives, and teacher guidance.
-2. Prefer eliciting the configured target expressions before introducing new language.
-3. Keep corrective feedback aligned to the configured feedback policy.
-4. Use the scaffold ladder instead of giving the answer immediately when the learner hesitates.
-5. Push for extended output when the learner gives minimal answers.
-""".strip()
-
-    pedagogy_sections = [
-        build_feedback_mode_prompt(feedback_policy),
-        build_correction_ladder_prompt(feedback_policy),
-        build_scaffold_ladder_prompt(scaffold_policy),
-        build_task_template_prompt(
-            task_type="",
-            assignment=assignment,
-            curriculum=curriculum,
-            pedagogy=pedagogy,
-            mapping=mapping,
-        ),
-        build_output_pressure_prompt(
-            serialize_output_policy(
-                output_policy,
-                task_type="",
-                evidence=pedagogy.get("evidence"),
-                feedback_mode=feedback_policy.get("mode", "balanced"),
-            ),
-            assignment=assignment,
-            pedagogy=pedagogy,
-        ),
-    ]
-    pedagogy_overlay = "\n\n".join(section for section in pedagogy_sections if section.strip())
-
+    overlay = "\n\n".join(s for s in sections if s.strip())
     if not base_prompt:
-        return f"{overlay}\n\n{pedagogy_overlay}".strip()
-    return f"{base_prompt}\n\n{overlay}\n\n{pedagogy_overlay}".strip()
+        return overlay
+    return f"{base_prompt}\n\n{overlay}".strip()

@@ -67,6 +67,17 @@ AVATAR_REACTION_INTENTS = [
 ]
 
 REALTIME_MODEL = 'gpt-realtime-mini-2025-12-15'
+REALTIME_INPUT_AUDIO_TRANSCRIPTION_MODEL = 'gpt-4o-mini-transcribe-2025-12-15'
+REALTIME_TRANSCRIPTION_LANGUAGE_HINTS = {
+    'ko-KR': ('ko', 'Korean'),
+    'es-ES': ('es', 'Spanish'),
+    'fr-FR': ('fr', 'French'),
+    'ru-RU': ('ru', 'Russian'),
+    'he-IL': ('he', 'Hebrew'),
+    'en': ('en', 'English'),
+    'en-US': ('en', 'English'),
+    'en-GB': ('en', 'English'),
+}
 
 
 def build_avatar_directive_tool() -> dict[str, Any]:
@@ -209,9 +220,34 @@ def realtime_avatar_directives_requested(payload: dict[str, Any] | None = None) 
     return is_development and request_opt_in
 
 
+def resolve_realtime_transcription_language_hint(learning_locale: Any) -> tuple[str, str]:
+    if isinstance(learning_locale, str):
+        normalized = learning_locale.strip()
+        if normalized in REALTIME_TRANSCRIPTION_LANGUAGE_HINTS:
+            return REALTIME_TRANSCRIPTION_LANGUAGE_HINTS[normalized]
+
+        primary_language = normalized.split('-', 1)[0].lower()
+        for locale_key, hint in REALTIME_TRANSCRIPTION_LANGUAGE_HINTS.items():
+            if locale_key.split('-', 1)[0].lower() == primary_language:
+                return hint
+
+    return ('en', 'English')
+
+
+def build_realtime_transcription_prompt(expected_language_name: str) -> str:
+    return (
+        f'Primary expected language is {expected_language_name}. English may also appear. '
+        'Transcribe verbatim exactly as spoken. Never translate. Preserve code-switching exactly as spoken. '
+        'Keep English words in English and keep non-English words in the language they were spoken. '
+        'Do not rewrite the utterance into a single language, and do not replace it with a translated version.'
+    )
+
+
 def build_realtime_session_request(
     system_instructions: str,
     *,
+    transcription_language: str = 'en',
+    transcription_prompt: str | None = None,
     enable_avatar_directives: bool | None = None,
 ) -> dict[str, Any]:
     guarded_instructions = (
@@ -219,11 +255,18 @@ def build_realtime_session_request(
         'Voice-input guardrail: Ignore accidental noise, background conversations, and speech not directed at you. '
         'Only respond when the learner is clearly addressing you.'
     )
+    input_audio_transcription: dict[str, Any] = {
+        'model': REALTIME_INPUT_AUDIO_TRANSCRIPTION_MODEL,
+        'language': transcription_language,
+    }
+    if isinstance(transcription_prompt, str) and transcription_prompt.strip():
+        input_audio_transcription['prompt'] = transcription_prompt.strip()
+
     request_payload: dict[str, Any] = {
         'model': REALTIME_MODEL,
         'voice': 'coral',
         'instructions': guarded_instructions,
-        'input_audio_transcription': {'model': 'whisper-1'},
+        'input_audio_transcription': input_audio_transcription,
         'turn_detection': {
             'type': 'server_vad',
             'threshold': 0.7,
@@ -290,6 +333,7 @@ def create_chat_blueprint(deps: RouteDeps) -> Blueprint:
 
             uid = deps.get_current_user_uid()
             assignment_id = _extract_assignment_id(payload)
+            learning_locale = 'en'
             if assignment_id:
                 context = deps.get_school_request_context()
                 practice_session_id = _extract_practice_session_id(payload)
@@ -358,6 +402,11 @@ def create_chat_blueprint(deps: RouteDeps) -> Blueprint:
                         'blockedReasons': blocked_reasons,
                     }), 403
                 system_instructions = build_assignment_system_prompt(bootstrap)
+                learning_locale = (
+                    (class_record or {}).get('learning_locale')
+                    or (bootstrap.get('class') or {}).get('learningLocale')
+                    or 'en'
+                )
             else:
                 proficiency_context = deps.get_user_proficiency_context()
                 profile_context = deps.db.get_user_profile_context(uid) or {}
@@ -374,6 +423,12 @@ def create_chat_blueprint(deps: RouteDeps) -> Blueprint:
                     learning_locale,
                     language_mix_level,
                 )
+            transcription_language, transcription_language_name = (
+                resolve_realtime_transcription_language_hint(learning_locale)
+            )
+            transcription_prompt = build_realtime_transcription_prompt(
+                transcription_language_name,
+            )
 
             response = requests.post(
                 'https://api.openai.com/v1/realtime/sessions',
@@ -383,6 +438,8 @@ def create_chat_blueprint(deps: RouteDeps) -> Blueprint:
                 },
                 json=build_realtime_session_request(
                     system_instructions,
+                    transcription_language=transcription_language,
+                    transcription_prompt=transcription_prompt,
                     enable_avatar_directives=realtime_avatar_directives_requested(payload),
                 ),
             )
