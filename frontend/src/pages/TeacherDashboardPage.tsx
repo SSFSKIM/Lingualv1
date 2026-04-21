@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   AlertTriangle,
@@ -104,6 +104,11 @@ export function TeacherDashboardPage() {
   const [canvasRosterGap, setCanvasRosterGap] = useState<CanvasRosterGapEntry[]>([]);
   const [canvasRosterSummary, setCanvasRosterSummary] =
     useState<CanvasRosterGapSummary | null>(null);
+
+  // Tracks the class whose roster is currently being fetched, so an
+  // in-flight fetch for class A doesn't overwrite state after the teacher
+  // has already switched to class B.
+  const activeRosterClassIdRef = useRef<string | null>(null);
 
   // Team section state (school_admin only)
   const [teacherInviteCode, setTeacherInviteCode] = useState<TeacherInviteCodeData | null>(null);
@@ -221,6 +226,7 @@ export function TeacherDashboardPage() {
   // ── Roster handlers ───────────────────────────────────────────────
 
   const openRosterDialog = async (classId: string) => {
+    activeRosterClassIdRef.current = classId;
     setRosterClassId(classId);
     setRoster([]);
     setCanvasRosterGap([]);
@@ -231,13 +237,20 @@ export function TeacherDashboardPage() {
         getClassRoster(classId),
         getClassCanvasRosterGap(classId),
       ]);
+      // Bail if the teacher clicked a different class's roster button
+      // before this fetch resolved — applying stale data would show
+      // class A's roster under class B's dialog title.
+      if (activeRosterClassIdRef.current !== classId) return;
       setRoster(students);
       setCanvasRosterGap(gapResponse.gap);
       setCanvasRosterSummary(gapResponse.summary);
     } catch (err) {
+      if (activeRosterClassIdRef.current !== classId) return;
       setError(err instanceof Error ? err.message : 'Failed to load roster.');
     } finally {
-      setRosterLoading(false);
+      if (activeRosterClassIdRef.current === classId) {
+        setRosterLoading(false);
+      }
     }
   };
 
