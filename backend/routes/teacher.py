@@ -802,6 +802,56 @@ def create_teacher_blueprint(deps: RouteDeps) -> Blueprint:
             print(f"Class roster error: {exc}")
             return jsonify({"success": False, "error": str(exc)}), 500
 
+    @bp.route("/api/teacher/classes/<class_id>/canvas-roster-gap")
+    @deps.login_required
+    def api_get_canvas_roster_gap(class_id):
+        try:
+            _context, class_record = _require_teacher_class_context(deps, class_id)
+
+            has_canvas_connection = (
+                deps.db.get_canvas_connection_by_class(class_id) is not None
+                if hasattr(deps.db, "get_canvas_connection_by_class")
+                else False
+            )
+            if not has_canvas_connection:
+                return jsonify({"success": True, "gap": [], "summary": None})
+
+            roster_entries = deps.db.list_canvas_roster_entries(class_id)
+            enrollments = deps.db.list_class_enrollments(class_id)
+
+            joined_emails = set()
+            for enrollment in enrollments:
+                student_uid = enrollment.get("student_uid")
+                if not student_uid:
+                    continue
+                user = deps.db.get_user(student_uid) if hasattr(deps.db, "get_user") else None
+                email = ((user or {}).get("email") or "").lower().strip()
+                if email:
+                    joined_emails.add(email)
+
+            gap = []
+            for entry in roster_entries:
+                entry_email = (entry.get("canvas_email") or "").lower().strip()
+                if entry_email and entry_email not in joined_emails:
+                    gap.append({
+                        "canvas_name": entry.get("canvas_name", ""),
+                        "canvas_email": entry.get("canvas_email", ""),
+                        "synced_at": _timestamp_to_iso(entry.get("synced_at")),
+                    })
+            gap.sort(key=lambda item: item.get("canvas_name", "").lower())
+
+            summary = {
+                "canvas_total": len(roster_entries),
+                "joined": len(roster_entries) - len(gap),
+                "not_joined": len(gap),
+            }
+            return jsonify({"success": True, "gap": gap, "summary": summary})
+        except SchoolContextPermissionError as exc:
+            return jsonify({"success": False, "error": str(exc)}), 403
+        except Exception as exc:
+            print(f"Canvas roster gap error: {exc}")
+            return jsonify({"success": False, "error": str(exc)}), 500
+
     @bp.route("/api/teacher/classes/<class_id>/students/<student_uid>", methods=["DELETE"])
     @deps.login_required
     def api_remove_student(class_id, student_uid):

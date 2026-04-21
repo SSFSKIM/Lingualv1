@@ -315,6 +315,9 @@ class FakeSchoolDb:
                 return dict(entry)
         return None
 
+    def list_canvas_roster_entries(self, class_id):
+        return [dict(e) for e in self.roster_entries.values() if e.get('class_id') == class_id]
+
 
 class SchoolFoundationRoutesTestCase(unittest.TestCase):
     def setUp(self):
@@ -923,6 +926,75 @@ class SchoolFoundationRoutesTestCase(unittest.TestCase):
         roster = response.get_json()['roster']
         self.assertEqual(len(roster), 1)
         self.assertNotIn('isOnCanvasRoster', roster[0])
+
+    def test_canvas_roster_gap_lists_unjoined_students(self):
+        class_id, _org_id = self._bootstrap_school()
+        self.fake_db.canvas_connections['conn-1'] = {
+            'id': 'conn-1', 'class_id': class_id,
+        }
+        self.fake_db.roster_entries[f'{class_id}__cv50'] = {
+            'class_id': class_id, 'canvas_user_id': 'cv50',
+            'canvas_email': 'alice@school.edu', 'canvas_name': 'Alice',
+            'synced_at': '2026-04-21T00:00:00Z',
+        }
+        self.fake_db.roster_entries[f'{class_id}__cv51'] = {
+            'class_id': class_id, 'canvas_user_id': 'cv51',
+            'canvas_email': 'bob@school.edu', 'canvas_name': 'Bob',
+            'synced_at': '2026-04-21T00:00:00Z',
+        }
+        self.fake_db.enrollments[f'{class_id}_alice'] = {
+            'id': f'{class_id}_alice', 'class_id': class_id,
+            'student_uid': 'alice-uid', 'status': 'active',
+            'join_source': 'join_code',
+        }
+        self.fake_db.users['alice-uid'] = {
+            'uid': 'alice-uid', 'email': 'alice@school.edu', 'name': 'Alice',
+        }
+
+        response = self.client.get(f'/api/teacher/classes/{class_id}/canvas-roster-gap')
+        self.assertEqual(response.status_code, 200)
+        body = response.get_json()
+        self.assertEqual(body['summary'], {
+            'canvas_total': 2, 'joined': 1, 'not_joined': 1,
+        })
+        self.assertEqual(len(body['gap']), 1)
+        self.assertEqual(body['gap'][0]['canvas_email'], 'bob@school.edu')
+        self.assertEqual(body['gap'][0]['canvas_name'], 'Bob')
+
+    def test_canvas_roster_gap_empty_when_class_has_no_canvas_connection(self):
+        class_id, _org_id = self._bootstrap_school()
+        # No canvas_connections entry for this class.
+        response = self.client.get(f'/api/teacher/classes/{class_id}/canvas-roster-gap')
+        self.assertEqual(response.status_code, 200)
+        body = response.get_json()
+        self.assertEqual(body['gap'], [])
+        self.assertIsNone(body['summary'])
+
+    def test_canvas_roster_gap_positive_empty_state(self):
+        """Every rostered student has joined → gap is empty, summary reflects parity."""
+        class_id, _org_id = self._bootstrap_school()
+        self.fake_db.canvas_connections['conn-1'] = {
+            'id': 'conn-1', 'class_id': class_id,
+        }
+        self.fake_db.roster_entries[f'{class_id}__cv50'] = {
+            'class_id': class_id, 'canvas_user_id': 'cv50',
+            'canvas_email': 'alice@school.edu', 'canvas_name': 'Alice',
+        }
+        self.fake_db.enrollments[f'{class_id}_alice'] = {
+            'id': f'{class_id}_alice', 'class_id': class_id,
+            'student_uid': 'alice-uid', 'status': 'active',
+            'join_source': 'join_code',
+        }
+        self.fake_db.users['alice-uid'] = {
+            'uid': 'alice-uid', 'email': 'alice@school.edu', 'name': 'Alice',
+        }
+
+        response = self.client.get(f'/api/teacher/classes/{class_id}/canvas-roster-gap')
+        body = response.get_json()
+        self.assertEqual(body['gap'], [])
+        self.assertEqual(body['summary'], {
+            'canvas_total': 1, 'joined': 1, 'not_joined': 0,
+        })
 
     def test_roster_does_not_include_pending_sync_rows(self):
         """Even if a stale pending_sync enrollment still exists in the DB,
