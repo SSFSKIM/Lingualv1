@@ -713,7 +713,7 @@ def create_chat_blueprint(deps: RouteDeps) -> Blueprint:
                 )
 
             messages = [{'role': 'system', 'content': system_prompt}]
-            for msg in chat_messages[-10:]:
+            for msg in chat_messages:
                 messages.append({'role': msg['role'], 'content': msg['content']})
             messages.append({'role': 'user', 'content': user_message})
 
