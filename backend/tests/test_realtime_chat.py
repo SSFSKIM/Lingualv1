@@ -465,10 +465,10 @@ class FakeRealtimeSessionResponse:
 
     def json(self):
         return {
-            'id': 'sess_123',
-            'client_secret': {
-                'value': 'secret_123',
-                'expires_at': 1_234_567_890,
+            'value': 'secret_123',
+            'expires_at': 1_234_567_890,
+            'session': {
+                'id': 'sess_123',
             },
         }
 
@@ -553,16 +553,26 @@ class RealtimeChatHelpersTestCase(unittest.TestCase):
         with patch.dict('os.environ', {}, clear=False):
             payload = build_realtime_session_request('Base instructions')
 
-        self.assertIn('Base instructions', payload['instructions'])
-        self.assertIn('Ignore accidental noise', payload['instructions'])
+        session_payload = payload['session']
+        audio_input = session_payload['audio']['input']
+
+        self.assertEqual(payload['expires_after'], {'anchor': 'created_at', 'seconds': 600})
+        self.assertEqual(session_payload['type'], 'realtime')
+        self.assertEqual(session_payload['model'], 'gpt-realtime-2')
+        self.assertEqual(session_payload['reasoning'], {'effort': 'low'})
+        self.assertEqual(session_payload['output_modalities'], ['audio'])
+        self.assertIn('Base instructions', session_payload['instructions'])
+        self.assertIn('Ignore accidental noise', session_payload['instructions'])
+        self.assertEqual(audio_input['format'], {'type': 'audio/pcm', 'rate': 24000})
         self.assertEqual(
-            payload['input_audio_transcription']['model'],
+            audio_input['transcription']['model'],
             'gpt-4o-mini-transcribe-2025-12-15',
         )
-        self.assertEqual(payload['turn_detection']['threshold'], 0.7)
-        self.assertEqual(payload['turn_detection']['create_response'], False)
-        self.assertNotIn('tool_choice', payload)
-        self.assertNotIn('tools', payload)
+        self.assertEqual(audio_input['turn_detection']['threshold'], 0.7)
+        self.assertEqual(audio_input['turn_detection']['create_response'], False)
+        self.assertEqual(session_payload['audio']['output']['voice'], 'coral')
+        self.assertNotIn('tool_choice', session_payload)
+        self.assertNotIn('tools', session_payload)
 
     def test_realtime_session_request_accepts_transcription_language_and_prompt(self):
         with patch.dict('os.environ', {}, clear=False):
@@ -572,9 +582,11 @@ class RealtimeChatHelpersTestCase(unittest.TestCase):
                 transcription_prompt='Primary expected language is French. English may also appear.',
             )
 
-        self.assertEqual(payload['input_audio_transcription']['language'], 'fr')
+        transcription = payload['session']['audio']['input']['transcription']
+
+        self.assertEqual(transcription['language'], 'fr')
         self.assertEqual(
-            payload['input_audio_transcription']['prompt'],
+            transcription['prompt'],
             'Primary expected language is French. English may also appear.',
         )
 
@@ -582,18 +594,20 @@ class RealtimeChatHelpersTestCase(unittest.TestCase):
         with patch.dict('os.environ', {'ENABLE_PILOT_AVATAR': 'true', 'ENABLE_REALTIME_AVATAR_DIRECTIVES': 'true'}, clear=False):
             payload = build_realtime_session_request('Base instructions')
 
-        self.assertEqual(payload['tool_choice'], 'auto')
-        self.assertEqual(payload['tools'][0]['name'], 'emit_avatar_directive')
-        self.assertIn('Avatar acting contract', payload['instructions'])
-        self.assertIn('Preferred mappings', payload['instructions'])
-        self.assertIn('Tap reaction mappings', payload['instructions'])
+        session_payload = payload['session']
+
+        self.assertEqual(session_payload['tool_choice'], 'auto')
+        self.assertEqual(session_payload['tools'][0]['name'], 'emit_avatar_directive')
+        self.assertIn('Avatar acting contract', session_payload['instructions'])
+        self.assertIn('Preferred mappings', session_payload['instructions'])
+        self.assertIn('Tap reaction mappings', session_payload['instructions'])
 
     def test_realtime_session_request_skips_avatar_tools_when_pilot_avatar_is_disabled(self):
         with patch.dict('os.environ', {'ENABLE_REALTIME_AVATAR_DIRECTIVES': 'true'}, clear=False):
             payload = build_realtime_session_request('Base instructions')
 
-        self.assertNotIn('tool_choice', payload)
-        self.assertNotIn('tools', payload)
+        self.assertNotIn('tool_choice', payload['session'])
+        self.assertNotIn('tools', payload['session'])
 
     def test_realtime_session_request_includes_avatar_tools_when_explicitly_enabled(self):
         with patch.dict('os.environ', {'ENABLE_PILOT_AVATAR': 'true'}, clear=False):
@@ -602,8 +616,8 @@ class RealtimeChatHelpersTestCase(unittest.TestCase):
                 enable_avatar_directives=True,
             )
 
-        self.assertEqual(payload['tool_choice'], 'auto')
-        self.assertEqual(payload['tools'][0]['name'], 'emit_avatar_directive')
+        self.assertEqual(payload['session']['tool_choice'], 'auto')
+        self.assertEqual(payload['session']['tools'][0]['name'], 'emit_avatar_directive')
 
     def test_realtime_avatar_directives_requested_only_allows_payload_opt_in_in_development(self):
         with patch.dict('os.environ', {'ENABLE_PILOT_AVATAR': 'true', 'FLASK_ENV': 'development'}, clear=False):
@@ -721,9 +735,10 @@ class RealtimeChatRoutesTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self.build_system_prompt_calls[-1]['language_mix_level'], 'target_led')
         request_payload = mocked_post.call_args.kwargs['json']
-        self.assertEqual(request_payload['input_audio_transcription']['language'], 'fr')
-        self.assertIn('never translate', request_payload['input_audio_transcription']['prompt'].lower())
-        self.assertIn('english may also appear', request_payload['input_audio_transcription']['prompt'].lower())
+        transcription = request_payload['session']['audio']['input']['transcription']
+        self.assertEqual(transcription['language'], 'fr')
+        self.assertIn('never translate', transcription['prompt'].lower())
+        self.assertIn('english may also appear', transcription['prompt'].lower())
 
     def test_text_chat_uses_chat_language_mix_for_free_practice(self):
         self.fake_db.chats['student-1']['chat-existing']['language_mix_level'] = 'english_first'
@@ -767,8 +782,17 @@ class RealtimeChatRoutesTestCase(unittest.TestCase):
         self.assertTrue(payload['success'])
         self.assertEqual(payload['client_secret'], 'secret_123')
 
+        self.assertEqual(
+            mocked_post.call_args.args[0],
+            'https://api.openai.com/v1/realtime/client_secrets',
+        )
+        request_headers = mocked_post.call_args.kwargs['headers']
+        self.assertIn('OpenAI-Safety-Identifier', request_headers)
+        self.assertNotIn('student-1', request_headers['OpenAI-Safety-Identifier'])
+
         request_payload = mocked_post.call_args.kwargs['json']
-        instructions = request_payload['instructions']
+        instructions = request_payload['session']['instructions']
+        transcription = request_payload['session']['audio']['input']['transcription']
 
         self.assertIn('Restaurant Ordering Practice', instructions)
         self.assertIn('ASSIGNMENT:', instructions)
@@ -777,8 +801,8 @@ class RealtimeChatRoutesTestCase(unittest.TestCase):
         self.assertIn('Parisian bistro', instructions)
         self.assertIn('Could I have', instructions)
         self.assertIn('polite requests', instructions)
-        self.assertEqual(request_payload['input_audio_transcription']['language'], 'fr')
-        self.assertIn('preserve code-switching', request_payload['input_audio_transcription']['prompt'].lower())
+        self.assertEqual(transcription['language'], 'fr')
+        self.assertIn('preserve code-switching', transcription['prompt'].lower())
 
     def test_realtime_session_curriculum_module_payload_without_assignment_uses_generic_prompt(self):
         with patch.dict('os.environ', {'OPENAI_API_KEY': 'test-openai-key'}, clear=False):
@@ -799,7 +823,7 @@ class RealtimeChatRoutesTestCase(unittest.TestCase):
         self.assertTrue(payload['success'])
 
         request_payload = mocked_post.call_args.kwargs['json']
-        instructions = request_payload['instructions']
+        instructions = request_payload['session']['instructions']
 
         self.assertIn('Generic prompt: Intermediate Mid (fr-FR) [balanced]', instructions)
         self.assertNotIn('Prompt for M1::S1', instructions)
@@ -856,7 +880,7 @@ class RealtimeChatRoutesTestCase(unittest.TestCase):
         self.assertTrue(payload['success'])
 
         request_payload = mocked_post.call_args.kwargs['json']
-        instructions = request_payload['instructions']
+        instructions = request_payload['session']['instructions']
 
         self.assertIn('Restaurant Ordering Practice', instructions)
         self.assertIn('ASSIGNMENT:', instructions)
@@ -911,8 +935,8 @@ class RealtimeChatRoutesTestCase(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         request_payload = mocked_post.call_args.kwargs['json']
-        self.assertEqual(request_payload['tool_choice'], 'auto')
-        self.assertEqual(request_payload['tools'][0]['name'], 'emit_avatar_directive')
+        self.assertEqual(request_payload['session']['tool_choice'], 'auto')
+        self.assertEqual(request_payload['session']['tools'][0]['name'], 'emit_avatar_directive')
 
     def test_realtime_connect_proxies_offer_to_openai(self):
         with patch('backend.routes.chat.requests.post') as mocked_post:
@@ -921,7 +945,7 @@ class RealtimeChatRoutesTestCase(unittest.TestCase):
             response = self.client.post('/api/realtime/connect', json={
                 'offerSdp': 'v=0\r\no=- 0 0 IN IP4 127.0.0.1',
                 'clientSecret': 'secret_123',
-                'model': 'gpt-realtime-mini-2025-12-15',
+                'model': 'frontend-controlled-model-should-be-ignored',
             })
 
         self.assertEqual(response.status_code, 200)
@@ -929,9 +953,10 @@ class RealtimeChatRoutesTestCase(unittest.TestCase):
         self.assertTrue(payload['success'])
         self.assertEqual(payload['answerSdp'], 'mock-answer-sdp')
         self.assertEqual(
-            mocked_post.call_args.kwargs['params'],
-            {'model': 'gpt-realtime-mini-2025-12-15'},
+            mocked_post.call_args.args[0],
+            'https://api.openai.com/v1/realtime/calls',
         )
+        self.assertNotIn('params', mocked_post.call_args.kwargs)
         self.assertEqual(
             mocked_post.call_args.kwargs['headers']['Content-Type'],
             'application/sdp',

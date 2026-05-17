@@ -1,3 +1,4 @@
+import hashlib
 import os
 from typing import Any
 
@@ -66,7 +67,8 @@ AVATAR_REACTION_INTENTS = [
     'tap_chest_reassure',
 ]
 
-REALTIME_MODEL = 'gpt-realtime-mini-2025-12-15'
+REALTIME_MODEL = 'gpt-realtime-2'
+REALTIME_CLIENT_SECRET_TTL_SECONDS = 600
 REALTIME_INPUT_AUDIO_TRANSCRIPTION_MODEL = 'gpt-4o-mini-transcribe-2025-12-15'
 REALTIME_TRANSCRIPTION_LANGUAGE_HINTS = {
     'ko-KR': ('ko', 'Korean'),
@@ -243,6 +245,13 @@ def build_realtime_transcription_prompt(expected_language_name: str) -> str:
     )
 
 
+def build_realtime_safety_identifier(uid: Any) -> str | None:
+    if not isinstance(uid, str) or not uid.strip():
+        return None
+    digest = hashlib.sha256(f'lingual-user:{uid.strip()}'.encode('utf-8')).hexdigest()
+    return f'lingual-user-{digest}'
+
+
 def build_realtime_session_request(
     system_instructions: str,
     *,
@@ -262,19 +271,43 @@ def build_realtime_session_request(
     if isinstance(transcription_prompt, str) and transcription_prompt.strip():
         input_audio_transcription['prompt'] = transcription_prompt.strip()
 
-    request_payload: dict[str, Any] = {
+    session_payload: dict[str, Any] = {
+        'type': 'realtime',
         'model': REALTIME_MODEL,
-        'voice': 'coral',
         'instructions': guarded_instructions,
-        'input_audio_transcription': input_audio_transcription,
-        'turn_detection': {
-            'type': 'server_vad',
-            'threshold': 0.7,
-            'prefix_padding_ms': 300,
-            'silence_duration_ms': 320,
-            'create_response': False,
-            'interrupt_response': True,
+        'reasoning': {'effort': 'low'},
+        'output_modalities': ['audio'],
+        'audio': {
+            'input': {
+                'format': {
+                    'type': 'audio/pcm',
+                    'rate': 24000,
+                },
+                'transcription': input_audio_transcription,
+                'turn_detection': {
+                    'type': 'server_vad',
+                    'threshold': 0.7,
+                    'prefix_padding_ms': 300,
+                    'silence_duration_ms': 320,
+                    'create_response': False,
+                    'interrupt_response': True,
+                },
+            },
+            'output': {
+                'format': {
+                    'type': 'audio/pcm',
+                    'rate': 24000,
+                },
+                'voice': 'coral',
+            },
         },
+    }
+    request_payload: dict[str, Any] = {
+        'expires_after': {
+            'anchor': 'created_at',
+            'seconds': REALTIME_CLIENT_SECRET_TTL_SECONDS,
+        },
+        'session': session_payload,
     }
 
     if not pilot_avatar_enabled():
@@ -283,11 +316,11 @@ def build_realtime_session_request(
         enable_avatar_directives = realtime_avatar_directives_enabled()
 
     if enable_avatar_directives:
-        request_payload['instructions'] = (
+        session_payload['instructions'] = (
             f'{guarded_instructions}\n\n{build_avatar_realtime_instructions()}'
         )
-        request_payload['tool_choice'] = 'auto'
-        request_payload['tools'] = [build_avatar_directive_tool()]
+        session_payload['tool_choice'] = 'auto'
+        session_payload['tools'] = [build_avatar_directive_tool()]
 
     return request_payload
 
@@ -430,12 +463,17 @@ def create_chat_blueprint(deps: RouteDeps) -> Blueprint:
                 transcription_language_name,
             )
 
+            request_headers = {
+                'Authorization': f'Bearer {api_key}',
+                'Content-Type': 'application/json',
+            }
+            safety_identifier = build_realtime_safety_identifier(uid)
+            if safety_identifier:
+                request_headers['OpenAI-Safety-Identifier'] = safety_identifier
+
             response = requests.post(
-                'https://api.openai.com/v1/realtime/sessions',
-                headers={
-                    'Authorization': f'Bearer {api_key}',
-                    'Content-Type': 'application/json',
-                },
+                'https://api.openai.com/v1/realtime/client_secrets',
+                headers=request_headers,
                 json=build_realtime_session_request(
                     system_instructions,
                     transcription_language=transcription_language,
@@ -453,9 +491,9 @@ def create_chat_blueprint(deps: RouteDeps) -> Blueprint:
             data = response.json()
             return jsonify({
                 'success': True,
-                'client_secret': data.get('client_secret', {}).get('value'),
-                'session_id': data.get('id'),
-                'expires_at': data.get('client_secret', {}).get('expires_at'),
+                'client_secret': data.get('value'),
+                'session_id': (data.get('session') or {}).get('id'),
+                'expires_at': data.get('expires_at'),
             })
 
         except PermissionError as e:
@@ -475,7 +513,6 @@ def create_chat_blueprint(deps: RouteDeps) -> Blueprint:
             payload = request.get_json(silent=True) or {}
             offer_sdp = payload.get('offerSdp')
             client_secret = payload.get('clientSecret')
-            model = payload.get('model')
 
             if not isinstance(offer_sdp, str) or not offer_sdp.strip():
                 return jsonify({'success': False, 'error': 'offerSdp is required'}), 400
@@ -483,13 +520,8 @@ def create_chat_blueprint(deps: RouteDeps) -> Blueprint:
             if not isinstance(client_secret, str) or not client_secret.strip():
                 return jsonify({'success': False, 'error': 'clientSecret is required'}), 400
 
-            normalized_model = REALTIME_MODEL
-            if isinstance(model, str) and model.strip():
-                normalized_model = model.strip()
-
             response = requests.post(
-                'https://api.openai.com/v1/realtime',
-                params={'model': normalized_model},
+                'https://api.openai.com/v1/realtime/calls',
                 headers={
                     'Authorization': f'Bearer {client_secret}',
                     'Content-Type': 'application/sdp',

@@ -90,7 +90,7 @@ describe('useRealtimeChat directive continuation', () => {
     activeDataChannel = null;
 
     apiPostMock.mockReset();
-    apiPostMock.mockImplementation(async (url: string) => {
+    apiPostMock.mockImplementation(async (url: string, body?: unknown) => {
       if (url === '/realtime/session') {
         return {
           data: {
@@ -100,6 +100,10 @@ describe('useRealtimeChat directive continuation', () => {
       }
 
       if (url === '/realtime/connect') {
+        expect(body).toEqual({
+          offerSdp: 'mock-offer-sdp',
+          clientSecret: 'test-client-secret',
+        });
         return {
           data: {
             answerSdp: 'mock-answer-sdp',

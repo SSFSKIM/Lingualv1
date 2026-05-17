@@ -114,7 +114,6 @@ const ASSISTANT_AUDIO_DONE_EVENTS = new Set([
 ]);
 
 const DIRECTIVE_TOOL_NAME = 'emit_avatar_directive';
-const REALTIME_MODEL = 'gpt-realtime-mini-2025-12-15';
 
 function createEmptyAvatarDebugStats(): AvatarDebugStats {
   return {
@@ -979,7 +978,6 @@ export function useRealtimeChat(options?: UseRealtimeChatOptions): UseRealtimeCh
       const connectResponse = await api.post('/realtime/connect', {
         offerSdp: offer.sdp,
         clientSecret: client_secret,
-        model: REALTIME_MODEL,
       });
 
       const answerSdp = connectResponse.data?.answerSdp;
