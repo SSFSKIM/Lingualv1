@@ -35,12 +35,30 @@ def create_auth_blueprint(deps: RouteDeps) -> Blueprint:
             if not id_token:
                 return jsonify({'success': False, 'error': 'No token provided'}), 400
 
+            intended_role = data.get('intended_role')
+            if intended_role and intended_role not in {'student', 'teacher', 'admin'}:
+                return jsonify({'success': False, 'error': 'Invalid intended_role'}), 400
+
             decoded_token = deps.firebase_auth.verify_id_token(id_token)
             uid = decoded_token['uid']
             email = decoded_token.get('email', '')
             name = decoded_token.get('name', email.split('@')[0] if email else 'User')
 
             deps.db.get_or_create_user(uid, email, name)
+
+            if intended_role:
+                # Persist only on first-time users — existing memberships always win.
+                existing_context = deps.db.resolve_user_school_context(uid)
+                has_active_membership = any(
+                    (m or {}).get('status') == 'active'
+                    for m in (existing_context.get('memberships') or [])
+                )
+                if not has_active_membership:
+                    deps.db.update_user_profile(
+                        uid,
+                        intended_role=intended_role,
+                        onboarding_state='role_selected',
+                    )
 
             preferred_active_membership_id = (session.get('user') or {}).get('active_membership_id')
             school_context = deps.db.resolve_user_school_context(
