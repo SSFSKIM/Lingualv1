@@ -170,7 +170,7 @@ describe('LandingPage', () => {
     });
   });
 
-  it('routes incomplete profiles to /general', async () => {
+  it('routes incomplete profiles to /signup/student/setup', async () => {
     authState.user = { uid: '1', email: 'test@example.com', name: 'Test User' };
     getUserProfileMock.mockResolvedValue({
       profileCompleted: false,
@@ -186,7 +186,7 @@ describe('LandingPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Try Demo' }));
 
     await waitFor(() => {
-      expect(navigateMock).toHaveBeenCalledWith('/general');
+      expect(navigateMock).toHaveBeenCalledWith('/signup/student/setup');
     });
   });
 });
