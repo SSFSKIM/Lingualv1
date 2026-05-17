@@ -10,6 +10,46 @@ from firebase_admin import credentials, auth as firebase_auth
 
 load_dotenv()
 
+
+def _validate_required_env() -> None:
+    """Fail fast in production (warn in dev) when required env vars are missing.
+
+    Why: otherwise missing keys surface as 500/503s at feature-use time, which
+    is far later and noisier than refusing to boot. The Canvas PAT encryption
+    key drifting out of prod caused exactly this (silent 503 on connect).
+    """
+    is_production = os.environ.get('FLASK_ENV') == 'production'
+    secret = os.environ.get('SECRET_KEY', '')
+    hard = {
+        'OPENAI_API_KEY': 'AI chat, realtime voice, and scoring will fail',
+        'SECRET_KEY': 'Flask session security (dev fallback is insecure)',
+    }
+    feature = {
+        'CANVAS_PAT_ENCRYPTION_KEY': 'Canvas connect returns 503 when a teacher clicks Connect',
+    }
+    missing_hard = [
+        f'  - {k}: {reason}'
+        for k, reason in hard.items()
+        if not os.environ.get(k)
+        or (k == 'SECRET_KEY' and secret == 'dev-secret-key-change-in-production')
+    ]
+    missing_feature = [
+        f'  - {k}: {reason}' for k, reason in feature.items() if not os.environ.get(k)
+    ]
+    if missing_hard:
+        msg = 'Required environment variables missing:\n' + '\n'.join(missing_hard)
+        if is_production:
+            raise RuntimeError(msg)
+        print(f'[startup warning] {msg}')
+    if missing_feature:
+        print(
+            '[startup warning] Feature-gated env vars missing:\n'
+            + '\n'.join(missing_feature)
+        )
+
+
+_validate_required_env()
+
 app = Flask(__name__)
 _secret_key = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
 if os.environ.get('FLASK_ENV') == 'production' and _secret_key == 'dev-secret-key-change-in-production':
