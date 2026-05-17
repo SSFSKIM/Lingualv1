@@ -1348,11 +1348,25 @@ def list_class_assignments(class_id, statuses=None):
 def get_student_class_enrollment(class_id, student_uid):
     """Get a student's enrollment for a class if it exists."""
     enrollment_doc = get_enrollment_ref(f'{class_id}_{student_uid}').get()
+    deterministic = None
     if not enrollment_doc.exists:
-        return None
-    data = enrollment_doc.to_dict() or {}
-    data['id'] = enrollment_doc.id
-    return data
+        deterministic = None
+    else:
+        deterministic = enrollment_doc.to_dict() or {}
+        deterministic['id'] = enrollment_doc.id
+        if deterministic.get('status') == 'active':
+            return deterministic
+
+    legacy_match = None
+    for enrollment in list_student_enrollments(student_uid, status=None):
+        if enrollment.get('class_id') != class_id:
+            continue
+        if enrollment.get('status') == 'active':
+            return enrollment
+        if legacy_match is None:
+            legacy_match = enrollment
+
+    return deterministic or legacy_match
 
 
 def list_student_assignments(student_uid, statuses=None):

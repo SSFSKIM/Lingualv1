@@ -277,6 +277,22 @@ class TestEnrollmentIndexes(FirestoreIndexTestBase):
         class_ids = {r.to_dict()["class_id"] for r in results}
         self.assertEqual(class_ids, {"class-1", "class-2"})
 
+    def test_query_enrollments_by_student_ordered_without_status(self):
+        """Compound query: student_uid + order_by updated_at DESC
+        (used by get_student_class_enrollment legacy fallback)."""
+        self._seed_enrollments()
+
+        results = list(
+            self.db.collection("enrollments")
+            .where("student_uid", "==", "stu-1")
+            .order_by("updated_at", direction=admin_firestore.Query.DESCENDING)
+            .stream()
+        )
+
+        self.assertEqual(len(results), 2)
+        class_ids = {r.to_dict()["class_id"] for r in results}
+        self.assertEqual(class_ids, {"class-1", "class-2"})
+
     def test_query_enrollments_by_canvas_email_status(self):
         """Compound query: canvas_email + status
         (supports historical lookup of Canvas-synced enrollments, including
