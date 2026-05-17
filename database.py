@@ -879,6 +879,37 @@ def resolve_user_school_context(uid, preferred_active_membership_id=None):
     return result
 
 
+def list_lingual_admin_emails():
+    """Return [{uid, email, name}] for every user with an active `lingual_admin` membership.
+
+    Used by outbox templates that fan out to vendor-side staff. Order is
+    deterministic by uid (alphabetical) so tests are stable.
+    """
+    membership_docs = (
+        get_memberships_collection()
+        .where('roles', 'array_contains', 'lingual_admin')
+        .stream()
+    )
+    seen_uids = set()
+    recipients = []
+    for doc in membership_docs:
+        data = doc.to_dict() or {}
+        if data.get('status') != 'active':
+            continue
+        uid = data.get('uid')
+        if not uid or uid in seen_uids:
+            continue
+        seen_uids.add(uid)
+        user = get_user(uid) or {}
+        email = user.get('email')
+        if not email:
+            continue
+        display_name = (user.get('profile') or {}).get('display_name') or user.get('name')
+        recipients.append({'uid': uid, 'email': email, 'name': display_name})
+    recipients.sort(key=lambda r: r['uid'])
+    return recipients
+
+
 def create_class(
     org_id,
     name,
