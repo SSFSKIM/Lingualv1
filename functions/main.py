@@ -128,3 +128,24 @@ def _send_outbox_email_impl(event) -> None:
 def send_outbox_email(event):
     """Send pending outbox emails. Also re-handles 'failed' docs that retry sweep promoted."""
     return _send_outbox_email_impl(event)
+
+
+def _retry_outbox_sweep_impl() -> None:
+    """Promote `failed` docs with retry budget remaining back to `pending`.
+
+    Filters in Python (rather than `.where('attempt_count', '<', N)`) so the
+    composite index requirement stays at (status, scheduled_for) for now.
+    """
+    db = fb_firestore.client()
+    query = db.collection('outbox_emails').where('status', '==', 'failed')
+    for doc in query.stream():
+        data = doc.to_dict() or {}
+        attempt_count = int(data.get('attempt_count') or 0)
+        if attempt_count < MAX_OUTBOX_ATTEMPTS:
+            doc.reference.update({'status': 'pending'})
+
+
+@scheduler_fn.on_schedule(schedule='every 5 minutes')
+def retry_outbox_sweep(event) -> None:
+    """Cloud Function wrapper: delegates to the pure impl for testability."""
+    _retry_outbox_sweep_impl()

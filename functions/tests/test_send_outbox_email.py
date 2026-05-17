@@ -232,3 +232,47 @@ class SendOutboxEmailTriggerTest(unittest.TestCase):
             ev = self._make_event({'status': 'sent', 'attempt_count': 1})
             _send_outbox_email_impl(ev)
             ev.data.after.reference.update.assert_not_called()
+
+
+class RetryOutboxSweepTest(unittest.TestCase):
+    def setUp(self):
+        sys.modules.pop('functions.main', None)
+
+    def test_failed_docs_under_max_attempts_are_repromoted(self):
+        with patch('firebase_admin.initialize_app'):
+            from functions.main import _retry_outbox_sweep_impl
+
+            doc1 = MagicMock()
+            doc1.to_dict.return_value = {'status': 'failed', 'attempt_count': 2}
+            doc1.reference = MagicMock()
+
+            doc2 = MagicMock()
+            doc2.to_dict.return_value = {'status': 'failed', 'attempt_count': 5}
+            doc2.reference = MagicMock()
+
+            mock_db = MagicMock()
+            query = MagicMock()
+            query.stream.return_value = [doc1, doc2]
+            mock_db.collection.return_value.where.return_value = query
+
+            with patch('functions.main.fb_firestore.client', return_value=mock_db):
+                _retry_outbox_sweep_impl()
+
+            # doc1 (attempt_count=2 < 5) is repromoted.
+            doc1.reference.update.assert_called_once()
+            self.assertEqual(doc1.reference.update.call_args[0][0]['status'], 'pending')
+            # doc2 (attempt_count=5 >= 5) is NOT touched.
+            doc2.reference.update.assert_not_called()
+
+    def test_empty_query_is_noop(self):
+        with patch('firebase_admin.initialize_app'):
+            from functions.main import _retry_outbox_sweep_impl
+
+            mock_db = MagicMock()
+            query = MagicMock()
+            query.stream.return_value = []
+            mock_db.collection.return_value.where.return_value = query
+
+            with patch('functions.main.fb_firestore.client', return_value=mock_db):
+                _retry_outbox_sweep_impl()
+            # No exception, no updates — passes implicitly.
