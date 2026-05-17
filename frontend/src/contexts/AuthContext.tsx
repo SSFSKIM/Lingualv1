@@ -16,7 +16,7 @@ import {
   User as FirebaseUser,
 } from 'firebase/auth';
 import { auth, googleProvider, githubProvider, facebookProvider } from '../config/firebase';
-import { verifyToken } from '../api/auth';
+import { verifyToken, type IntendedRole, type AuthRoleOptions } from '../api/auth';
 import type { User } from '../types';
 
 interface AuthContextType {
@@ -28,10 +28,14 @@ interface AuthContextType {
   updateAvatarUrl: (url: string) => void;
   refreshUser: () => Promise<void>;
   signInWithEmail: (email: string, password: string) => Promise<void>;
-  signUpWithEmail: (email: string, password: string) => Promise<void>;
+  signUpWithEmail: (
+    email: string,
+    password: string,
+    options?: AuthRoleOptions,
+  ) => Promise<void>;
   sendPasswordReset: (email: string) => Promise<void>;
   changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
-  signInWithGoogle: () => Promise<void>;
+  signInWithGoogle: (options?: AuthRoleOptions) => Promise<void>;
   linkWithGoogle: () => Promise<void>;
   linkWithGithub: () => Promise<void>;
   linkWithFacebook: () => Promise<void>;
@@ -168,14 +172,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const signUpWithEmail = async (email: string, password: string) => {
+  const signUpWithEmail = async (
+    email: string,
+    password: string,
+    options?: AuthRoleOptions,
+  ) => {
     setLoading(true);
     setError(null);
 
     try {
       const result = await createUserWithEmailAndPassword(auth, email, password);
       const idToken = await result.user.getIdToken();
-      const verifyResult = await verifyToken(idToken);
+      const verifyResult = await verifyToken(idToken, options);
 
       if (verifyResult.success && verifyResult.user) {
         setUser(verifyResult.user);
@@ -234,14 +242,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const signInWithGoogle = async () => {
+  const signInWithGoogle = async (options?: AuthRoleOptions) => {
     setLoading(true);
     setError(null);
 
     try {
       const result = await signInWithPopup(auth, googleProvider);
       const idToken = await result.user.getIdToken();
-      const verifyResult = await verifyToken(idToken);
+      const verifyResult = await verifyToken(idToken, options);
 
       if (verifyResult.success && verifyResult.user) {
         setUser(verifyResult.user);

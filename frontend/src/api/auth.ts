@@ -3,6 +3,8 @@ import type { User } from '../types';
 
 export type IntendedRole = 'student' | 'teacher' | 'admin';
 
+export type AuthRoleOptions = { intendedRole?: IntendedRole };
+
 export interface VerifyTokenResponse {
   success: boolean;
   user?: User;
@@ -11,7 +13,7 @@ export interface VerifyTokenResponse {
 
 export const verifyToken = async (
   idToken: string,
-  options: { intendedRole?: IntendedRole } = {},
+  options: AuthRoleOptions = {},
 ): Promise<VerifyTokenResponse> => {
   const body: Record<string, unknown> = { idToken };
   if (options.intendedRole) {
