@@ -10,6 +10,9 @@ export interface User {
   activeMembershipId?: string | null;
   activeOrganizationId?: string | null;
   activeRoles?: SchoolRole[];
+  intendedRole?: 'student' | 'teacher' | 'admin' | null;
+  onboardingState?: string | null;
+  requiresLegacyRolePick?: boolean;
 }
 
 // Profile form data for GeneralPage

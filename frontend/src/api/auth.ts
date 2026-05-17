@@ -1,14 +1,23 @@
 import api from './index';
 import type { User } from '../types';
 
+export type IntendedRole = 'student' | 'teacher' | 'admin';
+
 export interface VerifyTokenResponse {
   success: boolean;
   user?: User;
   error?: string;
 }
 
-export const verifyToken = async (idToken: string): Promise<VerifyTokenResponse> => {
-  const response = await api.post<VerifyTokenResponse>('/auth/verify', { idToken });
+export const verifyToken = async (
+  idToken: string,
+  options: { intendedRole?: IntendedRole } = {},
+): Promise<VerifyTokenResponse> => {
+  const body: Record<string, unknown> = { idToken };
+  if (options.intendedRole) {
+    body.intended_role = options.intendedRole;
+  }
+  const response = await api.post<VerifyTokenResponse>('/auth/verify', body);
   return response.data;
 };
 
