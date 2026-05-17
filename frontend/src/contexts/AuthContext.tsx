@@ -16,7 +16,7 @@ import {
   User as FirebaseUser,
 } from 'firebase/auth';
 import { auth, googleProvider, githubProvider, facebookProvider } from '../config/firebase';
-import { verifyToken, type IntendedRole, type AuthRoleOptions } from '../api/auth';
+import { verifyToken, type AuthRoleOptions } from '../api/auth';
 import type { User } from '../types';
 
 interface AuthContextType {
