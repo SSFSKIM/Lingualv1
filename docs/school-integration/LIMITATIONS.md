@@ -144,3 +144,14 @@ not fall out of the gap list automatically once they join.
 Planned follow-up: add a teacher-side manual "link to Canvas roster
 entry" action, and/or a second-tier match via `canvas_user_id` derived
 from LTI session history.
+
+21. Outbox email scope (v1) — 2026-05-18
+
+The Firestore `outbox_emails/` collection and the `send_outbox_email` Cloud
+Function are live, but only one template is wired end-to-end:
+`school_request_to_lingual`. Other templates listed in the onboarding spec
+(teacher join notifications, approval/decline emails, suspend/restore, reminders)
+exist as enum values but have no rendering or business-side enqueue yet.
+
+They are added in subsequent onboarding plans (Plans 3–6). Until then, the
+relevant business actions complete normally but do not produce email.
