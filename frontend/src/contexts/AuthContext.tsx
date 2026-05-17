@@ -1,11 +1,15 @@
 /* eslint-disable react-refresh/only-export-components */
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import {
+  EmailAuthProvider,
   onAuthStateChanged,
+  reauthenticateWithCredential,
+  sendPasswordResetEmail,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   signInWithPopup,
   signOut,
+  updatePassword,
   linkWithPopup,
   unlink,
   AuthProvider as FirebaseAuthProvider,
@@ -25,6 +29,8 @@ interface AuthContextType {
   refreshUser: () => Promise<void>;
   signInWithEmail: (email: string, password: string) => Promise<void>;
   signUpWithEmail: (email: string, password: string) => Promise<void>;
+  sendPasswordReset: (email: string) => Promise<void>;
+  changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
   signInWithGoogle: () => Promise<void>;
   linkWithGoogle: () => Promise<void>;
   linkWithGithub: () => Promise<void>;
@@ -35,6 +41,38 @@ interface AuthContextType {
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
+
+const getAuthErrorCode = (err: unknown) => {
+  if (typeof err === 'object' && err !== null && 'code' in err) {
+    const code = (err as { code?: unknown }).code;
+    return typeof code === 'string' ? code : undefined;
+  }
+  return undefined;
+};
+
+const getAuthErrorMessage = (err: unknown, fallback: string) => {
+  const code = getAuthErrorCode(err);
+
+  switch (code) {
+    case 'auth/invalid-email':
+      return 'Enter a valid email address.';
+    case 'auth/missing-email':
+      return 'Enter your email address.';
+    case 'auth/wrong-password':
+    case 'auth/invalid-credential':
+      return 'The current password is incorrect.';
+    case 'auth/weak-password':
+      return 'Use a password with at least 6 characters.';
+    case 'auth/requires-recent-login':
+      return 'Please sign out and sign back in, then try again.';
+    case 'auth/too-many-requests':
+      return 'Too many attempts. Please wait and try again.';
+    case 'auth/network-request-failed':
+      return 'Network error. Check your connection and try again.';
+    default:
+      return err instanceof Error ? err.message : fallback;
+  }
+};
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
@@ -153,6 +191,49 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const sendPasswordReset = async (email: string) => {
+    setError(null);
+    const trimmedEmail = email.trim();
+
+    if (!trimmedEmail) {
+      throw new Error('Enter your email address.');
+    }
+
+    try {
+      await sendPasswordResetEmail(auth, trimmedEmail);
+    } catch (err) {
+      if (getAuthErrorCode(err) === 'auth/user-not-found') {
+        return;
+      }
+
+      const message = getAuthErrorMessage(err, 'Failed to send password reset email');
+      setError(message);
+      throw new Error(message);
+    }
+  };
+
+  const changePassword = async (currentPassword: string, newPassword: string) => {
+    setError(null);
+
+    if (!auth.currentUser) {
+      throw new Error('No authenticated user');
+    }
+
+    if (!auth.currentUser.email) {
+      throw new Error('This account does not have an email address.');
+    }
+
+    try {
+      const credential = EmailAuthProvider.credential(auth.currentUser.email, currentPassword);
+      await reauthenticateWithCredential(auth.currentUser, credential);
+      await updatePassword(auth.currentUser, newPassword);
+    } catch (err) {
+      const message = getAuthErrorMessage(err, 'Failed to change password');
+      setError(message);
+      throw new Error(message);
+    }
+  };
+
   const signInWithGoogle = async () => {
     setLoading(true);
     setError(null);
@@ -229,6 +310,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         refreshUser,
         signInWithEmail,
         signUpWithEmail,
+        sendPasswordReset,
+        changePassword,
         signInWithGoogle,
         linkWithGoogle,
         linkWithGithub,
