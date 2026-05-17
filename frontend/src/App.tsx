@@ -11,13 +11,15 @@ import { TeacherRoute } from './components/layout/TeacherRoute';
 import { LingualAdminRoute } from './components/layout/LingualAdminRoute';
 import { LoadingSpinner } from './components/common';
 import { useAuth } from './hooks/useAuth';
-import { getPrivilegedHomeRoute, LEARNER_HOME_ROUTE } from './lib/homeRoutes';
+import { getOnboardingDestination, LEARNER_HOME_ROUTE } from './lib/homeRoutes';
 
 const LandingPage = lazy(() => import('./pages/LandingPage').then((module) => ({ default: module.LandingPage })));
-const AuthPage = lazy(() => import('./pages/AuthPage').then((module) => ({ default: module.AuthPage })));
+const LoginPage = lazy(() => import('./pages/LoginPage').then((module) => ({ default: module.LoginPage })));
+const SignupPage = lazy(() => import('./pages/SignupPage').then((module) => ({ default: module.SignupPage })));
+const TeacherJoinOrgPlaceholderPage = lazy(() => import('./pages/TeacherJoinOrgPlaceholderPage').then((module) => ({ default: module.TeacherJoinOrgPlaceholderPage })));
+const AdminOrgWizardPlaceholderPage = lazy(() => import('./pages/AdminOrgWizardPlaceholderPage').then((module) => ({ default: module.AdminOrgWizardPlaceholderPage })));
 const GeneralPage = lazy(() => import('./pages/GeneralPage').then((module) => ({ default: module.GeneralPage })));
 const InitialOnboardingPage = lazy(() => import('./pages/InitialOnboardingPage').then((module) => ({ default: module.InitialOnboardingPage })));
-const SchoolRequestPage = lazy(() => import('./pages/SchoolRequestPage').then((module) => ({ default: module.SchoolRequestPage })));
 const LingualSchoolRequestsPage = lazy(() => import('./pages/LingualSchoolRequestsPage').then((module) => ({ default: module.LingualSchoolRequestsPage })));
 const AssessmentPage = lazy(() => import('./pages/AssessmentPage').then((module) => ({ default: module.AssessmentPage })));
 const CategoriesPage = lazy(() => import('./pages/CategoriesPage').then((module) => ({ default: module.CategoriesPage })));
@@ -60,7 +62,7 @@ function withRouteSuspense(element: ReactNode) {
 
 function AppIndexRedirect() {
   const { user } = useAuth();
-  return <Navigate to={getPrivilegedHomeRoute(user) ?? LEARNER_HOME_ROUTE} replace />;
+  return <Navigate to={getOnboardingDestination(user) ?? LEARNER_HOME_ROUTE} replace />;
 }
 
 function AnimatedRoutes() {
@@ -71,7 +73,9 @@ function AnimatedRoutes() {
       <Routes location={location} key={location.pathname}>
         {/* Public Routes */}
         <Route path="/" element={withRouteSuspense(<LandingPage />)} />
-        <Route path="/auth" element={withRouteSuspense(<AuthPage />)} />
+        <Route path="/login" element={withRouteSuspense(<LoginPage />)} />
+        <Route path="/signup" element={withRouteSuspense(<SignupPage />)} />
+        <Route path="/auth" element={<Navigate to="/login" replace />} />
         <Route path="/guardian/consent/:token" element={withRouteSuspense(<GuardianConsentPage />)} />
         <Route path="/compliance" element={withRouteSuspense(<CompliancePage />)} />
         <Route path="/lti/link-account" element={withRouteSuspense(<LtiLinkAccountPage />)} />
@@ -80,8 +84,11 @@ function AnimatedRoutes() {
         {/* Protected Routes */}
         <Route element={<ProtectedRoute />}>
           <Route path="/general" element={withRouteSuspense(<GeneralPage />)} />
+          <Route path="/signup/student/setup" element={withRouteSuspense(<GeneralPage />)} />
+          <Route path="/signup/teacher/join-org" element={withRouteSuspense(<TeacherJoinOrgPlaceholderPage />)} />
+          <Route path="/signup/admin/org-wizard" element={withRouteSuspense(<AdminOrgWizardPlaceholderPage />)} />
           <Route path="/onboarding" element={withRouteSuspense(<InitialOnboardingPage />)} />
-          <Route path="/school/setup" element={withRouteSuspense(<SchoolRequestPage />)} />
+          <Route path="/school/setup" element={<Navigate to="/signup/admin/org-wizard" replace />} />
           <Route path="/assessment" element={withRouteSuspense(<AssessmentPage />)} />
           <Route path="/categories" element={withRouteSuspense(<CategoriesPage />)} />
           <Route path="/chat" element={<Navigate to="/app/chat" replace />} />
