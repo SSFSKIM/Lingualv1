@@ -4,12 +4,13 @@
 
 **Goal:** Replace the single `/auth` page with a purpose-built `/login` + `/signup` pair, drive post-auth navigation from a role + onboarding-state dispatcher, and anchor the existing student setup flow at the canonical `/signup/student/setup` URL. Visible behavior for student learners is preserved; teacher and admin signup paths render a placeholder until Plans 3 and 4 land.
 
-**Architecture:** Three layers.
-1. **Auth surface:** extend `AuthContext.signUpWithEmail` and `signInWithGoogle` to forward the user's chosen `intendedRole` to `/api/auth/verify` (Plan 1 already accepts it). `signInWithEmail` stays role-blind.
-2. **Routing:** introduce `getOnboardingDestination(user)` in `lib/homeRoutes.ts` — a pure dispatcher that maps `(memberships, onboarding_state, intended_role, requires_legacy_role_pick)` to the right route. Every post-auth caller funnels through it.
-3. **Signup UX:** new `SignupPage` is a two-step shell. Step 1 (`RolePicker`) writes role to local state; Step 2 (`AccountCreator`) creates the Firebase account and dispatches by role. Teacher and admin lead to thin "Coming soon" placeholder pages so the dispatcher always lands somewhere coherent before Plans 3 and 4 ship.
+**Architecture:** Four layers.
+1. **Auth payload (backend):** close a pre-existing gap by emitting `lingualAdmin` from `/api/auth/verify` — declared on the frontend `User` type and read by the dispatcher, but never populated by Plan 1's payload builder. Surfaced as the union of the legacy `users/{uid}.lingual_admin` flag and any active `lingual_admin` membership role, mirroring Plan 1's `list_lingual_admin_emails` helper.
+2. **Auth surface (frontend):** extend `AuthContext.signUpWithEmail` and `signInWithGoogle` to forward the user's chosen `intendedRole` to `/api/auth/verify` (Plan 1 already accepts it). `signInWithEmail` stays role-blind.
+3. **Routing:** introduce `getOnboardingDestination(user)` in `lib/homeRoutes.ts` — a pure dispatcher that maps `(lingualAdmin, memberships, onboarding_state, intended_role, requires_legacy_role_pick)` to the right route. Every post-auth caller funnels through it.
+4. **Signup UX:** new `SignupPage` is a two-step shell. Step 1 (`RolePicker`) writes role to local state; Step 2 (`AccountCreator`) creates the Firebase account and dispatches by role. Teacher and admin lead to thin "Coming soon" placeholder pages so the dispatcher always lands somewhere coherent before Plans 3 and 4 ship.
 
-**Tech Stack:** React 19 + TypeScript, React Router v7, Vitest + React Testing Library, Tailwind 4, Framer Motion. Backend untouched in this plan.
+**Tech Stack:** Flask + Firebase Admin (backend, one small payload change), React 19 + TypeScript, React Router v7, Vitest + React Testing Library, Tailwind 4, Framer Motion.
 
 **Spec reference:** `docs/superpowers/specs/2026-05-18-teacher-school-onboarding-design.md` — sections 1 and 2, plus the rollout-plan phases 3 and 4.
 
@@ -28,7 +29,11 @@
 
 | Action | Path | Responsibility |
 |---|---|---|
-| Modify | `frontend/src/contexts/AuthContext.tsx` | `signUpWithEmail` and `signInWithGoogle` take `{ intendedRole }` and forward to `verifyToken` |
+| Modify | `database.py` | `resolve_user_school_context` adds a `lingual_admin` bool (union of `users/{uid}.lingual_admin == True` and active `lingual_admin` membership role) |
+| Modify | `backend/routes/auth.py` | `build_auth_user_payload` emits `lingualAdmin` |
+| Create | `backend/tests/test_auth_lingual_admin_payload.py` | Asserts both legacy and membership-derived Lingual admins get `lingualAdmin: true` |
+| Modify | `frontend/src/contexts/AuthContext.tsx` | `signUpWithEmail` and `signInWithGoogle` take `{ intendedRole }` and forward to `verifyToken`; `signInWithEmail` stays role-blind |
+| Create | `frontend/src/contexts/AuthContext.test.tsx` | `intendedRole` forwarding tests + signInWithEmail role-blind contract |
 | Modify | `frontend/src/lib/homeRoutes.ts` | Add `getOnboardingDestination(user)` dispatcher; keep `getPrivilegedHomeRoute` as a thin alias for back-compat |
 | Create | `frontend/src/lib/homeRoutes.test.ts` | Unit tests for dispatcher matrix |
 | Create | `frontend/src/components/signup/RolePicker.tsx` | Three-card role selector (controlled component) |
@@ -50,7 +55,196 @@
 
 ---
 
-## Task 1: Forward `intendedRole` through `AuthContext.signUpWithEmail` and `signInWithGoogle`
+## Task 1: Emit `lingualAdmin` in `/api/auth/verify` payload
+
+**Files:**
+- Modify: `database.py` — extend `resolve_user_school_context`
+- Modify: `backend/routes/auth.py` — extend `build_auth_user_payload`
+- Create: `backend/tests/test_auth_lingual_admin_payload.py`
+
+**Why:** The frontend `User` type already declares `lingualAdmin?: boolean` (`frontend/src/types/index.ts:8`) and the existing `LingualAdminRoute` and the new `getOnboardingDestination` dispatcher both gate on it. But the backend never populates the field. As a result, any Lingual admin authorized only by the legacy `users/{uid}.lingual_admin == True` flag (no `lingual_admin` membership row) silently fails the dispatcher's first check and lands on the signup role picker — a regression introduced when Plan 2's dispatcher starts treating that field as authoritative. The fix mirrors Plan 1's `list_lingual_admin_emails` helper (`database.py:882-920`): union the legacy flag and the membership role. This task closes the gap before any new code consumes the field.
+
+- [ ] **Step 1: Write the failing test**
+
+Create `backend/tests/test_auth_lingual_admin_payload.py`:
+
+```python
+import unittest
+from unittest.mock import MagicMock
+
+import database
+
+
+class ResolveUserSchoolContextLingualAdminTests(unittest.TestCase):
+    """`resolve_user_school_context` must set `lingual_admin` from the union of
+    (a) the legacy `users/{uid}.lingual_admin` boolean and (b) any active
+    membership whose roles include 'lingual_admin'."""
+
+    def setUp(self):
+        self.original_get_db = database.get_db
+        self.original_get_user_memberships = database.get_user_memberships
+        self.original_get_user = database.get_user
+        self.original_is_legacy = database.is_legacy_user_needing_role_pick
+
+    def tearDown(self):
+        database.get_db = self.original_get_db
+        database.get_user_memberships = self.original_get_user_memberships
+        database.get_user = self.original_get_user
+        database.is_legacy_user_needing_role_pick = self.original_is_legacy
+
+    def _patch(self, *, user_doc, memberships):
+        database.get_user_memberships = MagicMock(return_value=memberships)
+        database.get_user = MagicMock(return_value=user_doc)
+        database.is_legacy_user_needing_role_pick = MagicMock(return_value=False)
+
+    def test_legacy_flag_alone_grants_lingual_admin(self):
+        self._patch(
+            user_doc={'lingual_admin': True, 'profile': {}},
+            memberships=[],
+        )
+        ctx = database.resolve_user_school_context('uid-legacy')
+        self.assertTrue(ctx['lingual_admin'])
+
+    def test_membership_role_alone_grants_lingual_admin(self):
+        self._patch(
+            user_doc={'profile': {}},
+            memberships=[{
+                'id': 'm1',
+                'orgId': 'org-1',
+                'status': 'active',
+                'roles': ['lingual_admin'],
+            }],
+        )
+        ctx = database.resolve_user_school_context('uid-membership')
+        self.assertTrue(ctx['lingual_admin'])
+
+    def test_inactive_membership_does_not_grant(self):
+        self._patch(
+            user_doc={'profile': {}},
+            memberships=[{
+                'id': 'm1',
+                'orgId': 'org-1',
+                'status': 'revoked',
+                'roles': ['lingual_admin'],
+            }],
+        )
+        ctx = database.resolve_user_school_context('uid-revoked')
+        self.assertFalse(ctx['lingual_admin'])
+
+    def test_no_signal_returns_false(self):
+        self._patch(
+            user_doc={'profile': {}},
+            memberships=[],
+        )
+        ctx = database.resolve_user_school_context('uid-plain')
+        self.assertFalse(ctx['lingual_admin'])
+
+
+class BuildAuthUserPayloadLingualAdminTests(unittest.TestCase):
+    def test_payload_exposes_lingual_admin(self):
+        from backend.routes.auth import build_auth_user_payload
+
+        payload = build_auth_user_payload(
+            uid='u1',
+            email='admin@lingual.app',
+            name='Admin',
+            school_context={
+                'memberships': [],
+                'active_membership_id': None,
+                'active_organization_id': None,
+                'active_roles': [],
+                'lingual_admin': True,
+            },
+        )
+        self.assertTrue(payload['lingualAdmin'])
+
+    def test_payload_defaults_lingual_admin_false_when_missing(self):
+        from backend.routes.auth import build_auth_user_payload
+
+        payload = build_auth_user_payload(
+            uid='u1',
+            email='student@school.edu',
+            name='Student',
+            school_context={
+                'memberships': [],
+                'active_membership_id': None,
+                'active_organization_id': None,
+                'active_roles': [],
+            },
+        )
+        self.assertFalse(payload['lingualAdmin'])
+
+
+if __name__ == '__main__':
+    unittest.main()
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `python3 -m unittest backend.tests.test_auth_lingual_admin_payload -v`
+Expected: FAIL — `KeyError: 'lingual_admin'` on the first two test methods (the dict doesn't include the key); `KeyError: 'lingualAdmin'` on the payload tests.
+
+- [ ] **Step 3: Add `lingual_admin` to `resolve_user_school_context`**
+
+In `database.py`, locate `resolve_user_school_context` (around line 846). After the existing block that sets `result['requires_legacy_role_pick'] = ...`, add:
+
+```python
+    # Surface Lingual-admin authority for the auth payload + frontend routing.
+    # Mirrors the union used in `list_lingual_admin_emails`: legacy flag OR
+    # any active membership whose roles include 'lingual_admin'.
+    legacy_flag = bool(user_doc.get('lingual_admin'))
+    has_active_lingual_admin_role = any(
+        (m or {}).get('status') == 'active'
+        and 'lingual_admin' in ((m or {}).get('roles') or [])
+        for m in (result.get('memberships') or [])
+    )
+    result['lingual_admin'] = legacy_flag or has_active_lingual_admin_role
+```
+
+Place it just before `return result`.
+
+- [ ] **Step 4: Add `lingualAdmin` to `build_auth_user_payload`**
+
+In `backend/routes/auth.py`, modify `build_auth_user_payload` (lines 7-20). Add a new key:
+
+```python
+def build_auth_user_payload(uid, email, name, school_context):
+    """Build the auth payload returned to the frontend."""
+    return {
+        'uid': uid,
+        'email': email,
+        'name': name,
+        'memberships': school_context.get('memberships', []),
+        'activeMembershipId': school_context.get('active_membership_id'),
+        'activeOrganizationId': school_context.get('active_organization_id'),
+        'activeRoles': school_context.get('active_roles', []),
+        'intendedRole': school_context.get('intended_role'),
+        'onboardingState': school_context.get('onboarding_state'),
+        'requiresLegacyRolePick': bool(school_context.get('requires_legacy_role_pick')),
+        'lingualAdmin': bool(school_context.get('lingual_admin')),
+    }
+```
+
+- [ ] **Step 5: Run tests to verify they pass**
+
+Run: `python3 -m unittest backend.tests.test_auth_lingual_admin_payload -v`
+Expected: PASS (6 cases).
+
+Then run the broader auth + Plan 1 suites to confirm no regression:
+
+Run: `python3 -m unittest backend.tests.test_auth_intended_role backend.tests.test_user_onboarding_fields -v`
+Expected: PASS (the tests Plan 1 added).
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add database.py backend/routes/auth.py backend/tests/test_auth_lingual_admin_payload.py
+git commit -m "feat(auth): emit lingualAdmin in /api/auth/verify payload"
+```
+
+---
+
+## Task 2: Forward `intendedRole` through `AuthContext.signUpWithEmail` and `signInWithGoogle`
 
 **Files:**
 - Modify: `frontend/src/contexts/AuthContext.tsx`
@@ -118,6 +312,14 @@ function CallGoogle({ role }: { role?: 'student' | 'teacher' | 'admin' }) {
   return <div>ready</div>;
 }
 
+function CallSignIn() {
+  const { signInWithEmail } = useAuth();
+  useEffect(() => {
+    signInWithEmail('a@b.test', 'password123');
+  }, [signInWithEmail]);
+  return <div>ready</div>;
+}
+
 describe('AuthContext intendedRole forwarding', () => {
   beforeEach(() => {
     verifyTokenMock.mockReset();
@@ -159,6 +361,24 @@ describe('AuthContext intendedRole forwarding', () => {
     await waitFor(() => {
       expect(verifyTokenMock).toHaveBeenCalledWith('id-token-signup', undefined);
     });
+  });
+
+  it('signInWithEmail never forwards intendedRole (role-blind contract)', async () => {
+    render(
+      <AuthProvider>
+        <CallSignIn />
+      </AuthProvider>,
+    );
+    await screen.findByText('ready');
+    await waitFor(() => {
+      expect(verifyTokenMock).toHaveBeenCalledWith('id-token-signin');
+    });
+    // The second argument must be omitted entirely — login is for returning
+    // users whose role comes from their memberships, not from a UI selection.
+    const calls = verifyTokenMock.mock.calls;
+    const signInCall = calls.find((c) => c[0] === 'id-token-signin');
+    expect(signInCall).toBeDefined();
+    expect(signInCall).toHaveLength(1);
   });
 });
 ```
@@ -248,7 +468,7 @@ Note: only the third argument of `signUpWithEmail` and the new argument of `sign
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `cd frontend && npm run test -- --run src/contexts/AuthContext.test.tsx`
-Expected: PASS, all three cases.
+Expected: PASS, all four cases.
 
 - [ ] **Step 5: Commit**
 
@@ -259,7 +479,7 @@ git commit -m "feat(auth): forward intendedRole through signUpWithEmail and sign
 
 ---
 
-## Task 2: Add `getOnboardingDestination` dispatcher in `homeRoutes.ts`
+## Task 3: Add `getOnboardingDestination` dispatcher in `homeRoutes.ts`
 
 **Files:**
 - Modify: `frontend/src/lib/homeRoutes.ts`
@@ -277,7 +497,6 @@ import {
   getOnboardingDestination,
   LEARNER_HOME_ROUTE,
   TEACHER_HOME_ROUTE,
-  ADMIN_HOME_ROUTE,
   LINGUAL_ADMIN_HOME_ROUTE,
   STUDENT_SETUP_ROUTE,
   TEACHER_JOIN_ORG_ROUTE,
@@ -402,7 +621,9 @@ import type { SchoolRole } from '@/types/school';
 // ── Routes the dispatcher can return ───────────────────────────────────────
 export const LEARNER_HOME_ROUTE = '/app/learn';
 export const TEACHER_HOME_ROUTE = '/app/teacher';
-export const ADMIN_HOME_ROUTE = '/app/admin/school-requests';
+// Lingual admins land at the existing school-requests page until Plan 5
+// moves this surface to /app/lingual-admin/requests. Plan 3 will add a
+// distinct SCHOOL_ADMIN_HOME_ROUTE ('/app/admin') for school_admin users.
 export const LINGUAL_ADMIN_HOME_ROUTE = '/app/admin/school-requests';
 
 export const STUDENT_SETUP_ROUTE = '/signup/student/setup';
@@ -424,6 +645,9 @@ function activeRoles(user: User): Set<SchoolRole> {
 /**
  * Returns the route a privileged user should land on after sign-in.
  * Kept for callers that have not yet migrated to `getOnboardingDestination`.
+ *
+ * Note: relies on `user.lingualAdmin` being set by the backend. Task 1 closed
+ * the gap where this field was declared but never populated.
  */
 export function getPrivilegedHomeRoute(user: User | null | undefined): string | null {
   if (!user) return null;
@@ -456,6 +680,8 @@ export function getOnboardingDestination(user: User | null | undefined): string 
 
   // 2) Active memberships
   const roles = activeRoles(user);
+  // TEMP: school_admin shares teacher home until Plan 3 ships /app/admin.
+  // When SCHOOL_ADMIN_HOME_ROUTE lands, split this into two branches.
   if (roles.has('school_admin') || roles.has('teacher')) {
     return TEACHER_HOME_ROUTE;
   }
@@ -498,7 +724,7 @@ git commit -m "feat(routing): add getOnboardingDestination dispatcher with onboa
 
 ---
 
-## Task 3: Create the `RolePicker` component
+## Task 4: Create the `RolePicker` component
 
 **Files:**
 - Create: `frontend/src/components/signup/RolePicker.tsx`
@@ -658,7 +884,7 @@ git commit -m "feat(signup): add RolePicker component"
 
 ---
 
-## Task 4: Create the `AccountCreator` component
+## Task 5: Create the `AccountCreator` component
 
 **Files:**
 - Create: `frontend/src/components/signup/AccountCreator.tsx`
@@ -710,6 +936,26 @@ describe('AccountCreator', () => {
     fireEvent.click(screen.getByRole('button', { name: /continue with google/i }));
     await waitFor(() => {
       expect(googleMock).toHaveBeenCalledWith({ intendedRole: 'admin' });
+    });
+  });
+
+  it('invokes onSuccess after a successful Google signup', async () => {
+    const onSuccess = vi.fn();
+    render(<AccountCreator intendedRole="teacher" onSuccess={onSuccess} />);
+    fireEvent.click(screen.getByRole('button', { name: /continue with google/i }));
+    await waitFor(() => {
+      expect(onSuccess).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('does not call onSuccess when Google signup throws', async () => {
+    googleMock.mockRejectedValueOnce(new Error('popup-closed'));
+    const onSuccess = vi.fn();
+    render(<AccountCreator intendedRole="teacher" onSuccess={onSuccess} />);
+    fireEvent.click(screen.getByRole('button', { name: /continue with google/i }));
+    await waitFor(() => {
+      expect(googleMock).toHaveBeenCalled();
+      expect(onSuccess).not.toHaveBeenCalled();
     });
   });
 
@@ -855,7 +1101,7 @@ export { AccountCreator, type AccountCreatorProps } from './AccountCreator';
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `cd frontend && npm run test -- --run src/components/signup/AccountCreator.test.tsx`
-Expected: PASS (4 cases).
+Expected: PASS (6 cases).
 
 - [ ] **Step 5: Commit**
 
@@ -866,7 +1112,7 @@ git commit -m "feat(signup): add AccountCreator component that forwards intended
 
 ---
 
-## Task 5: Build the `LoginPage`
+## Task 6: Build the `LoginPage`
 
 **Files:**
 - Create: `frontend/src/pages/LoginPage.tsx`
@@ -1314,7 +1560,7 @@ git commit -m "feat(auth): add LoginPage for existing-account sign-in"
 
 ---
 
-## Task 6: Build the `SignupPage` shell
+## Task 7: Build the `SignupPage` shell
 
 **Files:**
 - Create: `frontend/src/pages/SignupPage.tsx`
@@ -1401,19 +1647,37 @@ describe('SignupPage', () => {
     expect(screen.queryByRole('button', { name: /create account/i })).not.toBeInTheDocument();
   });
 
-  it('on signup success navigates to the dispatcher destination', async () => {
+  it('triggers signup with the picked role when Create account is clicked', async () => {
     renderAt('/signup?role=student');
     fireEvent.click(screen.getByRole('button', { name: /continue/i }));
     fireEvent.change(screen.getByLabelText(/email/i), { target: { value: 'a@b.test' } });
     fireEvent.change(screen.getByLabelText(/password/i), { target: { value: 'hunter22' } });
-    // Simulate AuthContext updating user after signup so the page navigates.
-    signUpMock.mockImplementation(async () => {
-      mockUser = { uid: 'u1', email: 'a@b.test', name: 'A', intendedRole: 'student' };
-    });
     fireEvent.click(screen.getByRole('button', { name: /create account/i }));
     await waitFor(() => {
-      expect(navigateMock).toHaveBeenCalledWith('/signup/student/setup', { replace: true });
+      expect(signUpMock).toHaveBeenCalledWith(
+        'a@b.test',
+        'hunter22',
+        { intendedRole: 'student' },
+      );
     });
+  });
+
+  it('navigates to the dispatcher destination once an authenticated user is present', () => {
+    // Note: we don't try to simulate the user appearing after a signup call
+    // (which would require triggering a React re-render from outside the
+    // component tree). Instead we render the page with `mockUser` already
+    // set — exercising the on-mount useEffect that routes returning users
+    // through the dispatcher. The "signup completes → state updates →
+    // navigation" chain is covered by an E2E smoke check in Task 14.
+    mockUser = {
+      uid: 'u1',
+      email: 'a@b.test',
+      name: 'A',
+      intendedRole: 'teacher',
+      onboardingState: 'role_selected',
+    };
+    renderAt('/signup?role=teacher');
+    expect(navigateMock).toHaveBeenCalledWith('/signup/teacher/join-org', { replace: true });
   });
 });
 ```
@@ -1565,7 +1829,7 @@ export function SignupPage() {
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `cd frontend && npm run test -- --run src/pages/SignupPage.test.tsx`
-Expected: PASS (5 cases).
+Expected: PASS (6 cases).
 
 - [ ] **Step 5: Commit**
 
@@ -1576,7 +1840,7 @@ git commit -m "feat(signup): add SignupPage two-step shell"
 
 ---
 
-## Task 7: Build placeholder pages for teacher and admin Step 3
+## Task 8: Build placeholder pages for teacher and admin Step 3
 
 **Files:**
 - Create: `frontend/src/pages/TeacherJoinOrgPlaceholderPage.tsx`
@@ -1733,7 +1997,7 @@ git commit -m "feat(signup): add Teacher and Admin Step 3 placeholders"
 
 ---
 
-## Task 8: Wire new routes and legacy redirects in `App.tsx`
+## Task 9: Wire new routes and legacy redirects in `App.tsx`
 
 **Files:**
 - Modify: `frontend/src/App.tsx`
@@ -1824,7 +2088,7 @@ Stop the dev server before continuing.
 - [ ] **Step 3: Run the full frontend test suite**
 
 Run: `cd frontend && npm run test -- --run`
-Expected: all tests pass. (One known failure: `frontend/src/pages/AuthPage.test.tsx` may still pass for now because the file still exists — that's removed in Task 12.)
+Expected: all tests pass. (One known failure: `frontend/src/pages/AuthPage.test.tsx` may still pass for now because the file still exists — that's removed in Task 13.)
 
 - [ ] **Step 4: Commit**
 
@@ -1835,7 +2099,7 @@ git commit -m "feat(routing): wire /login, /signup, Step 3 routes, and legacy re
 
 ---
 
-## Task 9: Update `ProtectedRoute` to redirect to `/login`
+## Task 10: Update `ProtectedRoute` to redirect to `/login`
 
 **Files:**
 - Modify: `frontend/src/components/layout/ProtectedRoute.tsx`
@@ -1937,11 +2201,11 @@ export function ProtectedRoute() {
 }
 ```
 
-Also check `AppProtectedRoute` and `TeacherRoute`. If either of them redirects to `/auth`, change to `/login` for consistency. Read the files:
+**Mechanical sister edits** — same single-line change in `AppProtectedRoute` and `TeacherRoute`. These guards share the redirect-to-`/auth` pattern with `ProtectedRoute`; the only differences are the surrounding layout. The dispatcher tests in Task 3 and the `ProtectedRoute.test.tsx` written above already cover the underlying logic. We accept these two edits as mechanical without dedicated tests in this plan; if a future change makes them diverge from the simple "redirect unauth → /login" rule, that change should add tests at the same time.
 
-Run: `cd frontend && grep -n "/auth" src/components/layout/*.tsx`
+Run: `cd frontend && grep -n "'/auth'" src/components/layout/*.tsx`
 
-For each match, change `'/auth'` → `'/login'`. Keep the `state={{ from: location }}` clauses intact.
+For each match outside `ProtectedRoute.tsx`, change `'/auth'` → `'/login'`. Keep the `state={{ from: location }}` clauses intact. Expected files: `AppProtectedRoute.tsx`, `TeacherRoute.tsx`. If grep returns no results in either, skip — they're already correct.
 
 - [ ] **Step 4: Run tests to verify**
 
@@ -1963,7 +2227,7 @@ git commit -m "feat(routing): redirect unauthenticated users to /login instead o
 
 ---
 
-## Task 10: Update `LandingPage` with role-aware CTAs
+## Task 11: Update `LandingPage` with role-aware CTAs
 
 **Files:**
 - Modify: `frontend/src/pages/LandingPage.tsx`
@@ -2085,7 +2349,7 @@ git commit -m "feat(landing): split Get Started into three role-aware CTAs"
 
 ---
 
-## Task 11: Migrate remaining `getPrivilegedHomeRoute` callers to the new dispatcher
+## Task 12: Migrate remaining `getPrivilegedHomeRoute` callers to the new dispatcher
 
 **Files:**
 - Modify: `frontend/src/pages/GeneralPage.tsx`
@@ -2167,13 +2431,13 @@ git commit -m "refactor(routing): use getOnboardingDestination in learner setup 
 
 ---
 
-## Task 12: Remove the legacy `AuthPage`
+## Task 13: Remove the legacy `AuthPage`
 
 **Files:**
 - Delete: `frontend/src/pages/AuthPage.tsx`
 - Delete: `frontend/src/pages/AuthPage.test.tsx`
 
-**Why:** `AuthPage` is no longer imported (Task 8 swapped the lazy import). The `/auth` route is now a `Navigate` element, not a page render. Deleting the file prevents code rot and makes the new pages the only auth surface a reader sees.
+**Why:** `AuthPage` is no longer imported (Task 9 swapped the lazy import). The `/auth` route is now a `Navigate` element, not a page render. Deleting the file prevents code rot and makes the new pages the only auth surface a reader sees.
 
 - [ ] **Step 1: Confirm no remaining references**
 
@@ -2204,7 +2468,7 @@ git commit -m "chore(auth): remove legacy AuthPage in favor of LoginPage and Sig
 
 ---
 
-## Task 13: End-to-end smoke check on dev server
+## Task 14: End-to-end smoke check on dev server
 
 **Files:** none modified — this is a manual verification gate.
 
@@ -2264,21 +2528,22 @@ If any step fails, file the failure mode in a follow-up comment on this plan. Ot
 
 | Spec requirement | Plan task |
 |---|---|
-| §1 `/login`, `/signup`, `/signup/student/setup`, `/signup/teacher/join-org`, `/signup/admin/org-wizard` routes | Tasks 5, 6, 7, 8 |
-| §1 `/auth` → `/login` permanent redirect | Task 8 |
-| §1 `/school/setup` → `/signup/admin/org-wizard` permanent redirect | Task 8 |
-| §1 role-aware dispatcher driven by memberships + `onboarding_state` + `intended_role` | Task 2 |
-| §1 Landing page hero with three role-aware CTAs | Task 10 |
-| §1 `ProtectedRoute` redirects unauth users to `/login` not `/auth` | Task 9 |
-| §2 Step 1 role picker pre-selects from `?role=` | Tasks 3, 6 |
-| §2 Step 2 account creation (Google + email/password) forwards `intendedRole` | Tasks 1, 4, 6 |
-| §2 Edge case: change role mid-flow | Task 6 (`Change role` button) |
-| §2 Edge case: returning user with existing memberships bypasses signup | Tasks 2, 6 (effect bounces through dispatcher) |
-| §2 Edge case: Google account already linked to existing role → existing memberships win | Task 2 (membership precedes `intendedRole` in dispatcher) |
-| §7 Legacy users without `intendedRole` fall back to existing student flow | Task 2 (`requiresLegacyRolePick` → `STUDENT_SETUP_ROUTE` until Plan 6) |
+| §1 Lingual admin flag emitted by `/api/auth/verify` (closes pre-existing gap) | Task 1 |
+| §1 `/login`, `/signup`, `/signup/student/setup`, `/signup/teacher/join-org`, `/signup/admin/org-wizard` routes | Tasks 6, 7, 8, 9 |
+| §1 `/auth` → `/login` permanent redirect | Task 9 |
+| §1 `/school/setup` → `/signup/admin/org-wizard` permanent redirect | Task 9 |
+| §1 role-aware dispatcher driven by memberships + `onboarding_state` + `intended_role` | Task 3 |
+| §1 Landing page hero with three role-aware CTAs | Task 11 |
+| §1 `ProtectedRoute` redirects unauth users to `/login` not `/auth` | Task 10 |
+| §2 Step 1 role picker pre-selects from `?role=` | Tasks 4, 7 |
+| §2 Step 2 account creation (Google + email/password) forwards `intendedRole` | Tasks 2, 5, 7 |
+| §2 Edge case: change role mid-flow | Task 7 (`Change role` button) |
+| §2 Edge case: returning user with existing memberships bypasses signup | Tasks 3, 7 (effect bounces through dispatcher) |
+| §2 Edge case: Google account already linked to existing role → existing memberships win | Task 3 (membership precedes `intendedRole` in dispatcher) |
+| §7 Legacy users without `intendedRole` fall back to existing student flow | Task 3 (`requiresLegacyRolePick` → `STUDENT_SETUP_ROUTE` until Plan 6) |
 
 **Placeholder scan:** the `TeacherJoinOrgPlaceholderPage` and `AdminOrgWizardPlaceholderPage` files are *intentional* placeholders, called out as such in the file structure table and the spec rollout plan. They satisfy spec §2's "dispatcher must always land somewhere coherent" requirement while Plans 3 and 4 build the real surfaces. No "TODO" or "fill in" strings appear in any committed code or test.
 
-**Type consistency:** `SignupRole` (`'student' | 'teacher' | 'admin'`) used by `RolePicker`, `AccountCreator`, and `SignupPage` matches the `IntendedRole` exported from `frontend/src/api/auth.ts:4` and the `User.intendedRole` field in `frontend/src/types/index.ts:13`. Route constants (`STUDENT_SETUP_ROUTE`, `TEACHER_JOIN_ORG_ROUTE`, `ADMIN_ORG_WIZARD_ROUTE`, `ROLE_PICKER_ROUTE`, `LINGUAL_ADMIN_HOME_ROUTE`) are defined exactly once in `homeRoutes.ts` (Task 2) and imported by everything downstream.
+**Type consistency:** `SignupRole` (`'student' | 'teacher' | 'admin'`) used by `RolePicker`, `AccountCreator`, and `SignupPage` matches the `IntendedRole` exported from `frontend/src/api/auth.ts:4` and the `User.intendedRole` field in `frontend/src/types/index.ts:13`. Route constants (`STUDENT_SETUP_ROUTE`, `TEACHER_JOIN_ORG_ROUTE`, `ADMIN_ORG_WIZARD_ROUTE`, `ROLE_PICKER_ROUTE`, `LINGUAL_ADMIN_HOME_ROUTE`) are defined exactly once in `homeRoutes.ts` (Task 3) and imported by everything downstream. The dead `ADMIN_HOME_ROUTE` constant was removed in Task 3 — Plan 3 will introduce a properly-named `SCHOOL_ADMIN_HOME_ROUTE` when the `/app/admin` dashboard ships.
 
 **Scope check:** twelve implementation tasks plus a manual smoke check, all touching a single layer (frontend routing + signup UX). Plan 1 already shipped the backend contract this depends on. Plans 3-6 replace the placeholders and add the modal without revisiting any file this plan touches.
