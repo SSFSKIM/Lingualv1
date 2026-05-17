@@ -17,6 +17,7 @@ def build_auth_user_payload(uid, email, name, school_context):
         'intendedRole': school_context.get('intended_role'),
         'onboardingState': school_context.get('onboarding_state'),
         'requiresLegacyRolePick': bool(school_context.get('requires_legacy_role_pick')),
+        'lingualAdmin': bool(school_context.get('lingual_admin')),
     }
 
 

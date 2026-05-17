@@ -876,6 +876,17 @@ def resolve_user_school_context(uid, preferred_active_membership_id=None):
         user_doc, result.get('memberships') or []
     )
 
+    # Surface Lingual-admin authority for the auth payload + frontend routing.
+    # Mirrors the union used in `list_lingual_admin_emails`: legacy flag OR
+    # any active membership whose roles include 'lingual_admin'.
+    legacy_flag = bool(user_doc.get('lingual_admin'))
+    has_active_lingual_admin_role = any(
+        (m or {}).get('status') == 'active'
+        and 'lingual_admin' in ((m or {}).get('roles') or [])
+        for m in (result.get('memberships') or [])
+    )
+    result['lingual_admin'] = legacy_flag or has_active_lingual_admin_role
+
     return result
 
 
