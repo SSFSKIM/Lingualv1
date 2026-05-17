@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime
 import os
 from pathlib import Path
 from typing import Any, Optional
@@ -73,12 +74,18 @@ MAX_OUTBOX_ATTEMPTS = 5
 
 
 def _send_outbox_email_impl(event) -> None:
-    """Business logic for send_outbox_email; extracted so tests can call it directly."""
+    """Business logic for send_outbox_email; extracted so tests can call it directly.
+
+    Only processes docs with status='pending'. All other statuses (including
+    'failed') are ignored here. The retry sweep promotes failed→pending, and
+    that promotion write fires this trigger again — so the trigger never sees
+    'failed' directly.
+    """
     if event.data is None or event.data.after is None:
         return
     after = event.data.after.to_dict() or {}
     status = after.get('status')
-    if status not in ('pending', 'failed'):
+    if status != 'pending':
         return
 
     ref = event.data.after.reference
@@ -125,28 +132,54 @@ def _send_outbox_email_impl(event) -> None:
 
 
 # Use on_document_written (not on_document_created) so the retry sweep's
-# 'failed' -> 'pending' status update re-triggers this function. The
-# early-exit guard on line 81 prevents loops by ignoring non-actionable
-# statuses ('sending', 'sent', 'sent_dev', 'dead_letter').
+# 'failed' -> 'pending' promotion write re-triggers this function. The
+# trigger only processes status='pending'; all other statuses ('failed',
+# 'sending', 'sent', 'sent_dev', 'dead_letter') are ignored by the
+# early-exit guard. The sweep promotes failed→pending and the new write
+# fires this trigger; the trigger never sees 'failed' directly.
 @firestore_fn.on_document_written(document='outbox_emails/{emailId}')
 def send_outbox_email(event):
-    """Send pending outbox emails. Also re-handles 'failed' docs that retry sweep promoted."""
+    """Send pending outbox emails. Triggered by new writes and sweep promotions."""
     return _send_outbox_email_impl(event)
 
 
 def _retry_outbox_sweep_impl() -> None:
-    """Promote `failed` docs with retry budget remaining back to `pending`.
+    """Promote 'failed' docs with retry budget; kick stuck 'pending' docs.
 
-    Filters in Python (rather than `.where('attempt_count', '<', N)`) so the
-    composite index requirement stays at (status, scheduled_for) for now.
+    Two responsibilities:
+    1. failed → pending when attempt_count < MAX_OUTBOX_ATTEMPTS. The promotion
+       write fires the on_document_written trigger, which retries the send.
+    2. Touch stuck 'pending' docs that the trigger never processed (e.g., docs
+       queued before this function deployed, or docs with future scheduled_for
+       whose time has now passed). The touch write fires the trigger.
+
+    Filters attempt_count in Python (rather than a Firestore composite query)
+    so the index requirement stays at (status) for now.
     """
     db = fb_firestore.client()
-    query = db.collection('outbox_emails').where('status', '==', 'failed')
-    for doc in query.stream():
+    now = datetime.datetime.now(datetime.timezone.utc)
+
+    # Part 1: promote failed → pending
+    for doc in db.collection('outbox_emails').where('status', '==', 'failed').stream():
         data = doc.to_dict() or {}
         attempt_count = int(data.get('attempt_count') or 0)
         if attempt_count < MAX_OUTBOX_ATTEMPTS:
             doc.reference.update({'status': 'pending'})
+
+    # Part 2: kick stuck pending docs (trigger never ran — attempt_count still 0)
+    for doc in db.collection('outbox_emails').where('status', '==', 'pending').stream():
+        data = doc.to_dict() or {}
+        if int(data.get('attempt_count') or 0) > 0:
+            continue  # trigger already started this one
+        scheduled_for = data.get('scheduled_for')
+        if scheduled_for is not None and hasattr(scheduled_for, 'astimezone'):
+            try:
+                due = scheduled_for.astimezone(datetime.timezone.utc) <= now
+            except Exception:
+                due = True
+            if not due:
+                continue
+        doc.reference.update({'last_swept_at': fb_firestore.SERVER_TIMESTAMP})
 
 
 @scheduler_fn.on_schedule(schedule='every 5 minutes')

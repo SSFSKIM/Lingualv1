@@ -199,6 +199,10 @@ class SendOutboxEmailTriggerTest(unittest.TestCase):
             self.assertIn('boom', final['error'])
 
     def test_attempts_exhausted_marks_dead_letter(self):
+        # Doc is pending with attempt_count=4; next attempt becomes 5 → terminal.
+        # (The trigger only processes 'pending'; sweep promotes failed→pending
+        # before the trigger runs, so by the time we see attempt_count=4 the
+        # status will have been reset to 'pending' by the sweep.)
         with patch('firebase_admin.initialize_app'):
             from functions.main import _send_outbox_email_impl
 
@@ -216,7 +220,7 @@ class SendOutboxEmailTriggerTest(unittest.TestCase):
                         'requester_email': 'p@x',
                         'review_url': 'https://x',
                     },
-                    'status': 'failed',
+                    'status': 'pending',
                     'attempt_count': 4,  # next attempt would be 5 → terminal
                 })
 
@@ -224,6 +228,16 @@ class SendOutboxEmailTriggerTest(unittest.TestCase):
 
             final_status = ev.data.after.reference.update.call_args_list[-1].args[0]['status']
             self.assertEqual(final_status, 'dead_letter')
+
+    def test_failed_doc_is_skipped(self):
+        # Trigger must exit immediately for status='failed'; the sweep is
+        # responsible for promoting failed→pending before the trigger runs.
+        with patch('firebase_admin.initialize_app'):
+            from functions.main import _send_outbox_email_impl
+
+            ev = self._make_event({'status': 'failed', 'attempt_count': 2})
+            _send_outbox_email_impl(ev)
+            ev.data.after.reference.update.assert_not_called()
 
     def test_already_sent_doc_is_skipped(self):
         with patch('firebase_admin.initialize_app'):
@@ -238,6 +252,23 @@ class RetryOutboxSweepTest(unittest.TestCase):
     def setUp(self):
         sys.modules.pop('functions.main', None)
 
+    def _make_sweep_db(self, failed_docs, pending_docs):
+        """Return a mock Firestore client that routes where() by status value."""
+        mock_db = MagicMock()
+
+        def where_router(field, op, val):
+            q = MagicMock()
+            if val == 'failed':
+                q.stream.return_value = failed_docs
+            elif val == 'pending':
+                q.stream.return_value = pending_docs
+            else:
+                q.stream.return_value = []
+            return q
+
+        mock_db.collection.return_value.where.side_effect = where_router
+        return mock_db
+
     def test_failed_docs_under_max_attempts_are_repromoted(self):
         with patch('firebase_admin.initialize_app'):
             from functions.main import _retry_outbox_sweep_impl
@@ -250,10 +281,7 @@ class RetryOutboxSweepTest(unittest.TestCase):
             doc2.to_dict.return_value = {'status': 'failed', 'attempt_count': 5}
             doc2.reference = MagicMock()
 
-            mock_db = MagicMock()
-            query = MagicMock()
-            query.stream.return_value = [doc1, doc2]
-            mock_db.collection.return_value.where.return_value = query
+            mock_db = self._make_sweep_db(failed_docs=[doc1, doc2], pending_docs=[])
 
             with patch('functions.main.fb_firestore.client', return_value=mock_db):
                 _retry_outbox_sweep_impl()
@@ -268,11 +296,63 @@ class RetryOutboxSweepTest(unittest.TestCase):
         with patch('firebase_admin.initialize_app'):
             from functions.main import _retry_outbox_sweep_impl
 
-            mock_db = MagicMock()
-            query = MagicMock()
-            query.stream.return_value = []
-            mock_db.collection.return_value.where.return_value = query
+            mock_db = self._make_sweep_db(failed_docs=[], pending_docs=[])
 
             with patch('functions.main.fb_firestore.client', return_value=mock_db):
                 _retry_outbox_sweep_impl()
             # No exception, no updates — passes implicitly.
+
+    def test_stuck_pending_doc_is_touched_to_fire_trigger(self):
+        with patch('firebase_admin.initialize_app'):
+            from functions.main import _retry_outbox_sweep_impl
+
+            pending_stuck = MagicMock()
+            pending_stuck.to_dict.return_value = {
+                'status': 'pending', 'attempt_count': 0,
+                # no scheduled_for → treat as immediately due
+            }
+            pending_stuck.reference = MagicMock()
+
+            pending_in_progress = MagicMock()
+            pending_in_progress.to_dict.return_value = {
+                'status': 'pending', 'attempt_count': 1,  # trigger already started it
+            }
+            pending_in_progress.reference = MagicMock()
+
+            mock_db = self._make_sweep_db(
+                failed_docs=[],
+                pending_docs=[pending_stuck, pending_in_progress],
+            )
+
+            with patch('functions.main.fb_firestore.client', return_value=mock_db):
+                _retry_outbox_sweep_impl()
+
+            # Stuck pending (attempt_count=0, no scheduled_for) gets touched.
+            pending_stuck.reference.update.assert_called_once()
+            updated_payload = pending_stuck.reference.update.call_args[0][0]
+            self.assertIn('last_swept_at', updated_payload)
+            # In-progress pending (attempt_count=1) is NOT touched.
+            pending_in_progress.reference.update.assert_not_called()
+
+    def test_future_scheduled_pending_doc_is_not_touched(self):
+        import datetime as dt
+        with patch('firebase_admin.initialize_app'):
+            from functions.main import _retry_outbox_sweep_impl
+
+            future = dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=1)
+
+            pending_future = MagicMock()
+            pending_future.to_dict.return_value = {
+                'status': 'pending',
+                'attempt_count': 0,
+                'scheduled_for': future,
+            }
+            pending_future.reference = MagicMock()
+
+            mock_db = self._make_sweep_db(failed_docs=[], pending_docs=[pending_future])
+
+            with patch('functions.main.fb_firestore.client', return_value=mock_db):
+                _retry_outbox_sweep_impl()
+
+            # Future-scheduled doc must NOT be touched yet.
+            pending_future.reference.update.assert_not_called()
