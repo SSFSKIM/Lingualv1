@@ -36,7 +36,7 @@ export function TeacherJoinSchoolPage() {
       // Pull down the newly-created teacher membership so TeacherRoute lets
       // the user into /app/teacher when they click the button below.
       // Without this refresh, MembershipContext still reflects the pre-join
-      // state (no memberships) and the guard bounces them to /school/setup.
+      // state (no memberships) and the guard bounces them to /signup/teacher/join-org.
       await refreshUser();
       setResult(joinResult);
     } catch (err) {

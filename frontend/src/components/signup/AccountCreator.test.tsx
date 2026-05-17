@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { AccountCreator } from './AccountCreator';
 
 const signUpMock = vi.fn();
@@ -119,7 +119,11 @@ describe('AccountCreator', () => {
       expect(screen.getByRole('button', { name: /continue with google/i })).toBeDisabled();
     });
 
-    resolveSignUp();
+    // Flush the pending submission so the component finishes its
+    // try/finally → setSubmitting(false) re-render before the test exits.
+    await act(async () => {
+      resolveSignUp();
+    });
   });
 
   it('disables the submit button while a Google signup is in-flight', async () => {
@@ -137,6 +141,8 @@ describe('AccountCreator', () => {
       expect(submit).toBeDisabled();
     });
 
-    resolveGoogle();
+    await act(async () => {
+      resolveGoogle();
+    });
   });
 });
