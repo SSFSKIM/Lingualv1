@@ -4707,7 +4707,8 @@ vi.mock('@/api/schoolRequests', () => ({
 
 vi.mock('@/hooks/useAuth', () => ({
   useAuth: () => ({
-    user: { uid: 'uid-1', email: 'ada@ssfs.org', displayName: 'Ada Lovelace' },
+    user: { uid: 'uid-1', email: 'ada@ssfs.org', name: 'Ada Lovelace' },
+    refreshUser: vi.fn(),
   }),
 }));
 
@@ -4868,6 +4869,10 @@ export function AdminOrgWizardPage() {
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   // 1. Load the draft on mount (or prefill from auth user)
+  //    Effect runs once on mount; we deliberately do not depend on `user`
+  //    because re-running this on every user-context change would clobber
+  //    in-progress edits with the seed payload again. Refreshes to the user
+  //    happen in AdminPendingPage, not here.
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -4876,10 +4881,23 @@ export function AdminOrgWizardPage() {
         if (cancelled) return;
         if (draft) {
           dispatch({ type: 'LOAD_DRAFT', draft });
+          // Sync the URL to the loaded step so a refresh resumes here too.
+          const urlStep = parseStep(params.get('step'));
+          if (urlStep !== draft.currentStep) {
+            const next = new URLSearchParams(params);
+            next.set('step', String(draft.currentStep));
+            setParams(next, { replace: true });
+          }
         } else if (user) {
+          // User.name is the canonical type field (see frontend/src/types/index.ts).
+          // Fall back to the local-part of the email if name is empty.
+          const fallbackName =
+            user.name && user.name.trim().length > 0
+              ? user.name
+              : (user.email ? user.email.split('@')[0] : '');
           const seed: Partial<WizardSubmitPayload> = {
             adminIdentity: {
-              fullName: user.displayName ?? '',
+              fullName: fallbackName,
               schoolEmail: user.email ?? '',
               roleTitle: '',
               authorizationAttested: false,
@@ -4898,7 +4916,10 @@ export function AdminOrgWizardPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 2. URL step → reducer (one-way: URL is canonical for navigation, reducer is canonical for data)
+  // 2. URL step → reducer. One-way binding: URL is canonical for navigation
+  //    (so browser back/forward works), the reducer is canonical for data.
+  //    We don't depend on state.currentStep here — that would create a loop
+  //    when gotoStep below pushes URL and the reducer in the same turn.
   useEffect(() => {
     const urlStep = parseStep(params.get('step'));
     if (loaded && urlStep !== state.currentStep) {
@@ -4940,6 +4961,12 @@ export function AdminOrgWizardPage() {
   }, [state.currentStep, state.payload]);
 
   async function handleSubmit() {
+    // Cancel any pending autosave so it can't fire after submission deletes
+    // the draft and recreate a phantom row.
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
     setSubmitting(true);
     setSubmitError(null);
     try {
@@ -5045,7 +5072,7 @@ export function AdminOrgWizardPage() {
 }
 ```
 
-Note: this depends on the existing `@/hooks/useAuth` returning at least `{ user: { uid, email, displayName } }`. Plan 2 already established that shape — if `displayName` is named differently in `User` (`name`, `fullName`, etc.), adjust the seed in the mount effect to match what `useAuth` exposes.
+Note: this depends on the existing `@/hooks/useAuth` returning `{ user: User | null, refreshUser: () => Promise<void> }`. Plan 1 established that shape (`AuthContext.tsx:29` and `AuthContext.tsx:90`). The `User` type field is `name`, not `displayName` — the seed above is already correct. If a future User shape adds a richer display name field, prefer it in the fallback chain.
 
 - [ ] **Step 4: Run tests to verify they pass**
 
@@ -5071,7 +5098,9 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 - Create: `frontend/src/pages/AdminPendingPage.tsx`
 - Create: `frontend/src/pages/AdminPendingPage.test.tsx`
 
-**Why:** Polls `getMySchoolRequest()` every 30 seconds and routes the user to `/app/admin` (school-admin dashboard) the moment the request becomes `approved`. On `rejected`, displays the reason. On `cancelled` or missing, redirects back to the wizard.
+**Why:** Polls `getMySchoolRequest()` every 30 seconds. On `approved` it must first call `useAuth().refreshUser()` so the local session picks up the new `school_admin` membership and `onboarding_state='complete'`, THEN navigate to `/app/teacher` (school admins share the teacher home until Plan 5 introduces `/app/admin` — matches the temp convention in `homeRoutes.ts` set by Plan 2). On `rejected`, displays the reason. On `cancelled` or missing, redirects back to the wizard.
+
+> **Important:** without `refreshUser()`, the user's local `useAuth().user` is the stale signup payload (no memberships, `onboarding_state='awaiting_lingual'`). Navigating to a protected route with that stale context will bounce the user through `getOnboardingDestination` back to the wizard — an infinite loop. Always refresh, then navigate.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -5091,10 +5120,18 @@ vi.mock('react-router-dom', async () => {
 
 const getMineMock = vi.fn();
 const cancelMineMock = vi.fn();
+const refreshUserMock = vi.fn();
 
 vi.mock('@/api/schoolRequests', () => ({
   getMySchoolRequest: (...args: unknown[]) => getMineMock(...args),
   cancelMySchoolRequest: (...args: unknown[]) => cancelMineMock(...args),
+}));
+
+vi.mock('@/hooks/useAuth', () => ({
+  useAuth: () => ({
+    user: { uid: 'uid-1', email: 'ada@ssfs.org', name: 'Ada' },
+    refreshUser: (...args: unknown[]) => refreshUserMock(...args),
+  }),
 }));
 
 function renderPage() {
@@ -5107,6 +5144,7 @@ describe('AdminPendingPage', () => {
     navigateMock.mockReset();
     getMineMock.mockReset();
     cancelMineMock.mockReset().mockResolvedValue(undefined);
+    refreshUserMock.mockReset().mockResolvedValue(undefined);
   });
 
   it('shows the pending state with the school name', async () => {
@@ -5127,16 +5165,25 @@ describe('AdminPendingPage', () => {
     );
   });
 
-  it('redirects to /app/admin when status becomes approved', async () => {
+  it('refreshes user then redirects to /app/teacher when status becomes approved', async () => {
     getMineMock
       .mockResolvedValueOnce({ id: 'r1', status: 'pending', schoolName: 'SF Friends' })
       .mockResolvedValueOnce({ id: 'r1', status: 'approved', schoolName: 'SF Friends' });
     renderPage();
     await waitFor(() => expect(screen.getByText(/SF Friends/)).toBeInTheDocument());
     await act(async () => { vi.advanceTimersByTime(31000); });
+    await waitFor(() => expect(refreshUserMock).toHaveBeenCalled());
     await waitFor(() =>
-      expect(navigateMock).toHaveBeenCalledWith('/app/admin', expect.anything()),
+      expect(navigateMock).toHaveBeenCalledWith('/app/teacher', expect.anything()),
     );
+    // refreshUser must be called before navigate so the protected route sees
+    // the new membership and onboarding_state.
+    const refreshOrder = refreshUserMock.mock.invocationCallOrder[0];
+    const teacherCall = navigateMock.mock.calls.findIndex(
+      (c) => c[0] === '/app/teacher',
+    );
+    const navigateOrder = navigateMock.mock.invocationCallOrder[teacherCall];
+    expect(refreshOrder).toBeLessThan(navigateOrder);
   });
 
   it('shows decline reason when rejected', async () => {
@@ -5178,12 +5225,14 @@ import {
   getMySchoolRequest,
   cancelMySchoolRequest,
 } from '@/api/schoolRequests';
+import { useAuth } from '@/hooks/useAuth';
 import type { SchoolRequest } from '@/types/schoolRequest';
 
 const POLL_MS = 30_000;
 
 export function AdminPendingPage() {
   const navigate = useNavigate();
+  const { refreshUser } = useAuth();
   const [req, setReq] = useState<SchoolRequest | null>(null);
   const [loading, setLoading] = useState(true);
   const [cancelling, setCancelling] = useState(false);
@@ -5198,7 +5247,12 @@ export function AdminPendingPage() {
       }
       setReq(next);
       if (next.status === 'approved') {
-        navigate('/app/admin', { replace: true });
+        // Refresh the local session FIRST so AppProtectedRoute and the
+        // dispatcher see the new school_admin membership + onboarding_state.
+        // Then send the user to the school-admin landing (currently shared
+        // with /app/teacher per the Plan 2 temp convention).
+        await refreshUser();
+        navigate('/app/teacher', { replace: true });
         return;
       }
       if (next.status === 'cancelled') {
@@ -5453,7 +5507,7 @@ Example additions (only if not already present):
 
 - [ ] **Step 2: Append LIMITATIONS.md entries**
 
-Open `docs/school-integration/LIMITATIONS.md` and append two entries to the existing numbered list (use the next free numbers):
+Open `docs/school-integration/LIMITATIONS.md` and append three entries to the existing numbered list (use the next free numbers; the literals `N`, `N+1`, `N+2` below are placeholders — replace with the actual next sequence numbers in the file):
 
 ```
 N. **Wizard draft has no TTL.** A `school_creation_drafts/{uid}` document
@@ -5465,6 +5519,13 @@ N+1. **Pre-invite emails are best-effort at approval time.** The approve
      `school_request_approved` doc to the requester. Failures to enqueue
      are logged but do not block the approval response — the membership,
      org, and `teacher_invitations/` rows are written first.
+
+N+2. **`school_creation_drafts` rules are not under automated coverage in
+     this plan.** Task 18 added the owner-only rule but the Firebase
+     emulator test suite (`firebase-tests/`, Java required) was not
+     extended. The rule mirrors the existing `users/{uid}` ownership
+     pattern; a follow-up should add a rules test once a Java-enabled CI
+     runner is available.
 ```
 
 - [ ] **Step 3: Commit**
@@ -5535,7 +5596,7 @@ Confirm in Firestore:
 
 - [ ] **Step 5: Verify the pending page resolves**
 
-Return to the original (admin) browser session. Within 30 seconds, `/signup/admin/pending` should redirect to `/app/admin` (the school-admin dashboard).
+Return to the original (admin) browser session. Within 30 seconds, `/signup/admin/pending` should call `refreshUser()` and then redirect to `/app/teacher` (the school-admin shares the teacher home until Plan 5 ships `/app/admin`). Verify in the DevTools network panel that `/api/auth/verify` is re-fetched (refresh) and the new payload includes the `school_admin` membership before the navigation completes.
 
 If your `lingu-480600` project has Resend wired and `RESEND_API_KEY` is set in the local environment, also check the recipient inboxes for the rendered emails. Otherwise verify in the Cloud Function logs that the dev-mode fallback fired (`status='sent_dev'`).
 
