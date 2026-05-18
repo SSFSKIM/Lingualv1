@@ -72,6 +72,18 @@ class FakeTeacherRequestsDb(FakeDbBase):
     def update_user_profile(self, uid, **kwargs):
         pass
 
+    def update_teacher_join_request_status(self, *, request_id, status,
+                                            reviewed_by_uid=None,
+                                            decline_reason=None):
+        rec = self.teacher_join_requests.get(request_id)
+        if rec is None:
+            raise KeyError(request_id)
+        rec['status'] = status
+        if reviewed_by_uid is not None:
+            rec['reviewed_by_uid'] = reviewed_by_uid
+        if decline_reason is not None:
+            rec['decline_reason'] = decline_reason
+
 
 def _build_app(*, uid='teacher-1', user_email='t@x.com', user_name='Teacher'):
     db = FakeTeacherRequestsDb()
@@ -222,6 +234,59 @@ class SubmitTeacherJoinRequestTest(unittest.TestCase):
 
         resp = client.post('/api/teacher-join-requests', json={})
         self.assertEqual(resp.status_code, 400)
+
+
+class PollAndCancelTest(unittest.TestCase):
+    def test_get_me_returns_pending_request(self):
+        app, db = _build_app()
+        db.orgs['org-1'] = {'name': 'SF Friends'}
+        db.teacher_join_requests['tjr-1'] = {
+            'uid': 'teacher-1', 'org_id': 'org-1',
+            'source': 'invite_code', 'status': 'pending',
+        }
+        client = app.test_client()
+        with client.session_transaction() as sess:
+            sess['user'] = {'uid': 'teacher-1', 'email': 't@x.com'}
+
+        resp = client.get('/api/teacher-join-requests/me')
+        self.assertEqual(resp.status_code, 200)
+        body = resp.get_json()
+        self.assertEqual(body['status'], 'pending')
+        self.assertEqual(body['orgId'], 'org-1')
+        self.assertEqual(body['orgName'], 'SF Friends')
+
+    def test_get_me_returns_204_when_no_request(self):
+        app, db = _build_app()
+        client = app.test_client()
+        with client.session_transaction() as sess:
+            sess['user'] = {'uid': 'teacher-1', 'email': 't@x.com'}
+
+        resp = client.get('/api/teacher-join-requests/me')
+        self.assertEqual(resp.status_code, 204)
+
+    def test_delete_me_cancels_pending(self):
+        app, db = _build_app()
+        db.teacher_join_requests['tjr-1'] = {
+            'uid': 'teacher-1', 'org_id': 'org-1',
+            'source': 'search', 'status': 'pending',
+        }
+        client = app.test_client()
+        with client.session_transaction() as sess:
+            sess['user'] = {'uid': 'teacher-1', 'email': 't@x.com'}
+
+        resp = client.delete('/api/teacher-join-requests/me')
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.get_json()['success'])
+        self.assertEqual(db.teacher_join_requests['tjr-1']['status'], 'cancelled')
+
+    def test_delete_me_returns_404_when_no_pending(self):
+        app, db = _build_app()
+        client = app.test_client()
+        with client.session_transaction() as sess:
+            sess['user'] = {'uid': 'teacher-1', 'email': 't@x.com'}
+
+        resp = client.delete('/api/teacher-join-requests/me')
+        self.assertEqual(resp.status_code, 404)
 
 
 if __name__ == '__main__':

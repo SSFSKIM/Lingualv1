@@ -162,4 +162,44 @@ def create_teacher_requests_blueprint(deps: RouteDeps) -> Blueprint:
             'source': source,
         }), 201
 
+    @bp.route('/api/teacher-join-requests/me', methods=['GET'])
+    @deps.login_required
+    def get_my_request():
+        uid = deps.get_current_user_uid()
+        if not uid:
+            return jsonify({'success': False, 'error': 'Authentication required.'}), 401
+        rec = deps.db.get_pending_teacher_join_request_by_uid(uid)
+        if not rec:
+            return ('', 204)
+        org = deps.db.get_organization(rec['org_id']) or {}
+        return jsonify({
+            'requestId': rec['id'],
+            'orgId': rec['org_id'],
+            'orgName': org.get('name', ''),
+            'status': rec['status'],
+            'source': rec.get('source'),
+            'declineReason': rec.get('decline_reason'),
+        }), 200
+
+    @bp.route('/api/teacher-join-requests/me', methods=['DELETE'])
+    @deps.login_required
+    def cancel_my_request():
+        uid = deps.get_current_user_uid()
+        if not uid:
+            return jsonify({'success': False, 'error': 'Authentication required.'}), 401
+        rec = deps.db.get_pending_teacher_join_request_by_uid(uid)
+        if not rec:
+            return jsonify({'success': False, 'error': 'No pending request.'}), 404
+        deps.db.update_teacher_join_request_status(
+            request_id=rec['id'],
+            status='cancelled',
+            # No reviewed_by_uid — cancellation is not a review action.
+        )
+        # Clear pending state on the user profile.
+        try:
+            deps.db.update_user_profile(uid, onboarding_state='role_selected')
+        except Exception:
+            log.exception('onboarding_state revert failed for uid=%s', uid)
+        return jsonify({'success': True}), 200
+
     return bp
