@@ -437,3 +437,32 @@ class RetryOutboxSweepTest(unittest.TestCase):
 
             # Future-scheduled doc must NOT be touched yet.
             pending_future.reference.update.assert_not_called()
+
+
+class TemplateSubjectTableTest(unittest.TestCase):
+    def test_approved_subject_contains_org_name(self):
+        with patch('firebase_admin.initialize_app'):
+            from functions.main import _TEMPLATE_SUBJECTS
+        builder = _TEMPLATE_SUBJECTS['school_request_approved']
+        self.assertEqual(
+            builder({'org_name': 'SF Friends'}),
+            'Your school SF Friends is now on Lingual',
+        )
+
+    def test_declined_subject_contains_org_name(self):
+        with patch('firebase_admin.initialize_app'):
+            from functions.main import _TEMPLATE_SUBJECTS
+        builder = _TEMPLATE_SUBJECTS['school_request_declined']
+        self.assertEqual(
+            builder({'org_name': 'SF Friends'}),
+            'Your school registration needs more info',
+        )
+
+    def test_invitation_subject_contains_org_name(self):
+        with patch('firebase_admin.initialize_app'):
+            from functions.main import _TEMPLATE_SUBJECTS
+        builder = _TEMPLATE_SUBJECTS['teacher_invitation']
+        self.assertEqual(
+            builder({'org_name': 'SF Friends'}),
+            'SF Friends is inviting you to teach on Lingual',
+        )

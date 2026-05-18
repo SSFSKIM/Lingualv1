@@ -56,7 +56,14 @@ _JINJA_ENV = Environment(
 )
 
 _TEMPLATE_SUBJECTS = {
-    'school_request_to_lingual': lambda data: f"New school registration: {data['org_name']}",
+    'school_request_to_lingual':
+        lambda data: f"New school registration: {data['org_name']}",
+    'school_request_approved':
+        lambda data: f"Your school {data['org_name']} is now on Lingual",
+    'school_request_declined':
+        lambda data: "Your school registration needs more info",
+    'teacher_invitation':
+        lambda data: f"{data['org_name']} is inviting you to teach on Lingual",
 }
 
 
