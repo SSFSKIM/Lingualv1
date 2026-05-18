@@ -2156,13 +2156,39 @@ class OrgSearchRouteTest(unittest.TestCase):
         self.assertEqual(resp.status_code, 401)
 
     def test_search_rate_limit_blocks_after_threshold(self):
+        """Deterministic via monkey-patched time.monotonic — wall clock independent."""
         client, _ = self._client()
-        # Threshold: 10 req in ~1s. Fire 12 quickly; the last calls return 429.
-        statuses = []
-        for _ in range(12):
-            resp = client.get('/api/organizations/search?q=san')
-            statuses.append(resp.status_code)
-        self.assertIn(429, statuses, f"Expected at least one 429, got {statuses}")
+        from unittest.mock import patch
+        from backend.routes import teacher_requests as tr_module
+        # Clear any state from prior tests in the module.
+        tr_module._RATE_LIMIT_PER_UID.clear()
+        # Freeze time so the 1s window never rolls; 11th request must 429.
+        with patch.object(tr_module.time, 'monotonic', return_value=1000.0):
+            statuses = []
+            for _ in range(12):
+                resp = client.get('/api/organizations/search?q=san')
+                statuses.append(resp.status_code)
+        # First 10 succeed, next 2 are rate-limited.
+        self.assertEqual(statuses[:10], [200] * 10, f"first 10 should all 200: {statuses}")
+        self.assertEqual(statuses[10:], [429, 429], f"requests 11+12 should 429: {statuses}")
+
+    def test_rate_limit_window_clears_after_advance(self):
+        """Advancing past the window resets the bucket."""
+        client, _ = self._client()
+        from unittest.mock import patch
+        from backend.routes import teacher_requests as tr_module
+        tr_module._RATE_LIMIT_PER_UID.clear()
+
+        with patch.object(tr_module.time, 'monotonic') as mock_clock:
+            mock_clock.return_value = 1000.0
+            for _ in range(10):
+                client.get('/api/organizations/search?q=san')
+            blocked = client.get('/api/organizations/search?q=san')
+            self.assertEqual(blocked.status_code, 429)
+            # Advance past the 1-second window
+            mock_clock.return_value = 1002.0
+            unblocked = client.get('/api/organizations/search?q=san')
+            self.assertEqual(unblocked.status_code, 200)
 ```
 
 - [ ] **Step 2: Run test to verify failure**
@@ -2225,7 +2251,7 @@ Inside `create_teacher_requests_blueprint(deps)`:
 python3 -m unittest backend.tests.test_org_search_route -v
 ```
 
-Expected: 4 tests pass.
+Expected: 5 tests pass (the two rate-limit tests are deterministic — they don't depend on wall-clock timing).
 
 - [ ] **Step 5: Commit**
 
@@ -2250,11 +2276,13 @@ EOF
 **Files:**
 - Modify: `main.py`
 - Modify: `backend/routes/schools.py`
-- Modify: `backend/tests/test_school_routes_join_as_teacher.py` (or wherever the auto-approve test lives — update or delete)
+- Create: `backend/tests/test_school_routes_join_as_teacher.py`
+
+> **Verified on 2026-05-18**: `grep -rn "auto_approve\|join_as_teacher\|joinSchoolAsTeacher" backend/tests/` returns no matches — no existing tests reference the auto-approve behavior. So this task is purely additive on the test side. The runtime behavior change (auto-approve → 410 Gone) replaces the body of an existing route.
 
 - [ ] **Step 1: Write a failing test capturing the new contract**
 
-Find or create `backend/tests/test_school_routes_join_as_teacher.py`. Add (replace any pre-existing auto-approve tests):
+Create `backend/tests/test_school_routes_join_as_teacher.py`:
 
 ```python
 """Verify /api/schools/join-as-teacher now redirects to the new endpoint."""
@@ -2321,6 +2349,17 @@ from backend.routes.teacher_requests import create_teacher_requests_blueprint
 # ... existing registrations ...
 app.register_blueprint(create_teacher_requests_blueprint(deps))
 ```
+
+Also register `PUBLIC_BASE_URL` in the existing `_validate_required_env()` function as a feature-gated key. Locate the `feature = {...}` dict (around line 27 of `main.py` — currently contains only `CANVAS_PAT_ENCRYPTION_KEY`) and add:
+
+```python
+    feature = {
+        'CANVAS_PAT_ENCRYPTION_KEY': 'Canvas connect returns 503 when a teacher clicks Connect',
+        'PUBLIC_BASE_URL': 'Email CTAs ship with relative URLs which break in email clients',
+    }
+```
+
+This matches the env-validation discipline introduced in Plan 1: feature-gated keys warn at boot in dev and fail-fast in production, surfacing missing config at deploy time instead of runtime.
 
 - [ ] **Step 4: Run tests to verify**
 
@@ -2738,6 +2777,119 @@ EOF
 ```
 
 > **Sub-task during execution (if needed):** if `school_admin_uids` isn't yet maintained on org create / membership grant flows, add a separate commit that wires it through `database.create_membership(..., roles=['school_admin'])` and runs a backfill (`scripts/backfill_school_admin_uids.py`). Verify by reading `database.py:create_membership` before this task lands.
+>
+> **Forward invariant (binding on Plan 5+):** No `revoke_membership` / `remove_membership` / `delete_membership` helper exists in the codebase today (verified 2026-05-18: `grep -n "revoke_membership\|remove_membership\|delete_membership" database.py backend/` returns no matches). When Plan 5 introduces membership removal for org suspend / member removal / role revocation, the implementer **must** call `_sync_org_admin_uids(org_id, uid, add=False)` when the removed role contained `school_admin`. Otherwise `organizations.school_admin_uids` will drift and the rule will keep granting read access after the membership is gone. Task 19 lifts this as an explicit TASKS.md item.
+
+- [ ] **Step 6.5: Add a drift-detection assertion test for the Task 11 helper**
+
+> Placement note: this step tests `_sync_org_admin_uids` from Task 11. It's bundled here because the rule's correctness depends on the helper staying called — if the helper were ever silently disabled, the rule would over-grant. Keeping the test alongside the rules makes the dependency loud at review time. The new test file is independent of `test_database_teacher_join_requests.py`, so this step's commit is separate from Task 11's commit.
+
+To make future drift loud at CI time, add a small regression test that asserts the array stays in sync with at least one synthetic flow we control today (create-then-keep). Create `backend/tests/test_school_admin_uids_invariant.py`:
+
+```python
+"""Regression: organizations.school_admin_uids must stay in sync with school_admin memberships.
+
+This test exercises the create path that Plan 4 wires (the only path that
+exists today). Plan 5+ MUST extend coverage when adding removal paths.
+"""
+from __future__ import annotations
+
+import unittest
+from unittest.mock import MagicMock, patch
+
+import database
+
+
+class SchoolAdminUidsCreatePathTest(unittest.TestCase):
+    def test_create_membership_with_school_admin_role_syncs_array(self):
+        captured_updates: list[dict] = []
+        fake_org_doc = MagicMock()
+        def _update(payload):
+            captured_updates.append(payload)
+        fake_org_doc.update.side_effect = _update
+
+        fake_collection = MagicMock()
+        fake_collection.document.return_value = fake_org_doc
+        fake_membership_doc = MagicMock()
+        fake_membership_doc.id = 'mem-1'
+
+        def _collection(name):
+            if name == database.ORGANIZATIONS_COLLECTION:
+                return fake_collection
+            inner = MagicMock()
+            inner.document.return_value = fake_membership_doc
+            return inner
+
+        with patch('database.firestore.client') as fc:
+            fc.return_value.collection.side_effect = _collection
+            database.create_membership(
+                org_id='org-1',
+                uid='admin-1',
+                roles=['school_admin'],
+            )
+        # At least one update on the org doc should set school_admin_uids via ArrayUnion.
+        self.assertTrue(
+            any('school_admin_uids' in u for u in captured_updates),
+            f"create_membership(roles=['school_admin']) did not sync the org array. "
+            f"captured updates: {captured_updates}",
+        )
+
+    def test_create_membership_without_school_admin_role_does_not_touch_array(self):
+        captured_updates: list[dict] = []
+        fake_org_doc = MagicMock()
+        fake_org_doc.update.side_effect = lambda p: captured_updates.append(p)
+        fake_collection = MagicMock()
+        fake_collection.document.return_value = fake_org_doc
+        fake_membership_doc = MagicMock()
+        fake_membership_doc.id = 'mem-2'
+
+        def _collection(name):
+            if name == database.ORGANIZATIONS_COLLECTION:
+                return fake_collection
+            inner = MagicMock()
+            inner.document.return_value = fake_membership_doc
+            return inner
+
+        with patch('database.firestore.client') as fc:
+            fc.return_value.collection.side_effect = _collection
+            database.create_membership(
+                org_id='org-1',
+                uid='teacher-1',
+                roles=['teacher'],  # no school_admin
+            )
+        self.assertFalse(
+            any('school_admin_uids' in u for u in captured_updates),
+            "create_membership with teacher-only roles should NOT update school_admin_uids",
+        )
+
+
+if __name__ == '__main__':
+    unittest.main()
+```
+
+Run it:
+
+```bash
+python3 -m unittest backend.tests.test_school_admin_uids_invariant -v
+```
+
+Expected: both tests pass.
+
+- [ ] **Step 7: Commit the regression test**
+
+```bash
+git add backend/tests/test_school_admin_uids_invariant.py
+git commit -m "$(cat <<'EOF'
+test(rules): regression test for school_admin_uids drift
+
+Asserts create_membership(roles=['school_admin']) syncs the org array
+and the teacher-only case does NOT. Plan 5 will extend this file with
+removal-path coverage when the revoke helpers exist.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+EOF
+)"
+```
 
 ---
 
@@ -3007,7 +3159,7 @@ export async function searchOrganizations(query: string): Promise<OrgSearchResul
 cd frontend && npm run test -- --run src/api/teacherRequests.test.ts
 ```
 
-Expected: all 8 tests pass.
+Expected: 8 tests pass.
 
 - [ ] **Step 5: Commit**
 
@@ -4216,11 +4368,12 @@ Mark Plan-4-related items complete with `[x]` and add any newly-discovered follo
 - [x] Admin approval pipeline with email notification (Plan 4)
 - [x] Removed auto-approve from /api/schools/join-as-teacher (Plan 4)
 - [ ] Backfill organizations.school_admin_uids for orgs created before Plan 4
-- [ ] Replace in-memory org search rate limiter with shared store when multi-replica
-- [ ] 7-day reminder email for stale pending teacher join requests (v1.5)
-- [ ] Realtime status listener on /signup/teacher/pending (replace 30s polling, v1.5)
-- [ ] Wrap teacher-join approve flow in a Firestore batch/transaction (v1.5 — see LIMITATIONS)
-- [ ] Document PUBLIC_BASE_URL in .env.example and deployment runbook
+- [ ] **(Plan 5 acceptance)** Any membership-removal path (revoke_membership, org suspend that revokes admins, role downgrade) MUST call `_sync_org_admin_uids(org_id, uid, add=False)` when the removed role contained `school_admin`. Without this, `teacher_join_requests` rule keeps granting read access to former admins. Extend `backend/tests/test_school_admin_uids_invariant.py` with the removal regression.
+- [ ] Replace in-memory org search rate limiter with shared store (Redis / Firestore counter) when scaling to multi-replica
+- [ ] 7-day reminder email for stale pending teacher join requests (v1.5). **Product decision needed before launch** — without reminders, slow admin response times may bottleneck onboarding. Either ship now or accept the latency risk.
+- [ ] Realtime status listener on `/signup/teacher/pending` (replace 30s polling, v1.5)
+- [ ] Wrap teacher-join approve flow in a Firestore transaction (v1.5 — see LIMITATIONS; introduces the project's first transactional path so plan it cross-cuttingly)
+- [ ] Document PUBLIC_BASE_URL in .env.example and the deployment runbook
 ```
 
 - [ ] **Step 3: LIMITATIONS.md**
@@ -4236,7 +4389,9 @@ Add new entries:
 - Rate limiting on `/api/organizations/search` is process-local (10 req/sec/uid). Horizontal scale will require a shared store (Redis / Firestore counter).
 - Status polling is 30s; not realtime. A realtime listener is a v1.5 follow-up.
 - Search excludes suspended and archived orgs but does not respect any further geofencing.
-- **7-day reminder email to admins (spec §3) is not yet implemented.** Stale pending requests are visible on the admin dashboard but no automatic nudge is sent. Implement via a daily Cloud Function sweep that writes future-dated outbox docs once requests age past 7 days — v1.5 follow-up.
+- **7-day reminder email to admins (spec §3) is not yet implemented.** Stale pending requests are visible on the admin dashboard but no automatic nudge is sent. Implement via a daily Cloud Function sweep that writes future-dated outbox docs once requests age past 7 days — v1.5 follow-up. **Product decision needed before launch:** K-12 admin response latency varies; without reminders, requests can rot. Either ship reminders now or accept the latency risk explicitly.
+- **Approval is not transactional.** `POST /api/teacher-join-requests/<id>/approve` performs three sequential Firestore writes (membership create, request status update, last-active-membership update). The codebase has no other transactional flows today, so wrapping this one would be a one-off pattern. At pilot volume, partial failure recovery is manual (admin sees stale 'pending' row + duplicate membership; clean up via Firestore console). v1.5 follow-up.
+- **`PUBLIC_BASE_URL` is feature-gated.** Email CTAs use absolute URLs when `PUBLIC_BASE_URL` is set; otherwise relative paths (which break in email clients). The variable is registered in `_validate_required_env` as a feature-gated key (warns in dev, fails fast in production at boot).
 - **Approval flow is not transactional.** `POST /api/teacher-join-requests/<id>/approve` performs three sequential Firestore writes (create membership, mark request approved, update user profile). If a later write fails after an earlier one succeeded, the system is briefly inconsistent (e.g. teacher has a membership but request still shows pending). Wrap in a Firestore batch in v1.5.
 - **`PUBLIC_BASE_URL` is a soft-required env var for outbound email CTAs.** Without it, email links use relative paths (`/app/teacher` rather than `https://lingual.app/app/teacher`), which break in email clients. Set in Cloud Run env for any deploy that should send real email.
 ```
@@ -4352,7 +4507,10 @@ If anything is off, debug via `superpowers:systematic-debugging` rather than pat
 | Firestore rules for new collection | Task 12 |
 | Auto-approve removal | Task 10 |
 | Docs + LIMITATIONS sync | Task 20 |
-| 7-day admin reminder email | **Deferred to v1.5**, logged in LIMITATIONS (Task 20) |
+| 7-day admin reminder email | **Deferred to v1.5**, logged in LIMITATIONS (Task 20); flagged for product decision before launch |
 | Multi-org membership block | Task 4 (any active membership returns 422) |
+| `school_admin_uids` drift detection | Task 11 Step 6.5 (regression test); Plan 5 acceptance item in TASKS.md |
+| Transactional approval | **Deferred to v1.5** — inline TODO in Task 7 + LIMITATIONS entry |
+| PUBLIC_BASE_URL env validation | Task 10 (registered in `_validate_required_env` as feature-gated) |
 
 If any cell is empty after execution, that task didn't ship the spec's requirement and must be patched.
