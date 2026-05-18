@@ -139,5 +139,89 @@ class ApproveSchoolRequestOutboxTest(unittest.TestCase):
         ))
 
 
+class RejectSchoolRequestOutboxTest(unittest.TestCase):
+    def setUp(self):
+        self.db = FakeApprovalDb()
+        # Seed Lingual admin user
+        self.db.users = {'lingual-1': {
+            'email': 'la@lingual.app',
+            'name': 'LA',
+            'lingual_admin': True,
+        }}
+        self.db.requests['req-2'] = {
+            'id': 'req-2',
+            'requester_uid': 'uid-B',
+            'requester_email': 'bob@ssfs.org',
+            'requester_name': 'Bob',
+            'school_name': 'SF Friends',
+            'org_type': 'school',
+            'status': 'pending',
+        }
+        self.deps = make_test_deps(db=self.db)
+        from backend.routes.school_requests import create_school_requests_blueprint
+        self.app = make_test_app(create_school_requests_blueprint(self.deps))
+        self.client = self.app.test_client()
+        with self.client.session_transaction() as s:
+            s['user'] = {'uid': 'lingual-1', 'email': 'la@lingual.app'}
+
+    @patch('backend.routes.school_requests.database.get_db', return_value=MagicMock())
+    @patch('backend.routes.school_requests.enqueue_outbox_email')
+    def test_reject_persists_reason_and_category(self, mock_enqueue, _mock_get_db):
+        resp = self.client.post('/api/admin/school-requests/req-2/reject', json={
+            'reason': 'Website not reachable.',
+            'category': 'info_missing',
+        })
+        self.assertEqual(resp.status_code, 200, resp.get_json())
+        self.assertEqual(self.db.requests['req-2']['status'], 'rejected')
+        self.assertEqual(self.db.requests['req-2']['rejection_reason'], 'Website not reachable.')
+        self.assertEqual(self.db.requests['req-2']['rejection_category'], 'info_missing')
+
+    @patch('backend.routes.school_requests.database.get_db', return_value=MagicMock())
+    @patch('backend.routes.school_requests.enqueue_outbox_email')
+    def test_reject_enqueues_declined_email_to_requester(self, mock_enqueue, _mock_get_db):
+        resp = self.client.post('/api/admin/school-requests/req-2/reject', json={
+            'reason': 'Need more info', 'category': 'info_missing',
+        })
+        self.assertEqual(resp.status_code, 200)
+        declined = [
+            c for c in mock_enqueue.call_args_list
+            if c.kwargs.get('template').value == 'school_request_declined'
+        ]
+        self.assertEqual(len(declined), 1)
+        kwargs = declined[0].kwargs
+        self.assertEqual(kwargs['recipient_email'], 'bob@ssfs.org')
+        self.assertEqual(kwargs['template_data']['org_name'], 'SF Friends')
+        self.assertEqual(kwargs['template_data']['reason'], 'Need more info')
+        self.assertEqual(kwargs['template_data']['category'], 'info_missing')
+        self.assertIn('support_url', kwargs['template_data'])
+
+    @patch('backend.routes.school_requests.database.get_db', return_value=MagicMock())
+    @patch('backend.routes.school_requests.enqueue_outbox_email')
+    def test_reject_accepts_empty_reason(self, mock_enqueue, _mock_get_db):
+        resp = self.client.post('/api/admin/school-requests/req-2/reject', json={
+            'category': 'other',
+        })
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(self.db.requests['req-2']['rejection_reason'], '')
+        self.assertEqual(self.db.requests['req-2']['rejection_category'], 'other')
+
+    @patch('backend.routes.school_requests.database.get_db', return_value=MagicMock())
+    @patch('backend.routes.school_requests.enqueue_outbox_email')
+    def test_reject_rejects_invalid_category(self, mock_enqueue, _mock_get_db):
+        resp = self.client.post('/api/admin/school-requests/req-2/reject', json={
+            'reason': 'r', 'category': 'NOT_A_CATEGORY',
+        })
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(self.db.requests['req-2']['status'], 'pending')
+        mock_enqueue.assert_not_called()
+
+    @patch('backend.routes.school_requests.database.get_db', return_value=MagicMock())
+    @patch('backend.routes.school_requests.enqueue_outbox_email')
+    def test_reject_returns_409_on_already_decided(self, mock_enqueue, _mock_get_db):
+        self.db.requests['req-2']['status'] = 'approved'
+        resp = self.client.post('/api/admin/school-requests/req-2/reject', json={'reason': 'r'})
+        self.assertEqual(resp.status_code, 409)
+
+
 if __name__ == '__main__':
     unittest.main()

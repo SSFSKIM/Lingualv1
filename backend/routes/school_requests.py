@@ -554,13 +554,41 @@ def create_school_requests_blueprint(deps: RouteDeps) -> Blueprint:
 
             data = request.get_json() or {}
             reason = (data.get('reason') or '').strip()
+            category = (data.get('category') or '').strip()
+            if category and category not in database.ALLOWED_REJECTION_CATEGORIES:
+                return jsonify({
+                    'success': False,
+                    'error': f'Invalid category: {category!r}',
+                }), 400
 
             deps.db.update_school_request(request_id, {
                 'status': 'rejected',
                 'reviewed_by_uid': uid,
                 'reviewed_at': datetime.now(UTC),
                 'rejection_reason': reason,
+                'rejection_category': category or None,
             })
+
+            try:
+                base = _public_base_url()
+                enqueue_outbox_email(
+                    db=database.get_db(),
+                    recipient_email=req.get('requester_email') or '',
+                    recipient_name=req.get('requester_name'),
+                    template=OutboxTemplate.SCHOOL_REQUEST_DECLINED,
+                    template_data={
+                        'org_name': req.get('school_name'),
+                        'requester_name': req.get('requester_name'),
+                        'reason': reason,
+                        'category': category or 'other',
+                        'support_url': 'mailto:support@lingual.app',
+                    },
+                    related_entity_type='school_request',
+                    related_entity_id=request_id,
+                    created_by_uid=uid,
+                )
+            except Exception as exc:
+                print(f'[outbox] school_request_declined enqueue failed: {exc}')
 
             updated = deps.db.get_school_request(request_id)
             return jsonify({'success': True, 'request': _serialize_request(updated)}), 200
