@@ -86,7 +86,7 @@ export function AdminPendingPage() {
                   className="rounded-md border-2 border-foreground bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground">
             Edit and resubmit
           </button>
-          <a href="mailto:support@lingual.app"
+          <a href="mailto:support@l1ngual.com"
              className="rounded-md border px-4 py-2 text-sm">
             Contact support
           </a>

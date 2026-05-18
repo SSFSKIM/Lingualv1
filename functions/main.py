@@ -46,7 +46,7 @@ def send_via_resend(
         return DEV_MODE_SENTINEL
 
     resend.api_key = api_key
-    from_address = os.environ.get('RESEND_FROM_ADDRESS', 'Lingual <noreply@lingual.app>')
+    from_address = os.environ.get('RESEND_FROM_ADDRESS', 'Lingual <noreply@send.l1ngual.com>')
     response = resend.Emails.send({
         'from': from_address,
         'to': [_format_recipient(to_email, to_name)],

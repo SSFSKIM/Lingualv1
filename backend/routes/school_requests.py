@@ -15,7 +15,7 @@ from database import list_lingual_admin_emails
 
 
 def _public_base_url() -> str:
-    return os.environ.get('PUBLIC_BASE_URL', 'https://lingual.app')
+    return os.environ.get('PUBLIC_BASE_URL', 'https://l1ngual.com')
 
 
 _EMAIL_RE = re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
@@ -672,7 +672,7 @@ def create_school_requests_blueprint(deps: RouteDeps) -> Blueprint:
                         'requester_name': req.get('requester_name'),
                         'reason': reason,
                         'category': category or 'other',
-                        'support_url': 'mailto:support@lingual.app',
+                        'support_url': 'mailto:support@l1ngual.com',
                     },
                     related_entity_type='school_request',
                     related_entity_id=request_id,

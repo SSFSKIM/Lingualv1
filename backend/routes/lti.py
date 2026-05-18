@@ -44,7 +44,7 @@ def _lti_callback_url() -> str:
     behind Cloud Run, which would emit broken HTTP LTI callback URLs that
     Canvas rejects.
     """
-    base = os.environ.get('PUBLIC_BASE_URL', 'https://lingual.app').rstrip('/')
+    base = os.environ.get('PUBLIC_BASE_URL', 'https://l1ngual.com').rstrip('/')
     return f'{base}/lti/callback'
 
 

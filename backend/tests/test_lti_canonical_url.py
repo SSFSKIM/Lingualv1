@@ -18,20 +18,20 @@ from backend.routes.lti import _lti_callback_url
 
 class LtiCallbackUrlTest(unittest.TestCase):
     def test_uses_public_base_url_when_set(self):
-        with patch.dict(os.environ, {'PUBLIC_BASE_URL': 'https://lingual.app'}):
-            self.assertEqual(_lti_callback_url(), 'https://lingual.app/lti/callback')
+        with patch.dict(os.environ, {'PUBLIC_BASE_URL': 'https://l1ngual.com'}):
+            self.assertEqual(_lti_callback_url(), 'https://l1ngual.com/lti/callback')
 
     def test_strips_trailing_slash_on_base(self):
-        with patch.dict(os.environ, {'PUBLIC_BASE_URL': 'https://lingual.app/'}):
-            self.assertEqual(_lti_callback_url(), 'https://lingual.app/lti/callback')
+        with patch.dict(os.environ, {'PUBLIC_BASE_URL': 'https://l1ngual.com/'}):
+            self.assertEqual(_lti_callback_url(), 'https://l1ngual.com/lti/callback')
 
-    def test_falls_back_to_https_lingual_app(self):
+    def test_falls_back_to_production_default(self):
         env = {k: v for k, v in os.environ.items() if k != 'PUBLIC_BASE_URL'}
         with patch.dict(os.environ, env, clear=True):
-            self.assertEqual(_lti_callback_url(), 'https://lingual.app/lti/callback')
+            self.assertEqual(_lti_callback_url(), 'https://l1ngual.com/lti/callback')
 
     def test_honors_https_scheme_for_dev_overrides(self):
-        with patch.dict(os.environ, {'PUBLIC_BASE_URL': 'https://staging.lingual.app'}):
+        with patch.dict(os.environ, {'PUBLIC_BASE_URL': 'https://staging.l1ngual.com'}):
             self.assertTrue(_lti_callback_url().startswith('https://'))
 
 
