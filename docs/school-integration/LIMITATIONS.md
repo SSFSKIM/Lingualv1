@@ -201,3 +201,19 @@ business actions complete normally but do not produce those emails.
     approval confirmation or explicit CTA. Planned follow-up: replace the
     immediate redirect with an approved-state panel once the dedicated
     school-admin home route lands.
+
+28. **Role grants and changes require a session refresh to take effect.**
+    `AuthContext` only re-fetches the auth payload via `/api/auth/verify`
+    when Firebase Auth state changes (sign-in / sign-out) — not on every
+    navigation. So if a Lingual admin grants someone a new role or flips
+    a flag (e.g. `lingual_admin: true`) on a user whose session is already
+    established, the affected user keeps the stale `user.lingualAdmin`,
+    `memberships`, and `activeRoles` in React state until they sign out
+    and back in (or hard reload). The backend correctly returns the new
+    payload on demand; only the frontend cache is stale. Symptoms include
+    the profile card showing the old role label, the Home button routing
+    to the wrong dashboard, and `LingualAdminRoute` redirecting newly
+    promoted admins back to `/app/learn`. Planned follow-up: have
+    `AuthContext` poll `/api/auth/verify` on long-lived sessions, or
+    surface a "your access changed, refresh" toast when the server's
+    `lingualAdmin` / `activeRoles` differ from the cached payload.
