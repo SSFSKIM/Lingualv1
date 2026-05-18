@@ -357,6 +357,7 @@ class AdminListPendingTest(unittest.TestCase):
     def _admin_app(self):
         app, db = _build_app(uid='admin-1', user_email='admin@x.com', user_name='Admin')
         db._membership_list.append({
+            'id': 'mem-1',  # NEW — matches the session's active_membership_id
             'uid': 'admin-1', 'org_id': 'org-1',
             'roles': ['school_admin'], 'status': 'active',
         })
@@ -395,6 +396,21 @@ class AdminListPendingTest(unittest.TestCase):
 
         resp = client.get('/api/teacher-join-requests')
         self.assertEqual(resp.status_code, 403)
+
+    def test_admin_with_no_pending_returns_empty_list(self):
+        """200 with empty list is the right shape — frontend renders nothing."""
+        app, db = self._admin_app()
+        client = app.test_client()
+        with client.session_transaction() as sess:
+            sess['user'] = {'uid': 'admin-1', 'email': 'admin@x.com'}
+            sess['active_organization_id'] = 'org-1'
+            sess['active_membership_id'] = 'mem-1'
+
+        resp = client.get('/api/teacher-join-requests')
+        self.assertEqual(resp.status_code, 200)
+        body = resp.get_json()
+        self.assertTrue(body['success'])
+        self.assertEqual(body['requests'], [])
 
 
 if __name__ == '__main__':

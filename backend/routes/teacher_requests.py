@@ -37,6 +37,15 @@ def _absolute_url(path: str) -> str:
     return f"{base}{path}" if base else path
 
 
+def _isoformat(ts):
+    """Serialize a Firestore/datetime timestamp to ISO 8601, or None."""
+    if ts is None:
+        return None
+    if hasattr(ts, 'isoformat'):
+        return ts.isoformat()
+    return str(ts)
+
+
 def create_teacher_requests_blueprint(deps: RouteDeps) -> Blueprint:
     bp = Blueprint('teacher_requests', __name__)
 
@@ -182,7 +191,7 @@ def create_teacher_requests_blueprint(deps: RouteDeps) -> Blueprint:
                 'email': user.get('email') or '',
                 'source': rec.get('source'),
                 'status': rec.get('status'),
-                'requestedAt': str(rec['requested_at']) if rec.get('requested_at') else None,
+                'requestedAt': _isoformat(rec.get('requested_at')),
             })
         return jsonify({'success': True, 'requests': out}), 200
 
