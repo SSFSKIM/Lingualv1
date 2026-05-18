@@ -107,6 +107,9 @@ export default defineConfig({
     setupFiles: './src/test/setup.ts',
     globals: true,
     css: true,
+    fakeTimers: {
+      shouldAdvanceTime: true,
+    },
   },
   server: {
     proxy: {
