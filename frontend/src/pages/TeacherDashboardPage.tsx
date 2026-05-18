@@ -5,7 +5,6 @@ import {
   AlertTriangle,
   BookOpen,
   CalendarClock,
-  Check,
   CheckCircle2,
   ClipboardCopy,
   Filter,
@@ -19,7 +18,6 @@ import {
   Link as LinkIcon,
   UserPlus,
   Users,
-  X,
 } from 'lucide-react';
 import {
   Alert,
@@ -48,11 +46,9 @@ import {
   generateTeacherInviteCode,
   getTeacherInviteCode,
   deactivateTeacherInviteCode,
-  listTeacherInvitations,
-  approveTeacherInvitation,
-  rejectTeacherInvitation,
 } from '@/api/schoolRequests';
 import type { TeacherInviteCodeData } from '@/api/schoolRequests';
+import { PendingTeacherRequestsSection } from '@/components/teacher/PendingTeacherRequestsSection';
 import { getLtiPlatform, registerLtiPlatform, deleteLtiPlatform } from '@/api/lti';
 import type { LtiPlatformConfig } from '@/api/lti';
 import { useMembership } from '@/contexts/MembershipContext';
@@ -63,7 +59,6 @@ import type {
   ClassRosterStudent,
   CreateTeacherClassPayload,
   TeacherDashboardData,
-  TeacherInvitation,
   CanvasRosterGapEntry,
   CanvasRosterGapSummary,
 } from '@/types';
@@ -115,9 +110,6 @@ export function TeacherDashboardPage() {
   const [teacherInviteCode, setTeacherInviteCode] = useState<TeacherInviteCodeData | null>(null);
   const [teacherInviteCodeLoading, setTeacherInviteCodeLoading] = useState(false);
   const [teacherInviteCodeCopied, setTeacherInviteCodeCopied] = useState(false);
-  const [pendingInvitations, setPendingInvitations] = useState<TeacherInvitation[]>([]);
-  const [pendingInvitationsLoading, setPendingInvitationsLoading] = useState(false);
-  const [processingInvitationId, setProcessingInvitationId] = useState<string | null>(null);
 
   // LTI configuration state (school_admin only)
   const [ltiPlatform, setLtiPlatform] = useState<LtiPlatformConfig | null>(null);
@@ -274,7 +266,6 @@ export function TeacherDashboardPage() {
   const loadTeamData = useCallback(async () => {
     if (!isSchoolAdmin) return;
     setTeacherInviteCodeLoading(true);
-    setPendingInvitationsLoading(true);
     try {
       const code = await getTeacherInviteCode();
       setTeacherInviteCode(code);
@@ -282,14 +273,6 @@ export function TeacherDashboardPage() {
       setTeacherInviteCode(null);
     } finally {
       setTeacherInviteCodeLoading(false);
-    }
-    try {
-      const invitations = await listTeacherInvitations('pending');
-      setPendingInvitations(invitations);
-    } catch {
-      setPendingInvitations([]);
-    } finally {
-      setPendingInvitationsLoading(false);
     }
     // Load LTI platform config
     setLtiLoading(true);
@@ -362,30 +345,6 @@ export function TeacherDashboardPage() {
       setError(err instanceof Error ? err.message : 'Failed to remove LTI platform.');
     } finally {
       setLtiSaving(false);
-    }
-  };
-
-  const handleApproveInvitation = async (invitationId: string) => {
-    setProcessingInvitationId(invitationId);
-    try {
-      await approveTeacherInvitation(invitationId);
-      setPendingInvitations((prev) => prev.filter((inv) => inv.id !== invitationId));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to approve invitation.');
-    } finally {
-      setProcessingInvitationId(null);
-    }
-  };
-
-  const handleRejectInvitation = async (invitationId: string) => {
-    setProcessingInvitationId(invitationId);
-    try {
-      await rejectTeacherInvitation(invitationId);
-      setPendingInvitations((prev) => prev.filter((inv) => inv.id !== invitationId));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to reject invitation.');
-    } finally {
-      setProcessingInvitationId(null);
     }
   };
 
@@ -563,6 +522,8 @@ export function TeacherDashboardPage() {
           />
         </>
       )}
+
+      {isSchoolAdmin && <PendingTeacherRequestsSection />}
 
       <div className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
         <Card className="border-3 border-foreground p-6 shadow-stamp">
@@ -816,76 +777,6 @@ export function TeacherDashboardPage() {
             )}
           </Card>
 
-          {/* Pending Teacher Invitations card */}
-          <Card className="border-3 border-foreground p-6 shadow-stamp">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="flex h-10 w-10 items-center justify-center rounded-2xl border-2 border-foreground bg-success/15 text-success">
-                <UserPlus size={20} strokeWidth={2.5} />
-              </div>
-              <div>
-                <h2 className="text-xl font-display font-bold text-foreground">Pending Teacher Invitations</h2>
-                <p className="text-sm text-muted-foreground">Review requests from teachers to join your school.</p>
-              </div>
-            </div>
-
-            {pendingInvitationsLoading ? (
-              <div className="flex justify-center py-8">
-                <Loader2 className="h-6 w-6 animate-spin text-primary" />
-              </div>
-            ) : pendingInvitations.length === 0 ? (
-              <div className="text-center py-8">
-                <Users className="mx-auto h-10 w-10 text-muted-foreground" />
-                <p className="mt-3 text-muted-foreground">No pending invitations.</p>
-              </div>
-            ) : (
-              <div className="space-y-3 max-h-[400px] overflow-y-auto">
-                {pendingInvitations.map((invitation) => (
-                  <div
-                    key={invitation.id}
-                    className="flex items-center justify-between rounded-xl border border-border bg-secondary/40 px-4 py-3"
-                  >
-                    <div>
-                      <p className="font-medium text-foreground">{invitation.name || 'Unknown'}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {invitation.email || 'No email'}
-                        {invitation.createdAt
-                          ? ` · Submitted ${new Date(invitation.createdAt).toLocaleDateString()}`
-                          : ''}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Button
-                        size="sm"
-                        onClick={() => handleApproveInvitation(invitation.id)}
-                        disabled={processingInvitationId === invitation.id}
-                        className="bg-success hover:bg-success/90 text-white"
-                      >
-                        {processingInvitationId === invitation.id ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <Check size={14} className="mr-1" />
-                        )}
-                        Approve
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleRejectInvitation(invitation.id)}
-                        disabled={processingInvitationId === invitation.id}
-                      >
-                        {processingInvitationId === invitation.id ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <X size={14} className="mr-1" />
-                        )}
-                        Reject
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </Card>
         </div>
       )}
 

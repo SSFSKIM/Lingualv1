@@ -30,6 +30,24 @@ vi.mock('@/api/teacher', () => ({
 
 vi.mock('@/api/schools', () => ({}));
 
+vi.mock('@/api/schoolRequests', () => ({
+  generateTeacherInviteCode: vi.fn(),
+  getTeacherInviteCode: vi.fn().mockResolvedValue(null),
+  deactivateTeacherInviteCode: vi.fn(),
+}));
+
+vi.mock('@/api/teacherRequests', () => ({
+  listPendingTeacherRequests: vi.fn().mockResolvedValue([]),
+  approveTeacherJoinRequest: vi.fn(),
+  declineTeacherJoinRequest: vi.fn(),
+}));
+
+vi.mock('@/api/lti', () => ({
+  getLtiPlatform: vi.fn().mockResolvedValue(null),
+  registerLtiPlatform: vi.fn(),
+  deleteLtiPlatform: vi.fn(),
+}));
+
 const authState: {
   user: {
     uid: string;
