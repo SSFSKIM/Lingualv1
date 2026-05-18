@@ -17,7 +17,8 @@ const LandingPage = lazy(() => import('./pages/LandingPage').then((module) => ({
 const LoginPage = lazy(() => import('./pages/LoginPage').then((module) => ({ default: module.LoginPage })));
 const SignupPage = lazy(() => import('./pages/SignupPage').then((module) => ({ default: module.SignupPage })));
 const TeacherJoinOrgPlaceholderPage = lazy(() => import('./pages/TeacherJoinOrgPlaceholderPage').then((module) => ({ default: module.TeacherJoinOrgPlaceholderPage })));
-const AdminOrgWizardPlaceholderPage = lazy(() => import('./pages/AdminOrgWizardPlaceholderPage').then((module) => ({ default: module.AdminOrgWizardPlaceholderPage })));
+const AdminOrgWizardPage = lazy(() => import('./pages/AdminOrgWizard/AdminOrgWizardPage').then((module) => ({ default: module.AdminOrgWizardPage })));
+const AdminPendingPage = lazy(() => import('./pages/AdminPendingPage').then((module) => ({ default: module.AdminPendingPage })));
 const GeneralPage = lazy(() => import('./pages/GeneralPage').then((module) => ({ default: module.GeneralPage })));
 const InitialOnboardingPage = lazy(() => import('./pages/InitialOnboardingPage').then((module) => ({ default: module.InitialOnboardingPage })));
 const LingualSchoolRequestsPage = lazy(() => import('./pages/LingualSchoolRequestsPage').then((module) => ({ default: module.LingualSchoolRequestsPage })));
@@ -86,7 +87,8 @@ function AnimatedRoutes() {
           <Route path="/general" element={withRouteSuspense(<GeneralPage />)} />
           <Route path="/signup/student/setup" element={withRouteSuspense(<GeneralPage />)} />
           <Route path="/signup/teacher/join-org" element={withRouteSuspense(<TeacherJoinOrgPlaceholderPage />)} />
-          <Route path="/signup/admin/org-wizard" element={withRouteSuspense(<AdminOrgWizardPlaceholderPage />)} />
+          <Route path="/signup/admin/org-wizard" element={withRouteSuspense(<AdminOrgWizardPage />)} />
+          <Route path="/signup/admin/pending" element={withRouteSuspense(<AdminPendingPage />)} />
           <Route path="/onboarding" element={withRouteSuspense(<InitialOnboardingPage />)} />
           <Route path="/school/setup" element={<Navigate to="/signup/admin/org-wizard" replace />} />
           <Route path="/assessment" element={withRouteSuspense(<AssessmentPage />)} />
