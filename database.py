@@ -244,6 +244,8 @@ Schema:
     - finished_at: timestamp | None
 """
 
+import hashlib
+import os
 import secrets
 from datetime import UTC, datetime
 
@@ -343,6 +345,20 @@ ALLOWED_REJECTION_CATEGORIES = frozenset({
 
 WIZARD_STEP_MIN = 1
 WIZARD_STEP_MAX = 4
+
+
+def hash_attestation_ip(ip, salt=None):
+    """Return `sha256:<hex>` of `salt + ip` for audit-grade IP storage.
+
+    Returns `sha256:none` for falsy IPs so the column has a stable shape.
+    Salt defaults to env var ATTESTATION_HASH_SALT (or empty string).
+    """
+    if not ip:
+        return 'sha256:none'
+    if salt is None:
+        salt = os.environ.get('ATTESTATION_HASH_SALT', '')
+    digest = hashlib.sha256(f'{salt}|{ip}'.encode('utf-8')).hexdigest()
+    return f'sha256:{digest}'
 
 
 def _utc_now():

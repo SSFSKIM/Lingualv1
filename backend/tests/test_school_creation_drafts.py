@@ -1,3 +1,4 @@
+import os
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -120,6 +121,34 @@ class SchoolCreationDraftHelpersTest(unittest.TestCase):
     def test_delete_calls_doc_delete(self, mock_ref):
         database.delete_school_creation_draft('uid-1')
         mock_ref.return_value.delete.assert_called_once()
+
+
+class HashAttestationIpTest(unittest.TestCase):
+    def test_hash_is_deterministic_given_salt(self):
+        a = database.hash_attestation_ip('1.2.3.4', salt='pepper')
+        b = database.hash_attestation_ip('1.2.3.4', salt='pepper')
+        self.assertEqual(a, b)
+        self.assertTrue(a.startswith('sha256:'))
+
+    def test_different_salts_produce_different_hashes(self):
+        a = database.hash_attestation_ip('1.2.3.4', salt='pepperA')
+        b = database.hash_attestation_ip('1.2.3.4', salt='pepperB')
+        self.assertNotEqual(a, b)
+
+    def test_different_ips_produce_different_hashes(self):
+        a = database.hash_attestation_ip('1.2.3.4', salt='pepper')
+        b = database.hash_attestation_ip('1.2.3.5', salt='pepper')
+        self.assertNotEqual(a, b)
+
+    def test_empty_ip_returns_empty_marker(self):
+        self.assertEqual(database.hash_attestation_ip('', salt='pepper'), 'sha256:none')
+        self.assertEqual(database.hash_attestation_ip(None, salt='pepper'), 'sha256:none')
+
+    @patch.dict(os.environ, {'ATTESTATION_HASH_SALT': 'env-salt'}, clear=False)
+    def test_default_salt_from_env(self):
+        a = database.hash_attestation_ip('1.2.3.4')
+        b = database.hash_attestation_ip('1.2.3.4', salt='env-salt')
+        self.assertEqual(a, b)
 
 
 if __name__ == '__main__':
