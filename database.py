@@ -246,6 +246,7 @@ Schema:
 
 import hashlib
 import os
+import sys
 import secrets
 from datetime import UTC, datetime
 
@@ -346,17 +347,32 @@ ALLOWED_REJECTION_CATEGORIES = frozenset({
 WIZARD_STEP_MIN = 1
 WIZARD_STEP_MAX = 4
 
+_ATTESTATION_SALT_WARNED = False
+
 
 def hash_attestation_ip(ip, salt=None):
     """Return `sha256:<hex>` of `salt + ip` for audit-grade IP storage.
 
     Returns `sha256:none` for falsy IPs so the column has a stable shape.
-    Salt defaults to env var ATTESTATION_HASH_SALT (or empty string).
+    Salt defaults to env var ATTESTATION_HASH_SALT. If that env var is unset
+    or empty in production, hashes are not isolated across deployments — we
+    log a one-shot warning to stderr but continue (matches the project's
+    feature-gated-env pattern; see main.py::_validate_required_env).
     """
     if not ip:
         return 'sha256:none'
     if salt is None:
-        salt = os.environ.get('ATTESTATION_HASH_SALT', '')
+        env_salt = os.environ.get('ATTESTATION_HASH_SALT', '')
+        if not env_salt:
+            global _ATTESTATION_SALT_WARNED
+            if not _ATTESTATION_SALT_WARNED:
+                print(
+                    '[warn] ATTESTATION_HASH_SALT is not set; '
+                    'IP hashes are not isolated across deployments.',
+                    file=sys.stderr,
+                )
+                _ATTESTATION_SALT_WARNED = True
+        salt = env_salt
     digest = hashlib.sha256(f'{salt}|{ip}'.encode('utf-8')).hexdigest()
     return f'sha256:{digest}'
 

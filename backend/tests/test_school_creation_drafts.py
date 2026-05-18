@@ -1,5 +1,7 @@
+import io
 import os
 import unittest
+from contextlib import redirect_stderr
 from unittest.mock import MagicMock, patch
 
 import database
@@ -149,6 +151,19 @@ class HashAttestationIpTest(unittest.TestCase):
         a = database.hash_attestation_ip('1.2.3.4')
         b = database.hash_attestation_ip('1.2.3.4', salt='env-salt')
         self.assertEqual(a, b)
+
+    def test_warns_once_when_default_salt_is_empty(self):
+        # Reset the sentinel so this test is self-contained
+        database._ATTESTATION_SALT_WARNED = False
+        buf = io.StringIO()
+        with redirect_stderr(buf):
+            # Ensure env var is unset for this call
+            with patch.dict(os.environ, {}, clear=True):
+                database.hash_attestation_ip('1.2.3.4')
+                database.hash_attestation_ip('5.6.7.8')  # second call must NOT re-warn
+        output = buf.getvalue()
+        self.assertIn('ATTESTATION_HASH_SALT', output)
+        self.assertEqual(output.count('ATTESTATION_HASH_SALT'), 1)
 
 
 if __name__ == '__main__':
