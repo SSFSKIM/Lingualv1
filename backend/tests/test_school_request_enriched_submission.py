@@ -191,8 +191,11 @@ class SchoolRequestDraftRouteTest(unittest.TestCase):
         self.client = self.app.test_client()
 
     def _login(self, uid):
+        user = self.db.users.get(uid) or {}
+        email = user.get('email') or f'{uid}@test.com'
+        name = (user.get('profile') or {}).get('display_name') or user.get('name') or ''
         with self.client.session_transaction() as s:
-            s['user'] = {'uid': uid, 'email': f'{uid}@test.com'}
+            s['user'] = {'uid': uid, 'email': email, 'name': name}
 
     def test_returns_null_when_no_draft(self):
         self._login('uid-1')
@@ -390,7 +393,7 @@ class SubmitEnrichedSchoolRequestTest(SchoolRequestDraftRouteTest):
         self.assertEqual(req['pre_invited_teachers'],
                          ['t1@ssfs.org', 't2@ssfs.org'])
 
-    def test_submit_uses_forwarded_for_attestation_ip(self):
+    def test_submit_uses_trusted_remote_addr_for_attestation_ip(self):
         self._login('uid-1')
         resp = self.client.post(
             '/api/school-requests',
@@ -407,8 +410,50 @@ class SubmitEnrichedSchoolRequestTest(SchoolRequestDraftRouteTest):
         att = req['admin_identity']['authorization_attestation']
         self.assertEqual(
             att['ip_hash'],
-            database.hash_attestation_ip('203.0.113.9'),
+            database.hash_attestation_ip('10.0.0.10'),
         )
+
+    def test_submit_dedupes_and_normalizes_pre_invites(self):
+        self._login('uid-1')
+        resp = self.client.post(
+            '/api/school-requests',
+            json=self._valid_payload(
+                preInvitedTeachers=[
+                    'T1@SSFS.ORG',
+                    ' t1@ssfs.org ',
+                    't2@ssfs.org',
+                    '',
+                ],
+            ),
+        )
+
+        self.assertEqual(resp.status_code, 201, resp.get_json())
+        req = list(self.db.school_requests.values())[0]
+        self.assertEqual(req['pre_invited_teachers'], ['t1@ssfs.org', 't2@ssfs.org'])
+
+    def test_submit_rejects_invalid_pre_invite_email(self):
+        self._login('uid-1')
+        resp = self.client.post(
+            '/api/school-requests',
+            json=self._valid_payload(preInvitedTeachers=['not-an-email']),
+        )
+
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn('preInvitedTeachers', resp.get_json()['error'])
+        self.assertEqual(self.db.school_requests, {})
+
+    def test_submit_rejects_too_many_pre_invites(self):
+        self._login('uid-1')
+        resp = self.client.post(
+            '/api/school-requests',
+            json=self._valid_payload(
+                preInvitedTeachers=[f'teacher{i}@ssfs.org' for i in range(26)],
+            ),
+        )
+
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn('preInvitedTeachers', resp.get_json()['error'])
+        self.assertEqual(self.db.school_requests, {})
 
     def test_submit_rejects_unchecked_attestation(self):
         self._login('uid-1')
@@ -450,6 +495,25 @@ class SubmitEnrichedSchoolRequestTest(SchoolRequestDraftRouteTest):
             if uid == 'uid-1' and kwargs.get('onboarding_state') == 'awaiting_lingual'
         ]
         self.assertTrue(match, f'expected onboarding_state set, got {self.profile_updates!r}')
+
+    def test_submit_fails_without_partial_request_when_onboarding_state_update_fails(self):
+        def fail_update(_uid, **_kwargs):
+            raise RuntimeError('profile write failed')
+
+        self.db.update_user_profile = fail_update
+        self.db.drafts['uid-1'] = {
+            'uid': 'uid-1',
+            'current_step': 4,
+            'draft_payload': {'schoolName': 'SF Friends'},
+            'updated_at': 'NOW',
+        }
+
+        self._login('uid-1')
+        resp = self.client.post('/api/school-requests', json=self._valid_payload())
+
+        self.assertEqual(resp.status_code, 500)
+        self.assertEqual(self.db.school_requests, {})
+        self.assertIn('uid-1', self.db.drafts)
 
 
 class SerializeRequestTest(SchoolRequestDraftRouteTest):

@@ -81,7 +81,7 @@ describe('schoolRequests api', () => {
     expect(req.id).toBe('r1');
   });
 
-  it('rejectSchoolRequest forwards the optional category', async () => {
+  it('rejectSchoolRequest forwards the required reason and category', async () => {
     mocked.post.mockResolvedValue({ data: { success: true, request: { id: 'r2' } } });
     await rejectSchoolRequest('r2', 'Need more info', 'info_missing');
     expect(mocked.post).toHaveBeenCalledWith(

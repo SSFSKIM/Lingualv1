@@ -57,7 +57,8 @@ class SchoolRequestDecisionTemplateRenderTest(unittest.TestCase):
         self.assertIn('SF Friends', html)
         self.assertIn('Ada Lovelace', html)
         self.assertIn('https://lingual.app/signup?role=teacher', html)
-        self.assertIn('helps your school admin verify the invitation', html)
+        self.assertIn('coordinate with your school admin', html)
+        self.assertNotIn('same email this invitation was sent to', html)
         self.assertNotIn('connect you to <strong>SF Friends</strong> automatically', html)
 
 

@@ -71,15 +71,12 @@ export const approveSchoolRequest = async (
 
 export const rejectSchoolRequest = async (
   id: string,
-  reason?: string,
-  category?: string,
+  reason: string,
+  category: string,
 ): Promise<SchoolRequest> => {
-  const body: Record<string, unknown> = {};
-  if (reason !== undefined) body.reason = reason;
-  if (category !== undefined) body.category = category;
   const response = await api.post<{ success: boolean; request: SchoolRequest }>(
     `/admin/school-requests/${id}/reject`,
-    body,
+    { reason, category },
   );
   return response.data.request;
 };

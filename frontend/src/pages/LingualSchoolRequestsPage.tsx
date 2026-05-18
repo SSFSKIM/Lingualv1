@@ -7,7 +7,7 @@ import {
 } from '@/api/schoolRequests';
 import { AnimatedPage } from '@/components/layout';
 import { Alert, AlertDescription, Badge, Button, Card, Input } from '@/components/ui';
-import type { SchoolRequest } from '@/types';
+import type { RejectionCategory, SchoolRequest } from '@/types';
 
 type StatusFilter = 'all' | 'pending' | 'approved' | 'rejected';
 
@@ -18,6 +18,14 @@ const STATUS_TABS: { value: StatusFilter; label: string }[] = [
   { value: 'rejected', label: 'Rejected' },
 ];
 
+const REJECTION_CATEGORIES: { value: RejectionCategory; label: string }[] = [
+  { value: 'info_missing', label: 'Information missing' },
+  { value: 'fraud_risk', label: 'Could not verify' },
+  { value: 'out_of_scope', label: 'Out of scope' },
+  { value: 'duplicate', label: 'Duplicate request' },
+  { value: 'other', label: 'Other' },
+];
+
 export function LingualSchoolRequestsPage() {
   const [requests, setRequests] = useState<SchoolRequest[]>([]);
   const [loading, setLoading] = useState(true);
@@ -26,6 +34,7 @@ export function LingualSchoolRequestsPage() {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [rejectingId, setRejectingId] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState('');
+  const [rejectCategory, setRejectCategory] = useState<RejectionCategory | ''>('');
 
   const fetchRequests = useCallback(async () => {
     setLoading(true);
@@ -63,12 +72,18 @@ export function LingualSchoolRequestsPage() {
   };
 
   const handleReject = async (id: string) => {
+    const reason = rejectReason.trim();
+    if (!reason || !rejectCategory) {
+      setError('Rejection reason and category are required.');
+      return;
+    }
     setActionLoading(id);
     setError(null);
     try {
-      await rejectSchoolRequest(id, rejectReason.trim() || undefined);
+      await rejectSchoolRequest(id, reason, rejectCategory);
       setRejectingId(null);
       setRejectReason('');
+      setRejectCategory('');
       await fetchRequests();
     } catch (err) {
       setError(
@@ -208,21 +223,56 @@ export function LingualSchoolRequestsPage() {
                   </Alert>
                 )}
 
+                {(req.preInvitedTeachers?.length ?? 0) > 0 && (
+                  <div className="space-y-2 rounded-md border p-3 text-sm">
+                    <p className="font-semibold">
+                      Pre-invited teachers ({req.preInvitedTeachers?.length ?? 0})
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {req.preInvitedTeachers?.map((email) => (
+                        <Badge key={email} variant="secondary">
+                          {email}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 {req.status === 'pending' && (
                   <div className="flex gap-3 pt-2">
                     {rejectingId === req.id ? (
                       <div className="flex w-full flex-col gap-2">
+                        <label className="flex flex-col gap-1 text-sm font-medium">
+                          Rejection category
+                          <select
+                            aria-label="Rejection category"
+                            value={rejectCategory}
+                            onChange={(e) => setRejectCategory(e.target.value as RejectionCategory)}
+                            className="h-11 rounded-md border px-3 py-2"
+                          >
+                            <option value="">Choose a category</option>
+                            {REJECTION_CATEGORIES.map((category) => (
+                              <option key={category.value} value={category.value}>
+                                {category.label}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
                         <Input
                           value={rejectReason}
                           onChange={(e) => setRejectReason(e.target.value)}
-                          placeholder="Reason for rejection (optional)"
+                          placeholder="Reason for rejection"
                           autoFocus
                         />
                         <div className="flex gap-2">
                           <Button
                             variant="destructive"
                             onClick={() => handleReject(req.id)}
-                            disabled={actionLoading === req.id}
+                            disabled={
+                              actionLoading === req.id ||
+                              !rejectReason.trim() ||
+                              !rejectCategory
+                            }
                             className="flex-1"
                           >
                             {actionLoading === req.id ? (
@@ -235,6 +285,7 @@ export function LingualSchoolRequestsPage() {
                             onClick={() => {
                               setRejectingId(null);
                               setRejectReason('');
+                              setRejectCategory('');
                             }}
                           >
                             Cancel
@@ -258,7 +309,11 @@ export function LingualSchoolRequestsPage() {
                         </Button>
                         <Button
                           variant="outline"
-                          onClick={() => setRejectingId(req.id)}
+                          onClick={() => {
+                            setRejectingId(req.id);
+                            setRejectReason('');
+                            setRejectCategory('');
+                          }}
                         >
                           <XCircle className="mr-2 h-4 w-4" />
                           Reject

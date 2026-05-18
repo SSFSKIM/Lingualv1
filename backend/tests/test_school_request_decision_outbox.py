@@ -228,13 +228,21 @@ class RejectSchoolRequestOutboxTest(unittest.TestCase):
 
     @patch('backend.routes.school_requests.database.get_db', return_value=MagicMock())
     @patch('backend.routes.school_requests.enqueue_outbox_email')
-    def test_reject_accepts_empty_reason(self, mock_enqueue, _mock_get_db):
+    def test_reject_requires_reason_and_category(self, mock_enqueue, _mock_get_db):
         resp = self.client.post('/api/admin/school-requests/req-2/reject', json={
             'category': 'other',
         })
-        self.assertEqual(resp.status_code, 200)
-        self.assertEqual(self.db.requests['req-2']['rejection_reason'], '')
-        self.assertEqual(self.db.requests['req-2']['rejection_category'], 'other')
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn('reason', resp.get_json()['error'])
+        self.assertEqual(self.db.requests['req-2']['status'], 'pending')
+
+        resp = self.client.post('/api/admin/school-requests/req-2/reject', json={
+            'reason': 'Need more info.',
+        })
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn('category', resp.get_json()['error'])
+        self.assertEqual(self.db.requests['req-2']['status'], 'pending')
+        mock_enqueue.assert_not_called()
 
     @patch('backend.routes.school_requests.database.get_db', return_value=MagicMock())
     @patch('backend.routes.school_requests.enqueue_outbox_email')

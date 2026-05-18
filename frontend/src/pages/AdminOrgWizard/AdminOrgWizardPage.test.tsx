@@ -87,6 +87,30 @@ describe('AdminOrgWizardPage', () => {
     );
   });
 
+  it('keeps Step 1 location inputs controlled while each nested field is filled', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      renderAt('/signup/admin/org-wizard');
+      await waitFor(() => expect(getDraftMock).toHaveBeenCalled());
+
+      fireEvent.change(screen.getByLabelText(/country/i), { target: { value: 'US' } });
+      fireEvent.change(screen.getByLabelText(/state/i), { target: { value: 'CA' } });
+      fireEvent.change(screen.getByLabelText(/county/i), { target: { value: 'San Francisco' } });
+
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      const messages = errorSpy.mock.calls.map((args) => args.map(String).join(' '));
+      expect(messages.some((message) => (
+        message.includes('A component is changing an uncontrolled input to be controlled') ||
+        message.includes('A component is changing a controlled input to be uncontrolled')
+      ))).toBe(false);
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
   it('debounces autosave (one PATCH after the user stops typing for 800ms)', async () => {
     vi.useFakeTimers();
     renderAt('/signup/admin/org-wizard');

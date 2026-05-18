@@ -100,8 +100,11 @@ class SchoolRequestOutboxIntegrationTest(unittest.TestCase):
         self.app.config['TESTING'] = True
 
     def _set_session(self, client, uid):
+        user = self.db.users.get(uid) or {}
+        email = user.get('email') or f'{uid}@test.com'
+        name = (user.get('profile') or {}).get('display_name') or user.get('name') or ''
         with client.session_transaction() as sess:
-            sess['user'] = {'uid': uid, 'email': f'{uid}@test.com'}
+            sess['user'] = {'uid': uid, 'email': email, 'name': name}
 
     def _valid_payload(self, school_name):
         return {

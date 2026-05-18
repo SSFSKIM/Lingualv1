@@ -148,15 +148,16 @@ from LTI session history.
 21. Outbox email scope (v1) — 2026-05-18
 
 The Firestore `outbox_emails/` collection and the `send_outbox_email` Cloud
-Function are live, but only one template is wired end-to-end:
-`school_request_to_lingual`. Other templates listed in the onboarding spec
-(teacher join notifications, approval/decline emails, suspend/restore, reminders)
-exist as enum values but have no rendering or business-side enqueue yet.
+Function are live. Plan 3 now wires `school_request_to_lingual`,
+`school_request_approved`, `school_request_declined`, and `teacher_invitation`
+end-to-end. Other templates listed in the onboarding spec (teacher join
+notifications, suspend/restore, reminders) still have no rendering or
+business-side enqueue yet.
 
-They are added in subsequent onboarding plans (Plans 3–6). Until then, the
-relevant business actions complete normally but do not produce email.
+Until later onboarding plans wire those remaining templates, the relevant
+business actions complete normally but do not produce those emails.
 
-**Sweep gap to watch:** `retry_outbox_sweep` in `functions/main.py` only re-promotes `status='failed'` documents back to `pending`. It does NOT yet pick up `pending` documents whose `scheduled_for` is in the past (intended for reminder emails). With v1 templates all being immediate (`scheduled_for = SERVER_TIMESTAMP`), the Firestore `on_document_written` trigger handles every email synchronously — this gap is latent. Before Plan 3+ wires any reminder template (e.g., `school_request_reminder_to_lingual`, `join_request_reminder_to_admin`), extend `_retry_outbox_sweep_impl` to also query `('status', '==', 'pending') AND ('scheduled_for', '<=', now)` and re-touch those docs to fire the trigger. The composite index `(status, scheduled_for)` added in `firestore.indexes.json` already supports that query.
+**Sweep gap to watch:** `retry_outbox_sweep` in `functions/main.py` only re-promotes `status='failed'` documents back to `pending`. It does NOT yet pick up `pending` documents whose `scheduled_for` is in the past (intended for reminder emails). With current v1 templates all being immediate (`scheduled_for = SERVER_TIMESTAMP`), the Firestore `on_document_written` trigger handles every email synchronously — this gap is latent. Before wiring any reminder template (e.g., `school_request_reminder_to_lingual`, `join_request_reminder_to_admin`), extend `_retry_outbox_sweep_impl` to also query `('status', '==', 'pending') AND ('scheduled_for', '<=', now)` and re-touch those docs to fire the trigger. The composite index `(status, scheduled_for)` added in `firestore.indexes.json` already supports that query.
 
 22. **Wizard draft has no TTL.** A `school_creation_drafts/{uid}` document
    lives until the user either submits successfully (route deletes it) or

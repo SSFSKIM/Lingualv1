@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from urllib.parse import urlparse
 
 import database
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, request, session
 
 from backend.route_deps import RouteDeps
 from backend.services.outbox import OutboxTemplate, enqueue_outbox_email
@@ -20,6 +20,7 @@ def _public_base_url() -> str:
 
 _EMAIL_RE = re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
 MAX_DRAFT_PAYLOAD_BYTES = 64_000
+MAX_PRE_INVITED_TEACHERS = 25
 
 
 def _serialize_request(req: dict | None) -> dict | None:
@@ -94,7 +95,8 @@ def create_school_requests_blueprint(deps: RouteDeps) -> Blueprint:
 
     def _require_lingual_admin(uid: str):
         """Raise PermissionError if the user is not a lingual_admin."""
-        if not deps.db.get_user_field(uid, 'lingual_admin'):
+        context = deps.db.resolve_user_school_context(uid)
+        if not context.get('lingual_admin'):
             raise PermissionError('Lingual admin access required.')
 
     # -- Enriched-payload helpers (used by submit_school_request) -------------
@@ -169,18 +171,38 @@ def create_school_requests_blueprint(deps: RouteDeps) -> Blueprint:
         return out
 
     def _authenticated_requester_contact(uid):
-        user_doc = deps.db.get_user(uid) or {}
-        profile = user_doc.get('profile') or {}
-        email = str(user_doc.get('email') or '').strip().lower()
-        name = str(profile.get('display_name') or user_doc.get('name') or '').strip()
+        user_session = session.get('user') or {}
+        if user_session.get('uid') != uid:
+            raise ValueError('Authenticated session does not match requester uid.')
+        email = str(user_session.get('email') or '').strip().lower()
+        name = str(user_session.get('name') or '').strip()
         if not email:
             raise ValueError('Authenticated user email is required.')
         return email, name
 
     def _attestation_ip():
-        if request.access_route:
-            return request.access_route[0] or ''
         return request.remote_addr or ''
+
+    def _normalize_pre_invited_teachers(values):
+        if not isinstance(values, list):
+            raise ValueError('preInvitedTeachers must be a list')
+        normalized = []
+        seen = set()
+        for raw in values:
+            email = str(raw or '').strip().lower()
+            if not email:
+                continue
+            if not _EMAIL_RE.match(email):
+                raise ValueError(f'preInvitedTeachers contains invalid email: {email!r}')
+            if email in seen:
+                continue
+            seen.add(email)
+            normalized.append(email)
+            if len(normalized) > MAX_PRE_INVITED_TEACHERS:
+                raise ValueError(
+                    f'preInvitedTeachers may include at most {MAX_PRE_INVITED_TEACHERS} emails.'
+                )
+        return normalized
 
     # -- User endpoints -------------------------------------------------------
 
@@ -204,6 +226,11 @@ def create_school_requests_blueprint(deps: RouteDeps) -> Blueprint:
                 return jsonify({'success': False, 'error': 'You already have a pending or approved request.'}), 409
 
             org_type = (data.get('orgType') or 'school').strip()
+            if org_type not in database.ALLOWED_ORG_TYPES:
+                return jsonify({
+                    'success': False,
+                    'error': f'orgType must be one of: {sorted(database.ALLOWED_ORG_TYPES)}',
+                }), 400
             requester_email, requester_name = _authenticated_requester_contact(uid)
             website_url = (data.get('websiteUrl') or '').strip()
             _validate_required_url(website_url, 'websiteUrl')
@@ -290,13 +317,9 @@ def create_school_requests_blueprint(deps: RouteDeps) -> Blueprint:
 
             pre_invites = data.get('preInvitedTeachers')
             if pre_invites is not None:
-                if not isinstance(pre_invites, list):
-                    return jsonify({'success': False, 'error': 'preInvitedTeachers must be a list'}), 400
-                enriched['pre_invited_teachers'] = [
-                    str(e).strip().lower() for e in pre_invites if str(e).strip()
-                ]
+                enriched['pre_invited_teachers'] = _normalize_pre_invited_teachers(pre_invites)
 
-            request_id = deps.db.create_school_request(
+            request_id = deps.db.create_school_request_with_onboarding(
                 requester_uid=uid,
                 requester_email=requester_email,
                 requester_name=requester_name,
@@ -306,18 +329,6 @@ def create_school_requests_blueprint(deps: RouteDeps) -> Blueprint:
                 canvas_instance_url=canvas_instance_url,
                 enriched=enriched or None,
             )
-
-            # Drop the draft — submission is the success terminal.
-            try:
-                deps.db.delete_school_creation_draft(uid)
-            except Exception as exc:
-                print(f'[draft] cleanup failed after submit: {exc}')
-
-            # Move the user's onboarding state forward.
-            try:
-                deps.db.update_user_profile(uid, onboarding_state='awaiting_lingual')
-            except Exception as exc:
-                print(f'[onboarding] state update failed: {exc}')
 
             # Fan-out outbox email to every active lingual admin.
             # The entire block is fire-and-forget: failures must never break the
@@ -625,6 +636,10 @@ def create_school_requests_blueprint(deps: RouteDeps) -> Blueprint:
             data = request.get_json() or {}
             reason = (data.get('reason') or '').strip()
             category = (data.get('category') or '').strip()
+            if not reason:
+                return jsonify({'success': False, 'error': 'reason is required.'}), 400
+            if not category:
+                return jsonify({'success': False, 'error': 'category is required.'}), 400
             if category and category not in database.ALLOWED_REJECTION_CATEGORIES:
                 return jsonify({
                     'success': False,
@@ -640,7 +655,6 @@ def create_school_requests_blueprint(deps: RouteDeps) -> Blueprint:
             })
 
             try:
-                base = _public_base_url()
                 enqueue_outbox_email(
                     db=database.get_db(),
                     recipient_email=req.get('requester_email') or '',

@@ -392,13 +392,30 @@ class FakeDbBase:
         memberships.sort(key=lambda m: m["id"])
         active_membership_id = preferred_active_membership_id or self.user_active_memberships.get(uid)
         active = next((m for m in memberships if m["id"] == active_membership_id), memberships[0] if memberships else None)
+        user = self.users.get(uid) or {}
+        lingual_admin = bool(user.get("lingual_admin")) or any(
+            (membership or {}).get("status") == "active"
+            and "lingual_admin" in ((membership or {}).get("roles") or [])
+            for membership in memberships
+        )
         return {
             "memberships": memberships,
             "active_membership": active,
             "active_membership_id": active.get("id") if active else None,
             "active_organization_id": active.get("orgId") if active else None,
             "active_roles": active.get("roles", []) if active else [],
+            "lingual_admin": lingual_admin,
         }
+
+    def create_school_request_with_onboarding(self, **kwargs):
+        requester_uid = kwargs["requester_uid"]
+        self.update_user_profile(
+            requester_uid,
+            onboarding_state="awaiting_lingual",
+        )
+        request_id = self.create_school_request(**kwargs)
+        self.delete_school_creation_draft(requester_uid)
+        return request_id
 
     # -- Core CRUD --
 

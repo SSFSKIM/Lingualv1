@@ -36,7 +36,11 @@ function setField(dispatch: (a: WizardAction) => void, path: string, value: unkn
 }
 
 export function WizardStep1Organization({ state, dispatch }: WizardStep1Props) {
-  const loc = state.location ?? { country: '', state: '' };
+  const loc = {
+    country: state.location?.country ?? '',
+    state: state.location?.state ?? '',
+    county: state.location?.county ?? '',
+  };
   return (
     <div className="space-y-5">
       <WizardField label="Organization name" required htmlFor="schoolName">

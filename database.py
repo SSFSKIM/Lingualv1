@@ -285,6 +285,10 @@ ALLOWED_ONBOARDING_STATES = frozenset({
 
 # School registration wizard enums (Plan 3)
 
+ALLOWED_ORG_TYPES = frozenset({
+    'school',
+})
+
 ALLOWED_SCHOOL_TYPES = frozenset({
     'middle',
     'high',
@@ -2657,18 +2661,9 @@ def unlink_assignment_from_canvas_item(assignment_id, canvas_content_id):
     batch.commit()
 
 
-def create_school_request(requester_uid, requester_email, requester_name,
-                          school_name, org_type, website_url='',
-                          canvas_instance_url='', *, enriched=None):
-    """Create a school join request.
-
-    `enriched`, when provided, is merged into the document. Legal keys are the
-    Plan 3 wizard groups: `location`, `school_type`, `public_private`,
-    `grade_size`, `official_email_domains`, `admin_identity`, `integration`,
-    `curriculum`, `pre_invited_teachers`. Validation of inner values is the
-    route's responsibility (this function trusts its caller).
-    """
-    doc_ref = get_school_requests_collection().document()
+def _build_school_request_payload(requester_uid, requester_email, requester_name,
+                                  school_name, org_type, website_url='',
+                                  canvas_instance_url='', *, enriched=None):
     payload = {
         'requester_uid': requester_uid,
         'requester_email': requester_email,
@@ -2693,8 +2688,67 @@ def create_school_request(requester_uid, requester_email, requester_name,
         ):
             if key in enriched:
                 payload[key] = enriched[key]
+    return payload
+
+
+def create_school_request(requester_uid, requester_email, requester_name,
+                          school_name, org_type, website_url='',
+                          canvas_instance_url='', *, enriched=None):
+    """Create a school join request.
+
+    `enriched`, when provided, is merged into the document. Legal keys are the
+    Plan 3 wizard groups: `location`, `school_type`, `public_private`,
+    `grade_size`, `official_email_domains`, `admin_identity`, `integration`,
+    `curriculum`, `pre_invited_teachers`. Validation of inner values is the
+    route's responsibility (this function trusts its caller).
+    """
+    doc_ref = get_school_requests_collection().document()
+    payload = _build_school_request_payload(
+        requester_uid,
+        requester_email,
+        requester_name,
+        school_name,
+        org_type,
+        website_url,
+        canvas_instance_url,
+        enriched=enriched,
+    )
     doc_ref.set(payload)
     return doc_ref.id
+
+
+def create_school_request_with_onboarding(requester_uid, requester_email, requester_name,
+                                          school_name, org_type, website_url='',
+                                          canvas_instance_url='', *, enriched=None):
+    """Create a school request and advance admin onboarding atomically."""
+    client = get_db()
+    request_ref = client.collection('school_requests').document()
+    user_ref = client.collection('users').document(requester_uid)
+    draft_ref = client.collection('school_creation_drafts').document(requester_uid)
+    transaction = client.transaction()
+
+    payload = _build_school_request_payload(
+        requester_uid,
+        requester_email,
+        requester_name,
+        school_name,
+        org_type,
+        website_url,
+        canvas_instance_url,
+        enriched=enriched,
+    )
+
+    @firestore.transactional
+    def _submit(transaction):
+        transaction.set(request_ref, payload)
+        transaction.update(user_ref, {
+            'profile.onboarding_state': ONBOARDING_STATE_AWAITING_LINGUAL,
+            'updated_at': firestore.SERVER_TIMESTAMP,
+        })
+        transaction.delete(draft_ref)
+        return request_ref.id
+
+    return _submit(transaction)
 
 
 def get_school_request(request_id):
