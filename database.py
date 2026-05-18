@@ -430,6 +430,16 @@ def get_school_request_ref(request_id):
     return get_school_requests_collection().document(request_id)
 
 
+def get_school_creation_drafts_collection():
+    """Collection of in-progress school registration wizard drafts."""
+    return get_db().collection('school_creation_drafts')
+
+
+def get_school_creation_draft_ref(uid):
+    """Doc ref for a user's draft (doc id == uid; one draft per user)."""
+    return get_school_creation_drafts_collection().document(uid)
+
+
 def get_practice_sessions_collection():
     """Get practice sessions collection."""
     return get_db().collection('practice_sessions')

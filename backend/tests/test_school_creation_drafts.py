@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import MagicMock, patch
 
 import database
 
@@ -43,6 +44,22 @@ class WizardEnumConstantsTest(unittest.TestCase):
     def test_wizard_step_range(self):
         self.assertEqual(database.WIZARD_STEP_MIN, 1)
         self.assertEqual(database.WIZARD_STEP_MAX, 4)
+
+
+class SchoolCreationDraftAccessorsTest(unittest.TestCase):
+    @patch('database.get_db')
+    def test_collection_accessor(self, mock_get_db):
+        client = MagicMock()
+        mock_get_db.return_value = client
+        coll = database.get_school_creation_drafts_collection()
+        client.collection.assert_called_once_with('school_creation_drafts')
+        self.assertEqual(coll, client.collection.return_value)
+
+    @patch('database.get_school_creation_drafts_collection')
+    def test_ref_accessor(self, mock_coll):
+        ref = database.get_school_creation_draft_ref('uid-1')
+        mock_coll.return_value.document.assert_called_once_with('uid-1')
+        self.assertEqual(ref, mock_coll.return_value.document.return_value)
 
 
 if __name__ == '__main__':
