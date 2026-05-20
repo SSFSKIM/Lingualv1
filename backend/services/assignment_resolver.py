@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from backend.services.compliance import resolve_assignment_launch
+from backend.services.suspended_org_guard import enforce_org_active
 
 
 SUPPORTED_ASSIGNMENT_STATUSES = {"draft", "published", "archived"}
@@ -966,7 +967,16 @@ def resolve_assignment_bootstrap(
     ``mapping`` kwarg is kept only for backwards compatibility with the
     pre-C2 call sites and is always ignored. Every assignment now flows
     through the Canvas-generated resolver.
+
+    Raises ``SuspendedOrgError`` (from
+    ``backend.services.suspended_org_guard``) when the assignment's owning
+    org is suspended. Callers that are Flask routes translate this to a
+    403 with the stable ``org_suspended`` payload.
     """
+    enforce_org_active(
+        (class_record or {}).get("org_id"),
+        db=getattr(deps, "db", None),
+    )
     assignment_dto = serialize_assignment(assignment)
     if not assignment_dto:
         raise ValueError("Assignment bootstrap requires a valid assignment record.")

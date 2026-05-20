@@ -15,6 +15,7 @@ from backend.services.assignment_resolver import (
     user_can_access_assignment,
 )
 from backend.services.compliance import create_consent_event, resolve_assignment_launch
+from backend.services.suspended_org_guard import SuspendedOrgError, enforce_org_active
 
 
 AVATAR_EMOTION_KEYS = [
@@ -383,6 +384,17 @@ def create_chat_blueprint(deps: RouteDeps) -> Blueprint:
                         return jsonify({'success': False, 'error': 'Practice session is no longer active.'}), 409
 
                     assignment, _mapping, class_record = load_assignment_bundle(deps, assignment_id)
+                    # Suspended-org gate: block new realtime sessions on an
+                    # org that's been suspended since the practice session
+                    # was created. The in-flight grace is handled when
+                    # ``/api/practice-sessions/<id>/events`` is called.
+                    try:
+                        enforce_org_active(
+                            (class_record or {}).get('org_id'),
+                            db=deps.db,
+                        )
+                    except SuspendedOrgError as exc:
+                        return jsonify(exc.to_payload()), 403
                     allowed, teacher_preview = user_can_access_assignment(
                         deps,
                         uid=uid,
@@ -496,6 +508,8 @@ def create_chat_blueprint(deps: RouteDeps) -> Blueprint:
                 'expires_at': data.get('expires_at'),
             })
 
+        except SuspendedOrgError as exc:
+            return jsonify(exc.to_payload()), 403
         except PermissionError as e:
             return jsonify({'error': str(e), 'success': False}), 403
         except ValueError as e:

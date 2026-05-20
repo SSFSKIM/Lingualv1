@@ -20,6 +20,10 @@ class FakeResolverDb:
         self.assignments = {}
         self.classes = {}
         self.enrollments = {}
+        # Org status lookup feeds the suspended-org guard inside
+        # resolve_assignment_bootstrap. Tests that exercise the guard add
+        # entries; absent orgs are treated as "not suspended" (no-op).
+        self.organizations = {}
 
     def get_assignment(self, assignment_id):
         return self.assignments.get(assignment_id)
@@ -29,6 +33,9 @@ class FakeResolverDb:
 
     def get_student_class_enrollment(self, class_id, uid):
         return self.enrollments.get(f"{class_id}_{uid}")
+
+    def get_organization(self, org_id):
+        return self.organizations.get(org_id)
 
 
 def _make_deps(db=None):
