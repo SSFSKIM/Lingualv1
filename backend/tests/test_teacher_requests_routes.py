@@ -1,11 +1,32 @@
 """Route tests for backend/routes/teacher_requests.py."""
 from __future__ import annotations
 
+import os
 import unittest
 from unittest.mock import MagicMock
 
 from backend.routes.teacher_requests import create_teacher_requests_blueprint
 from backend.tests.conftest import FakeDbBase, make_test_app, make_test_deps
+
+
+# Plan 3 added a global outbox-write guard in conftest.py
+# (LINGUAL_BLOCK_OUTBOX_WRITES=1) so test runs never leak real emails to
+# production Firestore. Plan 4's route tests in this module exercise the
+# *real* enqueue_outbox_email through a FakeFirestoreClient that captures
+# writes locally (see FakeTeacherRequestsDb.outbox_writes), so the guard
+# would block the path under test. Opt out at the module level and restore
+# afterwards.
+_PRIOR_OUTBOX_BLOCK: str | None = None
+
+
+def setUpModule() -> None:
+    global _PRIOR_OUTBOX_BLOCK
+    _PRIOR_OUTBOX_BLOCK = os.environ.pop('LINGUAL_BLOCK_OUTBOX_WRITES', None)
+
+
+def tearDownModule() -> None:
+    if _PRIOR_OUTBOX_BLOCK is not None:
+        os.environ['LINGUAL_BLOCK_OUTBOX_WRITES'] = _PRIOR_OUTBOX_BLOCK
 
 
 class FakeFirestoreClient:

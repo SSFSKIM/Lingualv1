@@ -145,29 +145,138 @@ Planned follow-up: add a teacher-side manual "link to Canvas roster
 entry" action, and/or a second-tier match via `canvas_user_id` derived
 from LTI session history.
 
-21. Outbox email scope (v1) — 2026-05-18
+21. Outbox email scope (v1) — 2026-05-18 (updated 2026-05-19 with Plan 4)
 
 The Firestore `outbox_emails/` collection and the `send_outbox_email` Cloud
-Function are live, but only one template is wired end-to-end:
-`school_request_to_lingual`. Other templates listed in the onboarding spec
-(teacher join notifications, approval/decline emails, suspend/restore, reminders)
-exist as enum values but have no rendering or business-side enqueue yet.
+Function are live. Plans 1 + 3 + 4 together wire seven templates end-to-end:
+`school_request_to_lingual`, `school_request_approved`,
+`school_request_declined`, `teacher_invitation`,
+`teacher_join_request_to_admin`, `teacher_join_approved`,
+`teacher_join_declined`. Other templates listed in the onboarding spec
+(suspend/restore notifications, the 7-day reminders) still have no
+rendering or business-side enqueue yet.
 
-They are added in subsequent onboarding plans (Plans 3–6). Until then, the
-relevant business actions complete normally but do not produce email.
+Until later onboarding plans wire those remaining templates, the relevant
+business actions complete normally but do not produce those emails.
 
-**Sweep gap to watch:** `retry_outbox_sweep` in `functions/main.py` only re-promotes `status='failed'` documents back to `pending`. It does NOT yet pick up `pending` documents whose `scheduled_for` is in the past (intended for reminder emails). With v1 templates all being immediate (`scheduled_for = SERVER_TIMESTAMP`), the Firestore `on_document_written` trigger handles every email synchronously — this gap is latent. Before Plan 3+ wires any reminder template (e.g., `school_request_reminder_to_lingual`, `join_request_reminder_to_admin`), extend `_retry_outbox_sweep_impl` to also query `('status', '==', 'pending') AND ('scheduled_for', '<=', now)` and re-touch those docs to fire the trigger. The composite index `(status, scheduled_for)` added in `firestore.indexes.json` already supports that query.
+**Sweep gap to watch:** `retry_outbox_sweep` in `functions/main.py` only re-promotes `status='failed'` documents back to `pending`. It does NOT yet pick up `pending` documents whose `scheduled_for` is in the past (intended for reminder emails). With current v1 templates all being immediate (`scheduled_for = SERVER_TIMESTAMP`), the Firestore `on_document_written` trigger handles every email synchronously — this gap is latent. Before wiring any reminder template (e.g., `school_request_reminder_to_lingual`, `join_request_reminder_to_admin`), extend `_retry_outbox_sweep_impl` to also query `('status', '==', 'pending') AND ('scheduled_for', '<=', now)` and re-touch those docs to fire the trigger. The composite index `(status, scheduled_for)` added in `firestore.indexes.json` already supports that query.
+
+22. **Wizard draft has no TTL.** A `school_creation_drafts/{uid}` document
+   lives until the user either submits successfully (route deletes it) or
+   cancels the in-flight request. Stale drafts persist indefinitely.
+
+23. **Pre-invite emails are best-effort at approval time.** The approve
+    route enqueues one `teacher_invitation` outbox doc per email and one
+    `school_request_approved` doc to the requester. Failures to enqueue
+    are logged but do not block the approval response — the membership,
+    org, and `teacher_invitations/` rows are written first.
+
+24. **`school_creation_drafts` rules are not under automated coverage in
+    this plan.** Task 18 added the owner-only rule but the Firebase
+    emulator test suite (`firebase-tests/`, Java required) was not
+    extended. The rule mirrors the existing `users/{uid}` ownership
+    pattern; a follow-up should add a rules test once a Java-enabled CI
+    runner is available.
+
+25. **DB column names diverge from spec naming for decline / reject.**
+    Design spec §4 names `decline_reason` / `decline_category` on
+    `school_requests`. The implementation kept the pre-existing column
+    names `rejection_reason` / `rejection_category` to avoid migrating
+    historical rows. API responses use camelCase `rejectionReason` /
+    `rejectionCategory`. User-facing UI copy still says "Declined".
+    Future readers grepping for `decline_reason` will not find it.
+
+26. **Admin wizard is English-only.** Wizard labels, helper text, and
+    the three new email templates (`school_request_approved`,
+    `school_request_declined`, `teacher_invitation`) ship in English
+    only. `LanguageProvider` (en/ko) covers the learner app but is not
+    threaded through the wizard. Acceptable for v1 (admin audience is
+    US schools); revisit when expanding outside the US.
+
+27. **Approved admin pending state auto-navigates instead of showing a
+    dashboard CTA.** Design spec §4 says the pending page should surface a
+    "Continue to dashboard" CTA once Lingual approves the request. The current
+    implementation refreshes the user session and immediately navigates to
+    `/app/teacher` when `/api/school-requests/mine` returns `approved`.
+    Impact: approved admins do land in the correct school-admin experience
+    after the membership is refreshed, but they do not see an intermediate
+    approval confirmation or explicit CTA. Planned follow-up: replace the
+    immediate redirect with an approved-state panel once the dedicated
+    school-admin home route lands.
+
+28. **Role grants and changes require a session refresh to take effect.**
+    `AuthContext` only re-fetches the auth payload via `/api/auth/verify`
+    when Firebase Auth state changes (sign-in / sign-out) — not on every
+    navigation. So if a Lingual admin grants someone a new role or flips
+    a flag (e.g. `lingual_admin: true`) on a user whose session is already
+    established, the affected user keeps the stale `user.lingualAdmin`,
+    `memberships`, and `activeRoles` in React state until they sign out
+    and back in (or hard reload). The backend correctly returns the new
+    payload on demand; only the frontend cache is stale. Symptoms include
+    the profile card showing the old role label, the Home button routing
+    to the wrong dashboard, and `LingualAdminRoute` redirecting newly
+    promoted admins back to `/app/learn`. Planned follow-up: have
+    `AuthContext` poll `/api/auth/verify` on long-lived sessions, or
+    surface a "your access changed, refresh" toast when the server's
+    `lingualAdmin` / `activeRoles` differ from the cached payload.
+
+29. **Backend tests can write to production Firestore without isolation.**
+    Route handlers (e.g. `submit_school_request`) call `database.get_db()`
+    directly instead of going through a `deps`-injected client, so a test
+    that POSTs to `/api/school-requests` while the prod service account is
+    in scope writes real outbox docs to production. This actually happened
+    during the Plan 3 smoke test: a `make test-backend` run created ~27
+    outbox docs that the deployed Cloud Function later picked up and sent
+    as real emails to kimmi@l1ngual.com. Symptom was "I got 4 emails for
+    SF Friends and Springfield Elementary" (fixture school names from
+    `test_school_requests.py` and `test_school_request_outbox_integration.py`).
+    Mitigated by a runtime guard in `backend/services/outbox.py`:
+    `LINGUAL_BLOCK_OUTBOX_WRITES=1` makes `enqueue_outbox_email` raise
+    `OutboxBlockedInTestMode`, which the route's existing fan-out
+    try/except wrappers catch and log. `backend/tests/conftest.py` sets the
+    env var at import time so every test inherits the protection. Proper
+    long-term fix: route the Firestore client through `RouteDeps` so tests
+    can inject a fake DB at the boundary instead of relying on an env
+    guard. Tracked in TASKS / TECH_SPEC.
+
+30. **Local dev shows intermittent browser 500s during long-running POSTs.**
+    `main.py` runs Werkzeug's threaded dev server (`app.run`) in development.
+    On Python 3.12, Werkzeug occasionally raises
+    `OSError: [Errno 9] Bad file descriptor` during socket cleanup when a
+    request handler holds the connection open across multiple Firestore
+    round-trips (e.g. the approve route's transaction + side effects +
+    outbox enqueue + final read). The Vite proxy interprets the dropped
+    upstream socket as a 500 and surfaces it to the browser, even though
+    the Flask request usually completes successfully on its own thread and
+    logs 200 in the access log. Production is unaffected because Cloud Run
+    uses `gunicorn --workers 1 --threads 8 --timeout 120 main:app` (see
+    Dockerfile), which handles socket lifecycle correctly. When a local
+    approve / submit shows a 500 in the browser: check the backend access
+    log for the actual status, and verify Firestore + outbox state — the
+    work is almost always already done. Optional follow-up: add a Makefile
+    target to run local dev under gunicorn (eliminates the race but loses
+    Flask's auto-reload convenience).
 
 ### Teacher join-org (Plan 4)
 
-- Search is name-prefix only (`name_lower` index), not full-text. "san fran" matches "San Francisco …" but not "Friends of San Francisco".
-- One pending request per user is enforced — to retry with a different school, the user must cancel first.
-- Multi-org membership is not supported: any active membership in any org blocks a new join request.
-- Rate limiting on `/api/organizations/search` is process-local (10 req/sec/uid). Horizontal scale will require a shared store (Redis / Firestore counter).
-- Status polling on `/signup/teacher/pending` is 30s; not realtime. A realtime listener is a v1.5 follow-up.
-- Search excludes suspended and archived orgs; the `status=='active'` filter is applied in Python post-`limit`, so a query that hits 10 non-active orgs may silently return fewer results than expected. Move the active filter into Firestore once a composite index `(status, name_lower)` exists.
-- A stale active invite code on a suspended org returns 404 (not a friendlier 409). Production's `get_org_by_teacher_invite_code` filters `status='active'` at the Firestore query level, so the 409 branch in the route is effectively unreachable in production. v1.5 may split the query into two steps to produce a more informative response.
-- **7-day reminder email to admins** is NOT implemented. Stale pending requests are visible on the admin dashboard but no automatic nudge is sent. Implement via a daily Cloud Function sweep that writes future-dated outbox docs once requests age past 7 days. Product decision needed before launch.
-- **Approval flow is not transactional.** `POST /api/teacher-join-requests/<id>/approve` performs three sequential Firestore writes (create membership, set last-active membership, mark request approved) plus a fail-soft profile update. If a later write fails after an earlier one succeeded, the system is briefly inconsistent (e.g. teacher has a membership but request still shows pending; or two admins approving concurrently produce duplicate memberships). Wrap in a Firestore batch in v1.5.
-- **`PUBLIC_BASE_URL` is feature-gated.** Email CTAs use absolute URLs when set; otherwise relative paths (which break in email clients). The variable is registered in `_validate_required_env` as a feature-gated key (warns in dev, fails fast in production at boot).
-- **Top-level error handling on new endpoints is light.** The new `backend/routes/teacher_requests.py` endpoints do not wrap their main body in `try/except Exception` the way `school_requests.py` does. Firestore transient errors will surface as unformatted HTML 500 rather than shaped JSON. Add the wrapper in a hardening pass.
+31. **Plan 4 follow-ups.** Notable shipped-state constraints on the teacher
+    join-org flow:
+
+    - Search is name-prefix only (`name_lower` index), not full-text. "san fran" matches "San Francisco …" but not "Friends of San Francisco".
+    - One pending request per user is enforced — to retry with a different school, the user must cancel first.
+    - Multi-org membership is not supported: any active membership in any org blocks a new join request.
+    - Rate limiting on `/api/organizations/search` is process-local (10 req/sec/uid). Horizontal scale will require a shared store (Redis / Firestore counter).
+    - Status polling on `/signup/teacher/pending` is 30s; not realtime. A realtime listener is a v1.5 follow-up.
+    - Search excludes suspended and archived orgs; the `status=='active'` filter is applied in Python post-`limit`, so a query that hits 10 non-active orgs may silently return fewer results than expected. Move the active filter into Firestore once a composite index `(status, name_lower)` exists.
+    - A stale active invite code on a suspended org returns 404 (not a friendlier 409). Production's `get_org_by_teacher_invite_code` filters `status='active'` at the Firestore query level, so the 409 branch in the route is effectively unreachable in production. v1.5 may split the query into two steps to produce a more informative response.
+    - **7-day reminder email to admins** is NOT implemented. Stale pending requests are visible on the admin dashboard but no automatic nudge is sent. Implement via a daily Cloud Function sweep that writes future-dated outbox docs once requests age past 7 days. Product decision needed before launch.
+    - **Approval flow is not transactional.** `POST /api/teacher-join-requests/<id>/approve` performs three sequential Firestore writes (create membership, set last-active membership, mark request approved) plus a fail-soft profile update. If a later write fails after an earlier one succeeded, the system is briefly inconsistent (e.g. teacher has a membership but request still shows pending; or two admins approving concurrently produce duplicate memberships). Wrap in a Firestore batch in v1.5.
+    - **`PUBLIC_BASE_URL` is feature-gated.** Email CTAs use absolute URLs when set; otherwise relative paths (which break in email clients). The variable is registered in `_validate_required_env` as a feature-gated key (warns in dev, fails fast in production at boot).
+    - **Top-level error handling on new endpoints is light.** The new `backend/routes/teacher_requests.py` endpoints do not wrap their main body in `try/except Exception` the way `school_requests.py` does. Firestore transient errors will surface as unformatted HTML 500 rather than shaped JSON. Add the wrapper in a hardening pass.
+
+32. **LIMITATIONS #17 (auto-approve teacher invitations) is now RESOLVED by
+    Plan 4.** The auto-approve block in `api_join_as_teacher` is replaced
+    by a 410 Gone response pointing callers at the new
+    `/api/teacher-join-requests` flow. Teachers now go through explicit
+    school-admin approval. Item #17 is preserved as historical context for
+    the pilot shortcut.

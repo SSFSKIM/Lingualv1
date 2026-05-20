@@ -490,6 +490,10 @@
   "app.teacher.status.inactive": "비활동",
 
   "app.layout.role.learner": "학습자",
+  "app.layout.role.student": "학생",
+  "app.layout.role.teacher": "교사",
+  "app.layout.role.schoolAdmin": "학교 관리자",
+  "app.layout.role.lingualAdmin": "Lingual 관리자",
   "app.layout.language.korean": "한국어",
   "app.layout.nav.learning": "학습",
   "app.layout.nav.chat": "채팅",

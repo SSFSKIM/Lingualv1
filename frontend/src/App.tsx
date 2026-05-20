@@ -22,7 +22,8 @@ const TeacherJoinOrgPage = lazy(() =>
 const TeacherJoinPendingPage = lazy(() =>
   import('./pages/TeacherJoinPendingPage').then(m => ({ default: m.TeacherJoinPendingPage }))
 );
-const AdminOrgWizardPlaceholderPage = lazy(() => import('./pages/AdminOrgWizardPlaceholderPage').then((module) => ({ default: module.AdminOrgWizardPlaceholderPage })));
+const AdminOrgWizardPage = lazy(() => import('./pages/AdminOrgWizard/AdminOrgWizardPage').then((module) => ({ default: module.AdminOrgWizardPage })));
+const AdminPendingPage = lazy(() => import('./pages/AdminPendingPage').then((module) => ({ default: module.AdminPendingPage })));
 const GeneralPage = lazy(() => import('./pages/GeneralPage').then((module) => ({ default: module.GeneralPage })));
 const InitialOnboardingPage = lazy(() => import('./pages/InitialOnboardingPage').then((module) => ({ default: module.InitialOnboardingPage })));
 const LingualSchoolRequestsPage = lazy(() => import('./pages/LingualSchoolRequestsPage').then((module) => ({ default: module.LingualSchoolRequestsPage })));
@@ -91,7 +92,8 @@ function AnimatedRoutes() {
           <Route path="/signup/student/setup" element={withRouteSuspense(<GeneralPage />)} />
           <Route path="/signup/teacher/join-org" element={withRouteSuspense(<TeacherJoinOrgPage />)} />
           <Route path="/signup/teacher/pending" element={withRouteSuspense(<TeacherJoinPendingPage />)} />
-          <Route path="/signup/admin/org-wizard" element={withRouteSuspense(<AdminOrgWizardPlaceholderPage />)} />
+          <Route path="/signup/admin/org-wizard" element={withRouteSuspense(<AdminOrgWizardPage />)} />
+          <Route path="/signup/admin/pending" element={withRouteSuspense(<AdminPendingPage />)} />
           <Route path="/onboarding" element={withRouteSuspense(<InitialOnboardingPage />)} />
           <Route path="/school/setup" element={<Navigate to="/signup/admin/org-wizard" replace />} />
           <Route path="/assessment" element={withRouteSuspense(<AssessmentPage />)} />

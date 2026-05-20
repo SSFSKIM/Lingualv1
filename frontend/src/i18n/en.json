@@ -122,6 +122,10 @@
   "nav.back": "Back",
 
   "app.layout.role.learner": "Learner",
+  "app.layout.role.student": "Student",
+  "app.layout.role.teacher": "Teacher",
+  "app.layout.role.schoolAdmin": "School Admin",
+  "app.layout.role.lingualAdmin": "Lingual Admin",
   "app.layout.language.korean": "Korean",
   "app.layout.nav.learning": "Learning",
   "app.layout.nav.chat": "Chat",

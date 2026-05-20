@@ -244,6 +244,9 @@ Schema:
     - finished_at: timestamp | None
 """
 
+import hashlib
+import os
+import sys
 import secrets
 from datetime import UTC, datetime
 
@@ -279,6 +282,103 @@ ALLOWED_ONBOARDING_STATES = frozenset({
     ONBOARDING_STATE_AWAITING_LINGUAL,
     ONBOARDING_STATE_COMPLETE,
 })
+
+# School registration wizard enums (Plan 3)
+
+ALLOWED_ORG_TYPES = frozenset({
+    'school',
+})
+
+ALLOWED_SCHOOL_TYPES = frozenset({
+    'middle',
+    'high',
+    'k12',
+    'university',
+    'language_academy',
+    'district',
+    'other',
+})
+
+ALLOWED_PUBLIC_PRIVATE = frozenset({
+    'public',
+    'private',
+    'charter',
+    'other',
+})
+
+ALLOWED_GRADE_SIZES = frozenset({
+    '<50',
+    '50-100',
+    '100-200',
+    '200-500',
+    '500+',
+})
+
+ALLOWED_CANVAS_INTEGRATION_TYPES = frozenset({
+    'lti13',
+    'roster_sync',
+    'grade_passback',
+    'sso',
+})
+
+ALLOWED_GRADE_RANGES = frozenset({
+    'k_2',
+    'g3_5',
+    'g6_8',
+    'g9_12',
+    'undergrad',
+    'graduate',
+    'adult_ed',
+})
+
+ALLOWED_COURSE_FRAMEWORKS = frozenset({
+    'ap',
+    'actfl',
+    'cefr',
+    'ib',
+    'school_specific',
+    'none',
+})
+
+ALLOWED_REJECTION_CATEGORIES = frozenset({
+    'info_missing',
+    'fraud_risk',
+    'out_of_scope',
+    'duplicate',
+    'other',
+})
+
+WIZARD_STEP_MIN = 1
+WIZARD_STEP_MAX = 4
+
+_ATTESTATION_SALT_WARNED = False
+
+
+def hash_attestation_ip(ip, salt=None):
+    """Return `sha256:<hex>` of `salt + ip` for audit-grade IP storage.
+
+    Returns `sha256:none` for falsy IPs so the column has a stable shape.
+    Salt defaults to env var ATTESTATION_HASH_SALT. If that env var is unset
+    or empty in production, hashes are not isolated across deployments — we
+    log a one-shot warning to stderr but continue (matches the project's
+    feature-gated-env pattern; see main.py::_validate_required_env).
+    """
+    if not ip:
+        return 'sha256:none'
+    if salt is None:
+        env_salt = os.environ.get('ATTESTATION_HASH_SALT', '')
+        if not env_salt:
+            global _ATTESTATION_SALT_WARNED
+            if not _ATTESTATION_SALT_WARNED:
+                print(
+                    '[warn] ATTESTATION_HASH_SALT is not set; '
+                    'IP hashes are not isolated across deployments.',
+                    file=sys.stderr,
+                )
+                _ATTESTATION_SALT_WARNED = True
+        salt = env_salt
+    digest = hashlib.sha256(f'{salt}|{ip}'.encode('utf-8')).hexdigest()
+    return f'sha256:{digest}'
 
 
 def _utc_now():
@@ -364,6 +464,60 @@ def get_school_requests_collection():
 def get_school_request_ref(request_id):
     """Get school request document reference."""
     return get_school_requests_collection().document(request_id)
+
+
+def get_school_creation_drafts_collection():
+    """Collection of in-progress school registration wizard drafts."""
+    return get_db().collection('school_creation_drafts')
+
+
+def get_school_creation_draft_ref(uid):
+    """Doc ref for a user's draft (doc id == uid; one draft per user)."""
+    return get_school_creation_drafts_collection().document(uid)
+
+
+def get_school_creation_draft(uid):
+    """Return the user's wizard draft dict, or None if no draft exists.
+
+    The returned dict has keys `uid`, `current_step`, `draft_payload`, and
+    `updated_at` (Firestore Timestamp).
+    """
+    snap = get_school_creation_draft_ref(uid).get()
+    if not snap.exists:
+        return None
+    data = snap.to_dict() or {}
+    data['uid'] = uid
+    return data
+
+
+def upsert_school_creation_draft(uid, *, current_step, draft_payload):
+    """Create or update a user's wizard draft (merge semantics).
+
+    Raises ValueError if `current_step` is outside [WIZARD_STEP_MIN, WIZARD_STEP_MAX]
+    or `draft_payload` is not a dict.
+    """
+    if not isinstance(current_step, int) or not (
+        WIZARD_STEP_MIN <= current_step <= WIZARD_STEP_MAX
+    ):
+        raise ValueError(
+            f'current_step must be int in [{WIZARD_STEP_MIN}, {WIZARD_STEP_MAX}]; got {current_step!r}'
+        )
+    if not isinstance(draft_payload, dict):
+        raise ValueError(f'draft_payload must be a dict; got {type(draft_payload).__name__}')
+
+    get_school_creation_draft_ref(uid).set(
+        {
+            'current_step': current_step,
+            'draft_payload': draft_payload,
+            'updated_at': firestore.SERVER_TIMESTAMP,
+        },
+        merge=True,
+    )
+
+
+def delete_school_creation_draft(uid):
+    """Delete a user's wizard draft. Safe to call when no draft exists."""
+    get_school_creation_draft_ref(uid).delete()
 
 
 def get_practice_sessions_collection():
@@ -2591,11 +2745,10 @@ def unlink_assignment_from_canvas_item(assignment_id, canvas_content_id):
     batch.commit()
 
 
-def create_school_request(requester_uid, requester_email, requester_name,
-                          school_name, org_type, website_url='', canvas_instance_url=''):
-    """Create a school join request."""
-    doc_ref = get_school_requests_collection().document()
-    doc_ref.set({
+def _build_school_request_payload(requester_uid, requester_email, requester_name,
+                                  school_name, org_type, website_url='',
+                                  canvas_instance_url='', *, enriched=None):
+    payload = {
         'requester_uid': requester_uid,
         'requester_email': requester_email,
         'requester_name': requester_name,
@@ -2607,10 +2760,98 @@ def create_school_request(requester_uid, requester_email, requester_name,
         'reviewed_by_uid': None,
         'reviewed_at': None,
         'rejection_reason': None,
+        'rejection_category': None,
         'created_org_id': None,
         'created_at': firestore.SERVER_TIMESTAMP,
-    })
+    }
+    if enriched:
+        for key in (
+            'location', 'school_type', 'public_private', 'grade_size',
+            'official_email_domains', 'admin_identity', 'integration',
+            'curriculum', 'pre_invited_teachers',
+        ):
+            if key in enriched:
+                payload[key] = enriched[key]
+    return payload
+
+
+def create_school_request(requester_uid, requester_email, requester_name,
+                          school_name, org_type, website_url='',
+                          canvas_instance_url='', *, enriched=None):
+    """Create a school join request.
+
+    `enriched`, when provided, is merged into the document. Legal keys are the
+    Plan 3 wizard groups: `location`, `school_type`, `public_private`,
+    `grade_size`, `official_email_domains`, `admin_identity`, `integration`,
+    `curriculum`, `pre_invited_teachers`. Validation of inner values is the
+    route's responsibility (this function trusts its caller).
+    """
+    doc_ref = get_school_requests_collection().document()
+    payload = _build_school_request_payload(
+        requester_uid,
+        requester_email,
+        requester_name,
+        school_name,
+        org_type,
+        website_url,
+        canvas_instance_url,
+        enriched=enriched,
+    )
+    doc_ref.set(payload)
     return doc_ref.id
+
+
+class DuplicateSchoolRequestError(Exception):
+    """Raised when a user already has a pending or approved school request."""
+
+
+def create_school_request_with_onboarding(requester_uid, requester_email, requester_name,
+                                          school_name, org_type, website_url='',
+                                          canvas_instance_url='', *, enriched=None):
+    """Create a school request and advance admin onboarding atomically.
+
+    Raises `DuplicateSchoolRequestError` if the requester already has a pending
+    or approved request — the check happens INSIDE the Firestore transaction,
+    so concurrent POSTs can't both pass a non-atomic precheck. The route's
+    precheck remains for a fast 409 response; this in-transaction guard is the
+    correctness backstop.
+    """
+    client = get_db()
+    request_ref = client.collection('school_requests').document()
+    user_ref = client.collection('users').document(requester_uid)
+    draft_ref = client.collection('school_creation_drafts').document(requester_uid)
+    transaction = client.transaction()
+
+    payload = _build_school_request_payload(
+        requester_uid,
+        requester_email,
+        requester_name,
+        school_name,
+        org_type,
+        website_url,
+        canvas_instance_url,
+        enriched=enriched,
+    )
+
+    @firestore.transactional
+    def _submit(transaction):
+        existing_query = client.collection('school_requests').where(
+            'requester_uid', '==', requester_uid
+        )
+        for doc in existing_query.stream(transaction=transaction):
+            if (doc.to_dict() or {}).get('status') in ('pending', 'approved'):
+                raise DuplicateSchoolRequestError(
+                    'You already have a pending or approved request.'
+                )
+        transaction.set(request_ref, payload)
+        transaction.update(user_ref, {
+            'profile.onboarding_state': ONBOARDING_STATE_AWAITING_LINGUAL,
+            'updated_at': firestore.SERVER_TIMESTAMP,
+        })
+        transaction.delete(draft_ref)
+        return request_ref.id
+
+    return _submit(transaction)
 
 
 def get_school_request(request_id):
@@ -2657,6 +2898,161 @@ def update_school_request(request_id, updates):
     """Update fields on a school request."""
     updates['updated_at'] = firestore.SERVER_TIMESTAMP
     get_school_request_ref(request_id).update(updates)
+
+
+def approve_school_request(request_id, reviewed_by_uid):
+    """Atomically approve a pending school request and create its admin org.
+
+    Returns a dict with `request`, `org_id`, and `membership_id`.
+    Returns None if the request does not exist.
+    Raises ValueError if the request is no longer pending.
+    """
+    client = get_db()
+    request_ref = client.collection('school_requests').document(request_id)
+    org_ref = client.collection('organizations').document()
+    membership_ref = client.collection('memberships').document()
+    transaction = client.transaction()
+
+    @firestore.transactional
+    def _approve(transaction):
+        snap = request_ref.get(transaction=transaction)
+        if not snap.exists:
+            return None
+
+        req = snap.to_dict() or {}
+        if req.get('status') != 'pending':
+            raise ValueError(
+                f'Request {request_id} is not pending (status={req.get("status")!r})'
+            )
+
+        requester_uid = req.get('requester_uid')
+        if not requester_uid:
+            raise ValueError(f'Request {request_id} is missing requester_uid')
+
+        org_data = {
+            'name': req['school_name'],
+            'type': req.get('org_type', 'school'),
+            'status': 'active',
+            'pilot_stage': 'beta',
+            'default_modality_policy': 'hybrid',
+            'default_retention_policy': 'standard_school',
+            'lms_capabilities': [],
+            'created_at': firestore.SERVER_TIMESTAMP,
+            'updated_at': firestore.SERVER_TIMESTAMP,
+        }
+        membership_data = {
+            'org_id': org_ref.id,
+            'uid': requester_uid,
+            'roles': ['school_admin'],
+            'status': 'active',
+            'primary_class_ids': [],
+            'created_at': firestore.SERVER_TIMESTAMP,
+            'updated_at': firestore.SERVER_TIMESTAMP,
+        }
+        request_updates = {
+            'status': 'approved',
+            'reviewed_by_uid': reviewed_by_uid,
+            'reviewed_at': firestore.SERVER_TIMESTAMP,
+            'created_org_id': org_ref.id,
+            'updated_at': firestore.SERVER_TIMESTAMP,
+        }
+
+        transaction.set(org_ref, org_data)
+        transaction.set(membership_ref, membership_data)
+        transaction.set(
+            client.collection('users').document(requester_uid),
+            {
+                'last_active_membership_id': membership_ref.id,
+                'updated_at': firestore.SERVER_TIMESTAMP,
+            },
+            merge=True,
+        )
+        transaction.update(request_ref, request_updates)
+
+        approved = dict(req)
+        approved.update({
+            'id': request_id,
+            'status': 'approved',
+            'reviewed_by_uid': reviewed_by_uid,
+            'created_org_id': org_ref.id,
+        })
+        return {
+            'request': approved,
+            'org_id': org_ref.id,
+            'membership_id': membership_ref.id,
+        }
+
+    return _approve(transaction)
+
+
+def cancel_school_request(request_id, uid):
+    """Mark a pending school request as cancelled.
+
+    Returns True on success, False when no such request exists.
+    Raises PermissionError if `uid` is not the requester.
+    Raises ValueError if the request is not in `pending` status.
+    """
+    req = get_school_request(request_id)
+    if req is None:
+        return False
+    if req.get('requester_uid') != uid:
+        raise PermissionError(f'Request {request_id} not owned by {uid}')
+    if req.get('status') != 'pending':
+        raise ValueError(
+            f'Request {request_id} is not pending (status={req.get("status")!r})'
+        )
+    update_school_request(request_id, {
+        'status': 'cancelled',
+        'cancelled_at': firestore.SERVER_TIMESTAMP,
+    })
+    return True
+
+
+def record_school_request_pre_invites(*, org_id, requester_uid, emails):
+    """Create teacher_invitations rows for a list of pre-invite emails.
+
+    Returns the list of new invitation ids in input order (skipping blanks).
+    Emails are stripped and lowercased before write.
+
+    Schema: matches the existing `teacher_invitations` doc shape from
+    `create_teacher_invitation`, with `uid` and `name` set to None (the teacher
+    hasn't signed up yet). Adds two new fields — `created_by_uid` and
+    `source` — that existing rows will have absent; Plan 4 readers should
+    treat them as optional.
+    """
+    cleaned = []
+    for raw in emails or []:
+        if not isinstance(raw, str):
+            continue
+        addr = raw.strip().lower()
+        if addr:
+            cleaned.append(addr)
+    if not cleaned:
+        return []
+
+    client = get_db()
+    coll = client.collection('teacher_invitations')
+    batch = client.batch()
+    ids = []
+    for addr in cleaned:
+        ref = coll.document()
+        ids.append(ref.id)
+        batch.set(ref, {
+            # Existing-schema fields (match create_teacher_invitation)
+            'org_id': org_id,
+            'uid': None,                  # unknown until the teacher signs up
+            'email': addr,
+            'name': None,                 # unknown until the teacher signs up
+            'status': 'pending',
+            'reviewed_by_uid': None,
+            'reviewed_at': None,
+            'created_at': firestore.SERVER_TIMESTAMP,
+            # New (additive) fields
+            'created_by_uid': requester_uid,
+            'source': 'pre_invite',
+        })
+    batch.commit()
+    return ids
 
 
 # ---------------------------------------------------------------------------

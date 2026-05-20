@@ -161,6 +161,10 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    match /school_creation_drafts/{uid} {
+      allow read, write: if isUserOwner(uid);
+    }
+
     match /teacher_join_requests/{requestId} {
       allow read: if request.auth != null
                   && (

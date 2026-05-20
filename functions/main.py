@@ -16,6 +16,13 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 set_global_options(max_instances=10)
 initialize_app()
 
+# RESEND_API_KEY is declared as a secret on each @firestore_fn / @scheduler_fn
+# decorator (`secrets=['RESEND_API_KEY']`) so the Functions 2nd gen runtime
+# mounts it into the function's env. Without the per-decorator declaration,
+# os.environ['RESEND_API_KEY'] would be unset even when the secret exists in
+# Secret Manager, and the function would silently fall into dev-mode (sent_dev).
+# Provision the secret with: `firebase functions:secrets:set RESEND_API_KEY`.
+
 DEV_MODE_SENTINEL = {'mode': 'dev', 'message_id': None}
 
 
@@ -39,7 +46,7 @@ def send_via_resend(
         return DEV_MODE_SENTINEL
 
     resend.api_key = api_key
-    from_address = os.environ.get('RESEND_FROM_ADDRESS', 'Lingual <noreply@lingual.app>')
+    from_address = os.environ.get('RESEND_FROM_ADDRESS', 'Lingual <noreply@send.l1ngual.com>')
     response = resend.Emails.send({
         'from': from_address,
         'to': [_format_recipient(to_email, to_name)],
@@ -56,10 +63,23 @@ _JINJA_ENV = Environment(
 )
 
 _TEMPLATE_SUBJECTS = {
-    'school_request_to_lingual': lambda data: f"New school registration: {data['org_name']}",
-    'teacher_join_request_to_admin': lambda data: f"New teacher request to join {data['org_name']}",
-    'teacher_join_approved': lambda data: f"Welcome to {data['org_name']} on Lingual",
-    'teacher_join_declined': lambda data: f"Your request to join {data['org_name']} was not approved",
+    # Plan 1
+    'school_request_to_lingual':
+        lambda data: f"New school registration: {data['org_name']}",
+    # Plan 3
+    'school_request_approved':
+        lambda data: f"Your school {data['org_name']} is now on Lingual",
+    'school_request_declined':
+        lambda data: "Your school registration needs more info",
+    'teacher_invitation':
+        lambda data: f"{data['org_name']} is inviting you to teach on Lingual",
+    # Plan 4
+    'teacher_join_request_to_admin':
+        lambda data: f"New teacher request to join {data['org_name']}",
+    'teacher_join_approved':
+        lambda data: f"Welcome to {data['org_name']} on Lingual",
+    'teacher_join_declined':
+        lambda data: f"Your request to join {data['org_name']} was not approved",
 }
 
 
@@ -74,6 +94,39 @@ def render_template(template_id: str, data: dict[str, Any]) -> tuple[str, str]:
 
 
 MAX_OUTBOX_ATTEMPTS = 5
+
+
+def _claim_pending_outbox_email(ref) -> dict[str, Any] | None:
+    """Atomically claim a pending outbox email before calling the provider.
+
+    Firestore/Eventarc triggers are at-least-once. A transaction keeps duplicate
+    trigger deliveries from sending the same email twice: only one invocation
+    can observe status='pending' and move it to 'sending'.
+    """
+    transaction = fb_firestore.client().transaction()
+
+    @fb_firestore.transactional
+    def _claim(tx):
+        snapshot = ref.get(transaction=tx)
+        if getattr(snapshot, 'exists', True) is False:
+            return None
+        current = snapshot.to_dict() or {}
+        if current.get('status') != 'pending':
+            return None
+
+        attempt = int(current.get('attempt_count') or 0) + 1
+        update_payload = {
+            'status': 'sending',
+            'attempt_count': attempt,
+            'last_attempt_at': fb_firestore.SERVER_TIMESTAMP,
+        }
+        tx.update(ref, update_payload)
+
+        claimed = dict(current)
+        claimed.update(update_payload)
+        return claimed
+
+    return _claim(transaction)
 
 
 def _send_outbox_email_impl(event) -> None:
@@ -92,19 +145,16 @@ def _send_outbox_email_impl(event) -> None:
         return
 
     ref = event.data.after.reference
-    attempt = int(after.get('attempt_count') or 0) + 1
-
-    ref.update({
-        'status': 'sending',
-        'attempt_count': attempt,
-        'last_attempt_at': fb_firestore.SERVER_TIMESTAMP,
-    })
+    claimed = _claim_pending_outbox_email(ref)
+    if claimed is None:
+        return
+    attempt = int(claimed.get('attempt_count') or 0)
 
     try:
         subject, html = render_template(
-            after['template_id'], after.get('template_data') or {}
+            claimed['template_id'], claimed.get('template_data') or {}
         )
-        recipient = after.get('recipient') or {}
+        recipient = claimed.get('recipient') or {}
         result = send_via_resend(
             to_email=recipient.get('email'),
             to_name=recipient.get('name'),
@@ -140,7 +190,10 @@ def _send_outbox_email_impl(event) -> None:
 # 'sending', 'sent', 'sent_dev', 'dead_letter') are ignored by the
 # early-exit guard. The sweep promotes failed→pending and the new write
 # fires this trigger; the trigger never sees 'failed' directly.
-@firestore_fn.on_document_written(document='outbox_emails/{emailId}')
+@firestore_fn.on_document_written(
+    document='outbox_emails/{emailId}',
+    secrets=['RESEND_API_KEY'],
+)
 def send_outbox_email(event):
     """Send pending outbox emails. Triggered by new writes and sweep promotions."""
     return _send_outbox_email_impl(event)
@@ -185,7 +238,10 @@ def _retry_outbox_sweep_impl() -> None:
         doc.reference.update({'last_swept_at': fb_firestore.SERVER_TIMESTAMP})
 
 
-@scheduler_fn.on_schedule(schedule='every 5 minutes')
+@scheduler_fn.on_schedule(
+    schedule='every 5 minutes',
+    secrets=['RESEND_API_KEY'],
+)
 def retry_outbox_sweep(event) -> None:
     """Cloud Function wrapper: delegates to the pure impl for testability."""
     _retry_outbox_sweep_impl()

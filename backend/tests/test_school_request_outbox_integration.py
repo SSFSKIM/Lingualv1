@@ -25,7 +25,8 @@ class FakeSchoolRequestOutboxDb(FakeDbBase):
     # -- School request methods --
 
     def create_school_request(self, requester_uid, requester_email, requester_name,
-                              school_name, org_type, website_url='', canvas_instance_url=''):
+                              school_name, org_type, website_url='', canvas_instance_url='',
+                              enriched=None):
         self._sr_counter += 1
         request_id = f'sr-{self._sr_counter}'
         self.school_requests[request_id] = {
@@ -99,8 +100,28 @@ class SchoolRequestOutboxIntegrationTest(unittest.TestCase):
         self.app.config['TESTING'] = True
 
     def _set_session(self, client, uid):
+        user = self.db.users.get(uid) or {}
+        email = user.get('email') or f'{uid}@test.com'
+        name = (user.get('profile') or {}).get('display_name') or user.get('name') or ''
         with client.session_transaction() as sess:
-            sess['user'] = {'uid': uid, 'email': f'{uid}@test.com'}
+            sess['user'] = {'uid': uid, 'email': email, 'name': name}
+
+    def _valid_payload(self, school_name):
+        return {
+            'schoolName': school_name,
+            'orgType': 'school',
+            'websiteUrl': 'https://sfschool.edu',
+            'location': {'country': 'US', 'state': 'CA'},
+            'schoolType': 'k12',
+            'publicPrivate': 'private',
+            'gradeSize': '100-200',
+            'adminIdentity': {
+                'fullName': 'Alice Teacher',
+                'schoolEmail': 'alice@example.com',
+                'roleTitle': 'Principal',
+                'authorizationAttested': True,
+            },
+        }
 
     def test_submission_enqueues_outbox_email_per_lingual_admin(self):
         """One enqueue_outbox_email call per lingual admin on successful submission."""
@@ -119,13 +140,7 @@ class SchoolRequestOutboxIntegrationTest(unittest.TestCase):
                 self._set_session(client, 'requester-1')
                 resp = client.post(
                     '/api/school-requests',
-                    json={
-                        'schoolName': 'SF Friends School',
-                        'orgType': 'private',
-                        'websiteUrl': 'https://sfschool.edu',
-                        'email': 'alice@example.com',
-                        'name': 'Alice Teacher',
-                    },
+                    json=self._valid_payload('SF Friends School'),
                 )
                 self.assertIn(resp.status_code, (200, 201))
                 self.assertEqual(mock_enq.call_count, 2)
@@ -164,10 +179,7 @@ class SchoolRequestOutboxIntegrationTest(unittest.TestCase):
                 self._set_session(client, 'requester-1')
                 resp = client.post(
                     '/api/school-requests',
-                    json={
-                        'schoolName': 'Resilient Academy',
-                        'orgType': 'school',
-                    },
+                    json=self._valid_payload('Resilient Academy'),
                 )
                 self.assertIn(resp.status_code, (200, 201))
                 data = resp.get_json()
@@ -188,7 +200,7 @@ class SchoolRequestOutboxIntegrationTest(unittest.TestCase):
                 self._set_session(client, 'requester-1')
                 resp = client.post(
                     '/api/school-requests',
-                    json={'schoolName': 'Empty Admin School'},
+                    json=self._valid_payload('Empty Admin School'),
                 )
                 self.assertIn(resp.status_code, (200, 201))
                 mock_enq.assert_not_called()
@@ -203,13 +215,7 @@ class SchoolRequestOutboxIntegrationTest(unittest.TestCase):
                 self._set_session(client, 'requester-1')
                 resp = client.post(
                     '/api/school-requests',
-                    json={
-                        'schoolName': 'SF Friends School',
-                        'orgType': 'private',
-                        'websiteUrl': 'https://sfschool.edu',
-                        'email': 'alice@example.com',
-                        'name': 'Alice Teacher',
-                    },
+                    json=self._valid_payload('SF Friends School'),
                 )
                 self.assertIn(resp.status_code, (200, 201))
                 body = resp.get_json()

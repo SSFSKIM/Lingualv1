@@ -13,6 +13,7 @@ export const STUDENT_SETUP_ROUTE = '/signup/student/setup';
 export const TEACHER_JOIN_ORG_ROUTE = '/signup/teacher/join-org';
 export const TEACHER_JOIN_PENDING_ROUTE = '/signup/teacher/pending';
 export const ADMIN_ORG_WIZARD_ROUTE = '/signup/admin/org-wizard';
+export const ADMIN_PENDING_ROUTE = '/signup/admin/pending';
 export const ROLE_PICKER_ROUTE = '/signup';
 
 // Legacy alias retained while pages still import it. New code should
@@ -89,6 +90,9 @@ export function getOnboardingDestination(user: User | null | undefined): string 
     return TEACHER_JOIN_PENDING_ROUTE;
   }
   if (user.intendedRole === 'teacher') return TEACHER_JOIN_ORG_ROUTE;
+  if (user.intendedRole === 'admin' && user.onboardingState === 'awaiting_lingual') {
+    return ADMIN_PENDING_ROUTE;
+  }
   if (user.intendedRole === 'admin') return ADMIN_ORG_WIZARD_ROUTE;
 
   // 5) Legacy users without intendedRole. Plan 6 will replace this with

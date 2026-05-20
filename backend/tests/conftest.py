@@ -11,6 +11,7 @@ Provides:
 
 from __future__ import annotations
 
+import os
 import secrets
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -18,6 +19,14 @@ from typing import Any
 from flask import Flask, session
 
 from backend.route_deps import RouteDeps
+
+# Test-mode safety guard for the outbox writer. See
+# `backend/services/outbox.py:_OUTBOX_BLOCK_ENV_VAR` for the full rationale.
+# Set at conftest import time so every backend test inherits the protection
+# regardless of how it's invoked. Without this, any test that exercises a
+# route which calls `enqueue_outbox_email` against the prod-pointed
+# `database.get_db()` will write real outbox docs to production Firestore.
+os.environ.setdefault('LINGUAL_BLOCK_OUTBOX_WRITES', '1')
 from backend.services.membership_context import resolve_school_request_context
 
 
@@ -368,6 +377,12 @@ class FakeDbBase:
     def set_user_last_active_membership(self, uid: str, membership_id: str):
         self.user_active_memberships[uid] = membership_id
 
+    def update_user_profile(self, uid: str, **_kwargs):
+        pass
+
+    def delete_school_creation_draft(self, uid: str):
+        pass
+
     def resolve_user_school_context(self, uid: str, preferred_active_membership_id: str | None = None):
         memberships = []
         for membership in self.memberships.values():
@@ -386,13 +401,43 @@ class FakeDbBase:
         memberships.sort(key=lambda m: m["id"])
         active_membership_id = preferred_active_membership_id or self.user_active_memberships.get(uid)
         active = next((m for m in memberships if m["id"] == active_membership_id), memberships[0] if memberships else None)
+        user = self.users.get(uid) or {}
+        lingual_admin = bool(user.get("lingual_admin")) or any(
+            (membership or {}).get("status") == "active"
+            and "lingual_admin" in ((membership or {}).get("roles") or [])
+            for membership in memberships
+        )
         return {
             "memberships": memberships,
             "active_membership": active,
             "active_membership_id": active.get("id") if active else None,
             "active_organization_id": active.get("orgId") if active else None,
             "active_roles": active.get("roles", []) if active else [],
+            "lingual_admin": lingual_admin,
         }
+
+    def create_school_request_with_onboarding(self, **kwargs):
+        # Mirrors database.create_school_request_with_onboarding: the duplicate
+        # invariant lives inside the "transaction" so concurrent submits can't
+        # both pass a non-atomic precheck. The route's outer precheck stays
+        # for a friendly 409; this is the correctness backstop.
+        from database import DuplicateSchoolRequestError
+        requester_uid = kwargs["requester_uid"]
+        for existing in (self.school_requests or {}).values():
+            if (
+                existing.get("requester_uid") == requester_uid
+                and existing.get("status") in ("pending", "approved")
+            ):
+                raise DuplicateSchoolRequestError(
+                    "You already have a pending or approved request."
+                )
+        self.update_user_profile(
+            requester_uid,
+            onboarding_state="awaiting_lingual",
+        )
+        request_id = self.create_school_request(**kwargs)
+        self.delete_school_creation_draft(requester_uid)
+        return request_id
 
     # -- Core CRUD --
 

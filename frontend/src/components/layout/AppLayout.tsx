@@ -51,16 +51,31 @@ export function AppLayout() {
   const userAvatar = avatarUrl || profile?.avatarUrl || null;
   const canAccessTeacherView = hasAnyRole(['teacher', 'school_admin']);
   const isTeacherView = location.pathname.startsWith('/app/teacher');
-  const roleLabel = canAccessTeacherView
-    ? activeMembership?.orgName
-      ? `${t('app.layout.nav.teacher')} · ${activeMembership.orgName}`
-      : t('app.layout.nav.teacher')
+  // Priority: Lingual admin > school admin > teacher > student.
+  // The active membership's org name suffixes school admin / teacher labels;
+  // students get their grade level if it's set on their profile.
+  const orgSuffix = activeMembership?.orgName ? ` · ${activeMembership.orgName}` : '';
+  const roleLabel = user?.lingualAdmin
+    ? t('app.layout.role.lingualAdmin')
+    : hasAnyRole(['school_admin'])
+    ? `${t('app.layout.role.schoolAdmin')}${orgSuffix}`
+    : hasAnyRole(['teacher'])
+    ? `${t('app.layout.role.teacher')}${orgSuffix}`
     : profile?.gradeLevel
-    ? `${t('app.layout.role.learner')} · ${profile.gradeLevel}`
-    : t('app.layout.role.learner');
+    ? `${t('app.layout.role.student')} · ${profile.gradeLevel}`
+    : t('app.layout.role.student');
   const localeOption = LEARNING_LOCALES.find((locale) => locale.value === learningLocale);
-  const homeDestination = canAccessTeacherView ? '/app/teacher' : '/app/learn';
-  const homeLabel = canAccessTeacherView
+  // Home button priority mirrors the post-login dispatcher in lib/homeRoutes:
+  // Lingual admin > school admin / teacher > learner. Otherwise a Lingual admin
+  // clicking the logo would land on /app/learn instead of their queue.
+  const homeDestination = user?.lingualAdmin
+    ? '/app/admin/school-requests'
+    : canAccessTeacherView
+    ? '/app/teacher'
+    : '/app/learn';
+  const homeLabel = user?.lingualAdmin
+    ? 'Go to Lingual admin dashboard'
+    : canAccessTeacherView
     ? 'Go to teacher dashboard'
     : 'Go to learning dashboard';
   const mobilePrimaryNav = [
