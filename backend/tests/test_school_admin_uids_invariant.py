@@ -75,5 +75,71 @@ class SchoolAdminUidsCreatePathTest(unittest.TestCase):
         )
 
 
+_INVARIANT_AUDIT = {
+    'actor_uid': 'admin',
+    'action': 'membership_removed',
+    'target': {'type': 'membership', 'id': 'm1'},
+    'target_org_id': 'o-1',
+    'metadata': {'reason': 'invariant test'},
+    'ip_hash': '',
+    'user_agent': '',
+}
+
+
+class RemoveMembershipInvariantTests(unittest.TestCase):
+    """Plan 5 acceptance: any school_admin removal MUST update
+    `organizations.school_admin_uids` in the SAME Firestore batch."""
+
+    @patch('database.get_organization_ref')
+    @patch('database.get_membership_ref')
+    @patch('database.get_membership')
+    @patch('database.get_db')
+    def test_remove_membership_with_school_admin_role_batches_org_update(
+        self, mock_get_db, mock_get, mock_ref, mock_org_ref
+    ):
+        mock_get.return_value = {
+            'id': 'm1', 'uid': 'u1', 'org_id': 'o-1',
+            'roles': ['school_admin'], 'status': 'active',
+        }
+        mock_ref.return_value = MagicMock()
+        org_ref = MagicMock()
+        mock_org_ref.return_value = org_ref
+        batch = MagicMock()
+        mock_get_db.return_value.batch.return_value = batch
+        mock_get_db.return_value.collection.return_value.document.return_value = MagicMock()
+
+        database.remove_membership(
+            membership_id='m1', actor_uid='admin',
+            audit_entry=dict(_INVARIANT_AUDIT),
+        )
+        self.assertEqual(len(batch.update.call_args_list), 2)
+        org_update_payload = batch.update.call_args_list[1][0][1]
+        self.assertIn('school_admin_uids', org_update_payload)
+
+    @patch('database.get_organization_ref')
+    @patch('database.get_membership_ref')
+    @patch('database.get_membership')
+    @patch('database.get_db')
+    def test_combined_roles_still_updates_school_admin_uids(
+        self, mock_get_db, mock_get, mock_ref, mock_org_ref
+    ):
+        """If the role list contains BOTH teacher and school_admin, sync must fire."""
+        mock_get.return_value = {
+            'id': 'm1', 'uid': 'u1', 'org_id': 'o-1',
+            'roles': ['teacher', 'school_admin'], 'status': 'active',
+        }
+        mock_ref.return_value = MagicMock()
+        mock_org_ref.return_value = MagicMock()
+        batch = MagicMock()
+        mock_get_db.return_value.batch.return_value = batch
+        mock_get_db.return_value.collection.return_value.document.return_value = MagicMock()
+
+        database.remove_membership(
+            membership_id='m1', actor_uid='admin',
+            audit_entry=dict(_INVARIANT_AUDIT),
+        )
+        self.assertEqual(len(batch.update.call_args_list), 2)
+
+
 if __name__ == '__main__':
     unittest.main()

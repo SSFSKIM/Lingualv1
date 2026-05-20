@@ -1335,6 +1335,49 @@ def create_membership(
     return doc_ref.id
 
 
+def remove_membership(*, membership_id: str, actor_uid: str, audit_entry: dict) -> dict:
+    """Soft-remove a membership row, atomically with the audit row.
+
+    Sets `status='removed'` and stamps `removed_at` / `removed_by_uid` in
+    a Firestore batch alongside the audit doc. If the membership held the
+    `school_admin` role, ALSO updates the org's `school_admin_uids` array
+    in the same batch (via `arrayRemove`) so the denormalization
+    invariant the Plan 4 codebase-conventions §14 forward obligation
+    requires is preserved atomically.
+
+    Returns the membership dict (pre-removal) for downstream UI/response
+    shaping.
+    """
+    if audit_entry is None:
+        raise ValueError('audit_entry is required for state transitions')
+    m = get_membership(membership_id)
+    if not m:
+        raise ValueError(f'membership {membership_id} not found')
+    if m.get('status') == 'removed':
+        raise ValueError(f'membership {membership_id} is already removed')
+
+    db = get_db()
+    batch = db.batch()
+    batch.update(get_membership_ref(membership_id), {
+        'status': 'removed',
+        'removed_at': firestore.SERVER_TIMESTAMP,
+        'removed_by_uid': actor_uid,
+    })
+    if 'school_admin' in (m.get('roles') or []):
+        org_id = m.get('org_id')
+        uid = m.get('uid')
+        if org_id and uid:
+            batch.update(get_organization_ref(org_id), {
+                'school_admin_uids': firestore.ArrayRemove([uid]),
+                'updated_at': firestore.SERVER_TIMESTAMP,
+            })
+    audit_doc = dict(audit_entry)
+    audit_doc['created_at'] = firestore.SERVER_TIMESTAMP
+    batch.set(db.collection(LINGUAL_ADMIN_AUDIT_COLLECTION).document(), audit_doc)
+    batch.commit()
+    return m
+
+
 def get_membership(membership_id):
     """Get a membership by id."""
     doc = get_membership_ref(membership_id).get()
