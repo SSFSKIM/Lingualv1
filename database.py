@@ -416,6 +416,14 @@ def get_user_ref(uid):
     return db.collection('users').document(uid)
 
 
+LINGUAL_ADMIN_AUDIT_COLLECTION = 'lingual_admin_audit'
+
+
+def get_lingual_admin_audit_collection():
+    """Get the Lingual admin audit log collection."""
+    return get_db().collection(LINGUAL_ADMIN_AUDIT_COLLECTION)
+
+
 def get_organizations_collection():
     """Get organizations collection."""
     return get_db().collection('organizations')
