@@ -163,6 +163,61 @@ def create_lingual_admin_blueprint(deps: RouteDeps) -> Blueprint:
             'nextCursor': result.get('next_cursor'),
         }), 200
 
+    @bp.get('/organizations/<org_id>')
+    def get_org_detail(org_id):
+        try:
+            uid = deps.get_current_user_uid()
+            _require_lingual_admin(uid)
+        except PermissionError as exc:
+            return jsonify({'error': str(exc)}), 403
+
+        org = deps.db.get_organization(org_id)
+        if not org:
+            return jsonify({'error': 'not_found'}), 404
+
+        contacts = deps.db.list_org_memberships(
+            org_id=org_id, roles=('school_admin',),
+        )
+
+        # Fail-soft view audit — never block the page render if the audit
+        # write fails. Mirrors the pattern documented at the top of this
+        # module: build_audit_doc(...) is for state-transitions that batch
+        # with business writes; log(...) is for views like this one.
+        try:
+            deps.audit_logger.log(
+                actor_uid=uid,
+                action=AuditAction.ORG_VIEWED_DETAIL,
+                target_type='organization',
+                target_id=org_id,
+                target_org_id=org_id,
+                metadata={},
+                ip_hash=_hash_ip(_client_ip()),
+                user_agent=_user_agent(),
+            )
+        except Exception:  # noqa: BLE001
+            pass
+
+        return jsonify({
+            'id': org_id,
+            'name': org.get('name'),
+            'status': org.get('status'),
+            'schoolType': org.get('school_type'),
+            'country': org.get('country'),
+            'state': org.get('state'),
+            'websiteUrl': org.get('website_url'),
+            'createdAt': org.get('created_at'),
+            'lastActivityAt': org.get('last_activity_at'),
+            'suspendedAt': org.get('suspended_at'),
+            'suspendedByUid': org.get('suspended_by_uid'),
+            'suspendReason': org.get('suspend_reason'),
+            'suspendedUntil': org.get('suspended_until'),
+            'schoolAdminContacts': [
+                {'membershipId': c['membership_id'], 'uid': c['uid'],
+                 'email': c['email'], 'name': c.get('name')}
+                for c in contacts
+            ],
+        }), 200
+
     @bp.get('/requests/<request_id>')
     def get_request_detail(request_id):
         try:
