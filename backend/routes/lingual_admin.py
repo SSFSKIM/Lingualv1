@@ -10,6 +10,12 @@ Identity helpers (`_hash_ip`, `_client_ip`, `_user_agent`) and the
 external URL source (`_public_base_url`) are imported from
 `backend.services.audit_utils` so Plan 3 (`school_requests.py`) and
 Plan 5 cannot drift on the audit trust boundary.
+
+`_serialize_request` is imported from Plan 3's `school_requests.py` so
+the request-row shape stays identical across the legacy admin endpoint
+and the new lingual-admin list — including datetime ISO serialization
+and camelCased nested dicts (admin_identity, integration, curriculum,
+location, pre_invited_teachers).
 """
 from __future__ import annotations
 
@@ -18,6 +24,7 @@ import datetime
 from flask import Blueprint, jsonify, request
 
 from backend.route_deps import RouteDeps
+from backend.routes.school_requests import _serialize_request
 from backend.services.audit_utils import (  # noqa: F401  -- re-export
     client_ip as _client_ip,
     hash_ip as _hash_ip,
@@ -86,32 +93,8 @@ def create_lingual_admin_blueprint(deps: RouteDeps) -> Blueprint:
             return jsonify({'error': str(exc)}), 400
 
         return jsonify({
-            'items': [_camel_request_row(r) for r in result['items']],
+            'items': [_serialize_request(r) for r in result['items']],
             'nextCursor': result.get('next_cursor'),
         }), 200
 
     return bp
-
-
-def _camel_request_row(row: dict) -> dict:
-    """snake_case Firestore row -> camelCase response row.
-
-    Kept module-level so other lingual-admin routes (request detail,
-    approve/reject responses) can reuse the same mapping.
-    """
-    out = dict(row)
-    rename = {
-        'school_name': 'schoolName',
-        'org_type': 'orgType',
-        'school_type': 'schoolType',
-        'created_at': 'createdAt',
-        'requester_uid': 'requesterUid',
-        'requester_email': 'requesterEmail',
-        'requester_name': 'requesterName',
-        'rejection_reason': 'rejectionReason',
-        'rejection_category': 'rejectionCategory',
-    }
-    for src, dst in rename.items():
-        if src in out:
-            out[dst] = out.pop(src)
-    return out
