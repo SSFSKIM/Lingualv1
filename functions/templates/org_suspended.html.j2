@@ -1,0 +1,29 @@
+<!doctype html>
+<html>
+<body style="font-family: -apple-system, system-ui, sans-serif; line-height: 1.5; color: #1a1a1a; max-width: 560px; margin: 0 auto; padding: 24px;">
+  <h1 style="font-size: 20px; margin-bottom: 16px;">{{ org_name }} has been suspended on Lingual</h1>
+
+  <p>A Lingual administrator has temporarily suspended access for {{ org_name }}.</p>
+
+  <p><strong>Reason:</strong> {{ reason }}</p>
+
+  {% if suspended_until %}
+  <p><strong>Scheduled restore:</strong> {{ suspended_until }}</p>
+  <p>If no action is needed, access will be automatically restored at that time.</p>
+  {% else %}
+  <p>This is an indefinite suspension. Access will resume once Lingual restores the organization.</p>
+  {% endif %}
+
+  <p>During suspension:</p>
+  <ul>
+    <li>Students cannot start new practice sessions.</li>
+    <li>Existing voice sessions in progress will complete normally.</li>
+    <li>Teachers can still log in but cannot create or modify assignments.</li>
+    <li>All existing data is preserved.</li>
+  </ul>
+
+  <p>If you have questions or believe this was issued in error, reply to this email or contact <a href="mailto:{{ support_email }}">{{ support_email }}</a>.</p>
+
+  <p style="color: #666; font-size: 13px; margin-top: 32px;">— The Lingual team</p>
+</body>
+</html>

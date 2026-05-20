@@ -23,7 +23,9 @@ class OutboxConstantsTest(unittest.TestCase):
         )
 
     def test_template_enum_is_exhaustive_for_v1(self):
-        # Plans 1 + 3 + 4 together wire seven templates; later plans add more.
+        # Plans 1 + 3 + 4 wire seven templates; Plan 5 adds the two
+        # Lingual-admin org-lifecycle templates (suspend / restore). Later
+        # plans append to this set.
         self.assertEqual(
             {t.value for t in outbox.OutboxTemplate},
             {
@@ -34,6 +36,8 @@ class OutboxConstantsTest(unittest.TestCase):
                 'teacher_join_request_to_admin',
                 'teacher_join_approved',
                 'teacher_join_declined',
+                'org_suspended',
+                'org_restored',
             },
         )
 

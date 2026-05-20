@@ -80,6 +80,11 @@ _TEMPLATE_SUBJECTS = {
         lambda data: f"Welcome to {data['org_name']} on Lingual",
     'teacher_join_declined':
         lambda data: f"Your request to join {data['org_name']} was not approved",
+    # Plan 5: Lingual-admin org lifecycle
+    'org_suspended':
+        lambda data: f"{data.get('org_name', 'Your school')} has been suspended on Lingual",
+    'org_restored':
+        lambda data: f"{data.get('org_name', 'Your school')} access has been restored on Lingual",
 }
 
 
