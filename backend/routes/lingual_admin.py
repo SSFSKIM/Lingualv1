@@ -42,6 +42,27 @@ ALLOWED_DECLINE_CATEGORIES = frozenset({
 })
 
 
+def _camel_org_row(row):
+    """Reshape a Firestore organization row to the camelCase response DTO.
+
+    Tabular org-list response — keeps the wire contract decoupled from the
+    Firestore document shape. `memberCount` is derived from
+    `school_admin_uids` (Plan 5 v1 surfaces school-admin headcount only;
+    full staff counts arrive with the detail page).
+    """
+    return {
+        'id': row.get('id'),
+        'name': row.get('name'),
+        'status': row.get('status'),
+        'schoolType': row.get('school_type'),
+        'country': row.get('country'),
+        'publicOrPrivate': row.get('public_or_private'),
+        'memberCount': len(row.get('school_admin_uids') or []),
+        'createdAt': row.get('created_at'),
+        'lastActivityAt': row.get('last_activity_at'),
+    }
+
+
 def create_lingual_admin_blueprint(deps: RouteDeps) -> Blueprint:
     bp = Blueprint('lingual_admin', __name__, url_prefix='/api/lingual-admin')
 
@@ -103,6 +124,42 @@ def create_lingual_admin_blueprint(deps: RouteDeps) -> Blueprint:
 
         return jsonify({
             'items': [_serialize_request(r) for r in result['items']],
+            'nextCursor': result.get('next_cursor'),
+        }), 200
+
+    @bp.get('/organizations')
+    def list_orgs():
+        try:
+            uid = deps.get_current_user_uid()
+            _require_lingual_admin(uid)
+        except PermissionError as exc:
+            return jsonify({'error': str(exc)}), 403
+
+        cursor_arg = request.args.get('cursor')
+        cursor = None
+        if cursor_arg:
+            # Cursor is a JSON-encoded {name_lower, id} dict produced by a
+            # prior page's response. Reject malformed input with 400 rather
+            # than letting Firestore silently return a wrong page.
+            try:
+                import json
+                cursor = json.loads(cursor_arg)
+            except Exception:
+                return jsonify({'error': 'invalid cursor'}), 400
+
+        try:
+            result = deps.db.list_organizations(
+                status=request.args.get('status'),
+                school_type=request.args.get('schoolType'),
+                country=request.args.get('country'),
+                public_or_private=request.args.get('publicOrPrivate'),
+                cursor=cursor,
+            )
+        except ValueError as exc:
+            return jsonify({'error': str(exc)}), 400
+
+        return jsonify({
+            'items': [_camel_org_row(r) for r in result['items']],
             'nextCursor': result.get('next_cursor'),
         }), 200
 
