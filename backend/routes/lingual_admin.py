@@ -97,4 +97,17 @@ def create_lingual_admin_blueprint(deps: RouteDeps) -> Blueprint:
             'nextCursor': result.get('next_cursor'),
         }), 200
 
+    @bp.get('/requests/<request_id>')
+    def get_request_detail(request_id):
+        try:
+            uid = deps.get_current_user_uid()
+            _require_lingual_admin(uid)
+        except PermissionError as exc:
+            return jsonify({'error': str(exc)}), 403
+
+        row = deps.db.get_school_request(request_id)
+        if not row:
+            return jsonify({'error': 'not_found'}), 404
+        return jsonify(_serialize_request(row)), 200
+
     return bp
