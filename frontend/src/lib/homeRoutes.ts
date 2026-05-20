@@ -4,10 +4,12 @@ import type { SchoolRole } from '@/types/school';
 // ── Routes the dispatcher can return ───────────────────────────────────────
 export const LEARNER_HOME_ROUTE = '/app/learn';
 export const TEACHER_HOME_ROUTE = '/app/teacher';
-// Lingual admins land at the existing school-requests page until Plan 5
-// moves this surface to /app/lingual-admin/requests. Plan 3 will add a
-// distinct SCHOOL_ADMIN_HOME_ROUTE ('/app/admin') for school_admin users.
-export const LINGUAL_ADMIN_HOME_ROUTE = '/app/admin/school-requests';
+// Plan 5 (Task 27) splits the post-login dispatcher:
+//   - school_admin users land on the new admin dashboard at /app/admin
+//   - Lingual-side superadmins land on /app/lingual-admin/requests
+// The legacy /app/admin/school-requests surface is retired by Plan 5.
+export const SCHOOL_ADMIN_HOME_ROUTE = '/app/admin';
+export const LINGUAL_ADMIN_HOME_ROUTE = '/app/lingual-admin/requests';
 
 export const STUDENT_SETUP_ROUTE = '/signup/student/setup';
 export const TEACHER_JOIN_ORG_ROUTE = '/signup/teacher/join-org';
@@ -33,15 +35,18 @@ function activeRoles(user: User): Set<SchoolRole> {
  *
  * Note: relies on `user.lingualAdmin` being set by the backend. Task 1 closed
  * the gap where this field was declared but never populated.
+ *
+ * Plan 5 (Task 27) splits school_admin off from teacher so that school admins
+ * land on the new `/app/admin` dashboard instead of the teacher home. Legacy
+ * callers therefore also pick up the new behavior.
  */
 export function getPrivilegedHomeRoute(user: User | null | undefined): string | null {
   if (!user) return null;
   if (user.lingualAdmin) return LINGUAL_ADMIN_HOME_ROUTE;
 
   const roles = activeRoles(user);
-  if (roles.has('school_admin') || roles.has('teacher')) {
-    return TEACHER_HOME_ROUTE;
-  }
+  if (roles.has('school_admin')) return SCHOOL_ADMIN_HOME_ROUTE;
+  if (roles.has('teacher')) return TEACHER_HOME_ROUTE;
   return null;
 }
 
@@ -57,6 +62,10 @@ export function getPrivilegedHomeRoute(user: User | null | undefined): string | 
  * because a returning user with a real membership should never be sent
  * back through the signup wizard.
  *
+ * Plan 5 (Task 27) splits school_admin from teacher: school admins land on
+ * `/app/admin`, teachers (who are not also school admins) keep going to
+ * `/app/teacher`. Lingual admins still win over both branches.
+ *
  * Until Plan 6 ships the legacy modal, `requiresLegacyRolePick` users
  * fall back to the existing student setup flow so legacy learners stay
  * functional.
@@ -69,9 +78,10 @@ export function getOnboardingDestination(user: User | null | undefined): string 
 
   // 2) Active memberships
   const roles = activeRoles(user);
-  // TEMP: school_admin shares teacher home until Plan 3 ships /app/admin.
-  // When SCHOOL_ADMIN_HOME_ROUTE lands, split this into two branches.
-  if (roles.has('school_admin') || roles.has('teacher')) {
+  if (roles.has('school_admin')) {
+    return SCHOOL_ADMIN_HOME_ROUTE;
+  }
+  if (roles.has('teacher')) {
     return TEACHER_HOME_ROUTE;
   }
   if (roles.has('student')) {
