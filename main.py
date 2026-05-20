@@ -160,6 +160,7 @@ from backend.routes.canvas_practice import create_canvas_practice_blueprint
 from backend.routes.school_requests import create_school_requests_blueprint
 from backend.routes.teacher_requests import create_teacher_requests_blueprint
 from backend.routes.lti import create_lti_blueprint
+from backend.routes.lingual_admin import create_lingual_admin_blueprint
 from backend.services.membership_context import (
     SchoolContextNotFoundError,
     resolve_school_request_context,
@@ -436,6 +437,7 @@ def register_domain_blueprints():
     app.register_blueprint(create_school_requests_blueprint(deps))
     app.register_blueprint(create_teacher_requests_blueprint(deps))
     app.register_blueprint(create_lti_blueprint(deps))
+    app.register_blueprint(create_lingual_admin_blueprint(deps))
     register_avatar_chat_routes(app, deps)
 
     # E2E test harness — development/testing only

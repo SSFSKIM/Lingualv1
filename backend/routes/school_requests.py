@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 from datetime import UTC, datetime
 from urllib.parse import urlparse
@@ -10,12 +9,14 @@ import database
 from flask import Blueprint, jsonify, request, session
 
 from backend.route_deps import RouteDeps
+from backend.services.audit_utils import (
+    client_ip as _client_ip,
+    hash_ip as _hash_ip,
+    public_base_url as _public_base_url,
+    user_agent as _user_agent,
+)
 from backend.services.outbox import OutboxTemplate, enqueue_outbox_email
 from database import list_lingual_admin_emails
-
-
-def _public_base_url() -> str:
-    return os.environ.get('PUBLIC_BASE_URL', 'https://l1ngual.com')
 
 
 _EMAIL_RE = re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')

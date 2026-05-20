@@ -802,10 +802,25 @@ def make_test_deps(
     )
 
 
-def make_test_app(*blueprints) -> Flask:
-    """Create a Flask test app with the given blueprints registered."""
+def make_test_app(*blueprints, extra_blueprints=None) -> Flask:
+    """Create a Flask test app with the given blueprints registered.
+
+    Two calling styles are supported:
+        make_test_app(bp1, bp2, ...)                  # positional (legacy)
+        make_test_app(deps, extra_blueprints=[bp1])   # Plan 5 style
+
+    The first positional may be a `RouteDeps` (ignored — kept for the
+    Plan 5 smoke-test signature) or a Flask Blueprint.
+    """
     app = Flask(__name__)
     app.secret_key = "test-secret"
     for bp in blueprints:
+        if isinstance(bp, RouteDeps):
+            # Plan 5 callers pass deps positionally then list blueprints
+            # under `extra_blueprints=`. Skip — deps are already wired
+            # into the blueprints themselves.
+            continue
+        app.register_blueprint(bp)
+    for bp in (extra_blueprints or []):
         app.register_blueprint(bp)
     return app
