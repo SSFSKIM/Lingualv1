@@ -443,3 +443,72 @@ business actions complete normally but do not produce those emails.
     `_serialize_request` fallback) but DO NOT match the
     `?country=` filter until backfilled. Tracked in TASKS under the
     Plan 5 follow-ups.
+
+48. **`AdminPendingPage` still navigated approved admins to
+    `/app/teacher` instead of the new `/app/admin` school-admin home.**
+    _RESOLVED post-review._ The pending page's polling effect detected
+    `status === 'approved'`, called `refreshUser()`, then dispatched
+    `navigate('/app/teacher', ...)` — a Plan 2 placeholder convention
+    explicitly called out in the source comment. Plan 5 introduced
+    `SCHOOL_ADMIN_HOME_ROUTE = '/app/admin'` and `SchoolAdminRoute`
+    (LIMITATIONS #46), but the most visible admin entry point in the
+    product — the moment a school is first approved — still bypassed
+    them. The page now imports `SCHOOL_ADMIN_HOME_ROUTE` and uses it
+    on approval. `AdminPendingPage.test.tsx` updated to assert the new
+    target.
+
+49. **`approve_school_request` dropped the Plan 3 wizard payload when
+    creating the new org.** _RESOLVED post-review._ The transactional
+    `org_data` dict (extended in #42 with `name_lower` +
+    `school_admin_uids`) still only copied the legacy slim fields. The
+    Plan 3 wizard captures `school_type`, `location.{country,state}`,
+    `website_url`, `public_private`, and `grade_size` on
+    `school_requests`, but none of these reached the resulting
+    `organizations` doc. Self-defeating loop: Plan 5's
+    `list_organizations` filters and Org detail page surface render the
+    very fields that were missing on the very orgs they just created
+    via the wizard. `approve_school_request` now copies all six wizard
+    fields inside the same `@firestore.transactional` block, with two
+    name remaps required by the schema: the request schema uses
+    `public_private` while the org schema uses `public_or_private` (the
+    field `list_organizations` filters on); and `country` is sourced
+    from the top-level denormalized field (post-#47) with a fallback to
+    `location.country` for pre-denormalization rows. New regression in
+    `backend/tests/test_approve_org_denormalization.py`
+    (`ApproveOrgWizardPayloadTests`) covers happy path, name remap,
+    fallback, and the legacy-minimal-payload defense.
+
+50. **`list_organizations` filtered queries had no matching composite
+    indexes.** _RESOLVED post-review._ `firestore.indexes.json` only
+    declared `organizations(status, suspended_until)` for the
+    auto-restore scheduler. Any `list_organizations` call with a filter
+    builds `where('<field>', '==', value).order_by('name_lower')`,
+    which requires a composite index in deployed Firestore — without it
+    the query fails with `FAILED_PRECONDITION` and the org-list page
+    returns 500 on every filter selection. Four single-filter indexes
+    added:
+    `organizations(status, name_lower)`,
+    `organizations(school_type, name_lower)`,
+    `organizations(country, name_lower)`,
+    `organizations(public_or_private, name_lower)`. Multi-filter
+    combinations (e.g. status + school_type + name_lower) are not
+    pre-declared; Firestore's "create index" error link will guide
+    operators to add them on demand. New regression class
+    `TestOrganizationIndexes` in
+    `backend/tests/test_firestore_indexes.py` exercises each
+    single-filter shape against the emulator, so a future field added
+    to the filter contract without an index trips the test before
+    deploy — provided `make test-emulator` runs in CI (see TASKS).
+
+51. **`LingualOrgsListPage` offered an `elementary` school-type filter
+    option not in the backend allow-list.** _RESOLVED post-review._
+    Selecting "Elementary" sent `schoolType=elementary` to
+    `list_organizations`, which validates against
+    `ALLOWED_SCHOOL_TYPES`. The frozenset had `middle/high/k12/...`
+    but not `elementary`, so the page broke with a 400 on the
+    first-listed option. `elementary` added to `ALLOWED_SCHOOL_TYPES`
+    (Plan 3 wizard's school-type values can carry it too).
+    `test_school_creation_drafts.WizardEnumConstantsTest` updated to
+    pin the new value. Longer-term: share the school-type enum
+    between FE and BE so this drift class doesn't recur — tracked as
+    a v1.5 TASK.
