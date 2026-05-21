@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 
 from flask import Blueprint, jsonify, request
 
+import database
 from backend.route_deps import RouteDeps
 from backend.services.assignment_resolver import (
     SUPPORTED_ASSIGNMENT_STATUSES,
@@ -24,6 +25,10 @@ from backend.services.compliance import (
 )
 from backend.services.disclosure_logging import log_disclosure_if_new
 from backend.services.membership_context import SchoolContextPermissionError
+from backend.services.suspended_org_guard import (
+    SuspendedOrgError,
+    enforce_org_active,
+)
 from backend.services.practice_analytics import (
     SUPPORTED_EVENT_TYPES,
     apply_learning_event_to_session,
@@ -180,6 +185,10 @@ def create_curriculum_admin_blueprint(deps: RouteDeps) -> Blueprint:
     def api_generate_assignment_draft(class_id):
         try:
             _context, class_record = _require_teacher_context(deps, class_id)
+            try:
+                enforce_org_active(class_record.get('org_id'), db=deps.db)
+            except SuspendedOrgError as exc:
+                return jsonify(exc.to_payload()), 403
             data = request.get_json() or {}
             source_text = _normalize_string(data.get('sourceText'))
 
@@ -224,6 +233,10 @@ def create_curriculum_admin_blueprint(deps: RouteDeps) -> Blueprint:
     def api_create_assignment(class_id):
         try:
             _context, class_record = _require_teacher_context(deps, class_id)
+            try:
+                enforce_org_active(class_record.get('org_id'), db=deps.db)
+            except SuspendedOrgError as exc:
+                return jsonify(exc.to_payload()), 403
             uid = deps.get_current_user_uid()
             data = request.get_json() or {}
 
@@ -457,6 +470,15 @@ def create_curriculum_admin_blueprint(deps: RouteDeps) -> Blueprint:
                 chat_id=chat_id,
                 ui_language=ui_language,
             )
+            # In-flight grace anchor: capture the org status at session
+            # creation. Future event POSTs on this session pass through if
+            # *this* snapshot is 'active', even after the org is suspended.
+            classroom = bootstrap.get('class', {}) if isinstance(bootstrap, dict) else {}
+            session_org_id = classroom.get('orgId') or session_payload.get('org_id')
+            session_org = deps.db.get_organization(session_org_id) if session_org_id else None
+            session_payload['org_status_when_created'] = (
+                (session_org or {}).get('status') or database.ORG_STATUS_ACTIVE
+            )
             session_id = deps.db.create_practice_session(session_payload)
             session_record = deps.db.get_practice_session(session_id)
 
@@ -476,6 +498,8 @@ def create_curriculum_admin_blueprint(deps: RouteDeps) -> Blueprint:
                 'success': True,
                 'practiceSession': serialize_practice_session(session_record),
             }), 201
+        except SuspendedOrgError as exc:
+            return jsonify(exc.to_payload()), 403
         except ValueError as exc:
             error = str(exc)
             status_code = 404 if 'not found' in error.lower() else 400
@@ -506,6 +530,24 @@ def create_curriculum_admin_blueprint(deps: RouteDeps) -> Blueprint:
                 return jsonify({'success': False, 'error': 'Practice session is not available for this user.'}), 403
             if session_record.get('status') != 'active' and event_type != 'session.ended':
                 return jsonify({'success': False, 'error': 'Practice session is no longer active.'}), 409
+
+            # In-flight grace: only block when *both* the org is currently
+            # suspended AND the session was created while the org was
+            # already suspended. Sessions that started while the org was
+            # active continue to drain their events through to closure even
+            # if the org is suspended mid-session.
+            session_org_id = session_record.get('org_id')
+            if session_org_id:
+                org = deps.db.get_organization(session_org_id) or {}
+                current_status = org.get('status', database.ORG_STATUS_ACTIVE)
+                snapshot = session_record.get('org_status_when_created', database.ORG_STATUS_ACTIVE)
+                if current_status != database.ORG_STATUS_ACTIVE and snapshot != database.ORG_STATUS_ACTIVE:
+                    err = SuspendedOrgError(
+                        org_id=session_org_id,
+                        reason=org.get('suspend_reason'),
+                        until=org.get('suspended_until'),
+                    )
+                    return jsonify(err.to_payload()), 403
 
             deps.db.create_learning_event(
                 build_learning_event_payload(

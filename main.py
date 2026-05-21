@@ -28,6 +28,7 @@ def _validate_required_env() -> None:
     feature = {
         'CANVAS_PAT_ENCRYPTION_KEY': 'Canvas connect returns 503 when a teacher clicks Connect',
         'PUBLIC_BASE_URL': 'Email CTAs ship with relative URLs which break in email clients',
+        'SUPPORT_EMAIL': 'Plan 5 — falls back to help@l1ngual.com if unset; surfaces in org_suspended email footer',
     }
     missing_hard = [
         f'  - {k}: {reason}'
@@ -144,6 +145,7 @@ from scoring import load_assessment_data, compute_results, get_actfl_description
 import database as db
 from backend.avatar_chat import register_avatar_chat_routes
 from backend.route_deps import RouteDeps
+from backend.services.audit import AuditLogger
 from backend.routes.auth import create_auth_blueprint
 from backend.routes.chat import create_chat_blueprint
 from backend.routes.assessment import create_assessment_blueprint
@@ -159,6 +161,7 @@ from backend.routes.canvas_practice import create_canvas_practice_blueprint
 from backend.routes.school_requests import create_school_requests_blueprint
 from backend.routes.teacher_requests import create_teacher_requests_blueprint
 from backend.routes.lti import create_lti_blueprint
+from backend.routes.lingual_admin import create_lingual_admin_blueprint
 from backend.services.membership_context import (
     SchoolContextNotFoundError,
     resolve_school_request_context,
@@ -417,6 +420,7 @@ def register_domain_blueprints():
         allowed_learning_locales=ALLOWED_LEARNING_LOCALES,
         allowed_minigame_types=ALLOWED_MINIGAME_TYPES,
         supported_ui_languages=SUPPORTED_UI_LANGUAGES,
+        audit_logger=AuditLogger(),
     )
 
     app.register_blueprint(create_auth_blueprint(deps))
@@ -434,6 +438,7 @@ def register_domain_blueprints():
     app.register_blueprint(create_school_requests_blueprint(deps))
     app.register_blueprint(create_teacher_requests_blueprint(deps))
     app.register_blueprint(create_lti_blueprint(deps))
+    app.register_blueprint(create_lingual_admin_blueprint(deps))
     register_avatar_chat_routes(app, deps)
 
     # E2E test harness — development/testing only

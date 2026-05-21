@@ -17,6 +17,10 @@ from backend.services.canvas.client import CanvasClient
 from backend.services.canvas.encryption import decrypt_pat
 from backend.services.canvas.practice_generator import generate_canvas_practice
 from backend.services.membership_context import SchoolContextPermissionError
+from backend.services.suspended_org_guard import (
+    SuspendedOrgError,
+    enforce_org_active,
+)
 
 TEACHER_ALLOWED_ROLES = {'teacher', 'school_admin'}
 
@@ -47,6 +51,11 @@ def create_canvas_practice_blueprint(deps: RouteDeps) -> Blueprint:
             ctx, class_record = _require_teacher_for_class(class_id)
         except (PermissionError, SchoolContextPermissionError, LookupError) as exc:
             return jsonify({'success': False, 'error': str(exc)}), 403
+
+        try:
+            enforce_org_active(class_record.get('org_id'), db=deps.db)
+        except SuspendedOrgError as exc:
+            return jsonify(exc.to_payload()), 403
 
         data = request.get_json() or {}
         canvas_content_id = data.get('canvasContentId', '').strip()
@@ -129,6 +138,11 @@ def create_canvas_practice_blueprint(deps: RouteDeps) -> Blueprint:
             ctx, class_record = _require_teacher_for_class(class_id)
         except (PermissionError, SchoolContextPermissionError, LookupError) as exc:
             return jsonify({'success': False, 'error': str(exc)}), 403
+
+        try:
+            enforce_org_active(class_record.get('org_id'), db=deps.db)
+        except SuspendedOrgError as exc:
+            return jsonify(exc.to_payload()), 403
 
         data = request.get_json() or {}
 

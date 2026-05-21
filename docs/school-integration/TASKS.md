@@ -66,7 +66,7 @@ Owner: Engineering + Product
 - [x] PendingTeacherRequestsSection on TeacherDashboardPage (Plan 4)
 - [ ] Backfill `organizations.school_admin_uids` for orgs created before Plan 4 — run `scripts/backfill_school_admin_uids.py`
 - [ ] Backfill `organizations.name_lower` for orgs created before Plan 4 — run `scripts/backfill_org_name_lower.py`
-- [ ] **(Plan 5 acceptance)** Any membership-removal path MUST call `_sync_org_admin_uids(org_id, uid, add=False)` when removing `school_admin`. Extend `backend/tests/test_school_admin_uids_invariant.py` with the removal regression.
+- [x] **(Plan 5 acceptance)** Any membership-removal path MUST call `_sync_org_admin_uids(org_id, uid, add=False)` when removing `school_admin`. Extended `backend/tests/test_school_admin_uids_invariant.py` with the removal regression (Plan 5 Task 7).
 - [ ] Replace in-memory org search rate limiter with a shared store (Redis / Firestore counter) when scaling to multi-replica.
 - [ ] 7-day reminder email for stale pending teacher join requests (v1.5). **Product decision needed before launch.**
 - [ ] Realtime status listener on `/signup/teacher/pending` (replace 30s polling, v1.5).
@@ -102,6 +102,33 @@ Owner: Engineering + Product
   code or LTI deep-link launch. Deferred: manual "link to Canvas roster
   entry" UI for the email-mismatch case (see `LIMITATIONS.md` item 20).
 - [ ] Add manual CSV fallback if LMS setup is delayed.
+
+### Lingual admin panel (Plan 5)
+
+- [x] Routes mounted at `/lingual-admin/*` (top-level, outside `/app`, so AppLayout does not double-nest with `LingualAdminShell`).
+- [x] `lingual_admin_audit` collection with `AuditLogger` service.
+- [x] 12 endpoints under `backend/routes/lingual_admin.py`.
+- [x] Org suspend/restore with email fan-out via outbox.
+- [x] Auto-restore hourly Cloud Function scheduler.
+- [x] Suspended-org enforcement at 5 points (assignment_resolver, realtime mint, practice mutations, canvas_practice, teacher writes).
+- [x] Member removal UI with `_sync_org_admin_uids(add=False)` invariant test (Plan 4 forward obligation).
+- [x] `org_suspended` + `org_restored` email templates.
+- [x] `/app/admin` school_admin home route (separated from `/app/teacher`).
+- [x] AuthContext 5-min `/api/auth/verify` polling.
+- [x] Legacy `/api/admin/school-requests/*` endpoints return 410 Gone.
+- [x] Legacy `/app/admin/school-requests` route redirects to `/lingual-admin/requests`.
+
+- [ ] `PATCH /api/lingual-admin/organizations/<orgId>` (org metadata editing) — v1.5.
+- [ ] Realtime listener for org-detail audit feed (replace pagination, v1.5).
+- [ ] Bulk export of org audit feed as CSV — v1.5.
+- [ ] Internationalize Lingual admin panel UI (en-only in v1).
+- [ ] Wire `school_request_reminder_to_lingual` once the outbox sweep gap (LIMITATIONS #21) is closed.
+- [ ] Delete orphan Firestore composite index `enrollments(status, student_uid, updated_at DESC)` (LIMITATIONS #41) — safe, redundant with the IaC-managed `(student_uid, status, updated_at DESC)` index. Targeted `gcloud firestore indexes composite delete` command in LIMITATIONS #41.
+- [ ] Reminder email for inactive suspended orgs (≥30 days suspended_until in past with auto-restore disabled) — needs product decision before launch.
+- [ ] Backfill top-level `country` from `location.country` for `school_requests` rows submitted before the LIMITATIONS #47 denormalization fix. One-shot script: query `school_requests` where `country` is missing AND `location.country` is non-empty; write `country` to each. Until run, the Requests page country filter (LIMITATIONS #47) matches only post-fix rows.
+- [ ] Backfill org metadata (`school_type`, `country`, `state`, `website_url`, `public_or_private`, `grade_size`) on `organizations/` rows created before the LIMITATIONS #49 approval-time copy fix. One-shot script: for each org, look up the originating `school_requests` doc via `created_org_id` reverse lookup; copy missing fields. Until run, those pre-fix orgs render blanks in the Plan 5 detail page and are excluded from filtered org-list queries.
+- [ ] Wire `make test-emulator` into CI so a missing composite index trips before deploy. Infrastructure exists (`backend/tests/test_firestore_indexes.py` + Makefile target) but Plan 5 round-4 surfaced a class of index-shaped findings (LIMITATIONS #50) that FakeDb-only test suites cannot catch. Requires Java runtime on CI agents + Firebase CLI; add as a separate job that runs alongside `make test-backend`.
+- [ ] Share the school-type enum between FE and BE (LIMITATIONS #51 root cause). Today both sides hand-code overlapping lists in TS and Python, and the round-4 drift (`elementary` in TS, not in BE's `ALLOWED_SCHOOL_TYPES`) was caught by Codex review rather than the type system. Either (a) emit the Python enum as a generated TS const at build time, or (b) move both to a single JSON/YAML source-of-truth that both layers read.
 
 ## Phase 3: Canvas content and assignment authoring
 

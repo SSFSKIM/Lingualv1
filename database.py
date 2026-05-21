@@ -289,7 +289,37 @@ ALLOWED_ORG_TYPES = frozenset({
     'school',
 })
 
+# --- Organization status -------------------------------------------------
+ORG_STATUS_ACTIVE = 'active'
+ORG_STATUS_SUSPENDED = 'suspended'
+ORG_STATUS_ARCHIVED = 'archived'
+
+ALLOWED_ORG_STATUSES = frozenset({
+    ORG_STATUS_ACTIVE,
+    ORG_STATUS_SUSPENDED,
+    ORG_STATUS_ARCHIVED,
+})
+
+# Org suspend/restore field names
+ORG_FIELD_STATUS = 'status'
+ORG_FIELD_SUSPENDED_AT = 'suspended_at'
+ORG_FIELD_SUSPENDED_BY_UID = 'suspended_by_uid'
+ORG_FIELD_SUSPEND_REASON = 'suspend_reason'
+ORG_FIELD_SUSPENDED_UNTIL = 'suspended_until'
+ORG_FIELD_RESTORED_AT = 'restored_at'
+ORG_FIELD_RESTORED_BY_UID = 'restored_by_uid'
+
+
+def _validate_org_status(value: str) -> str:
+    """Raise ValueError if value is not a known org status."""
+    if not value or value not in ALLOWED_ORG_STATUSES:
+        raise ValueError(
+            f'Invalid org status {value!r}; allowed: {sorted(ALLOWED_ORG_STATUSES)}'
+        )
+    return value
+
 ALLOWED_SCHOOL_TYPES = frozenset({
+    'elementary',
     'middle',
     'high',
     'k12',
@@ -394,6 +424,14 @@ def get_user_ref(uid):
     """Get reference to user document."""
     db = get_db()
     return db.collection('users').document(uid)
+
+
+LINGUAL_ADMIN_AUDIT_COLLECTION = 'lingual_admin_audit'
+
+
+def get_lingual_admin_audit_collection():
+    """Get the Lingual admin audit log collection."""
+    return get_db().collection(LINGUAL_ADMIN_AUDIT_COLLECTION)
 
 
 def get_organizations_collection():
@@ -970,6 +1008,261 @@ def search_organizations(query: str, *, limit: int = 10):
     return results
 
 
+LINGUAL_ADMIN_ORGS_PAGE_SIZE = 25
+
+
+def list_organizations(
+    *,
+    status: str | None = None,
+    school_type: str | None = None,
+    country: str | None = None,
+    public_or_private: str | None = None,
+    created_after=None,
+    created_before=None,
+    cursor: dict | None = None,
+    limit: int = LINGUAL_ADMIN_ORGS_PAGE_SIZE,
+) -> dict:
+    """Paged list of organizations with optional filters.
+
+    Returns ``{ 'items': [...], 'next_cursor': dict | None }``.
+
+    ``cursor`` shape: ``{ 'name_lower': str, 'id': str }`` — the last doc seen.
+
+    Pagination contract: ``next_cursor`` is set whenever the returned page is
+    full (``len(items) == limit``), even if there are no further results in
+    the underlying collection. Callers MUST handle the case where a follow-up
+    call with that cursor returns ``{'items': [], 'next_cursor': None}``.
+    (A ``limit + 1`` lookahead fix would be more elegant but requires a
+    larger refactor — current behavior is intentional.)
+
+    Filter semantics: ``None`` (the default) means "no filter applied".
+    Any other value — including the empty string ``''`` — is treated as an
+    explicit filter value and forwarded to Firestore as
+    ``where(field, '==', value)``. Validation rejects non-empty values that
+    are outside the allowed set for ``status`` / ``school_type`` /
+    ``public_or_private``; ``country`` is free-form.
+    """
+    if status is not None:
+        _validate_org_status(status)
+    if school_type and school_type not in ALLOWED_SCHOOL_TYPES:
+        raise ValueError(
+            f'Invalid school_type {school_type!r}; allowed: {sorted(ALLOWED_SCHOOL_TYPES)}'
+        )
+    if public_or_private and public_or_private not in ALLOWED_PUBLIC_PRIVATE:
+        raise ValueError(
+            f'Invalid public_or_private {public_or_private!r}; allowed: {sorted(ALLOWED_PUBLIC_PRIVATE)}'
+        )
+    query = get_db().collection('organizations')
+    if status is not None:
+        query = query.where('status', '==', status)
+    if school_type is not None:
+        query = query.where('school_type', '==', school_type)
+    if country is not None:
+        query = query.where('country', '==', country)
+    if public_or_private is not None:
+        query = query.where('public_or_private', '==', public_or_private)
+    if created_after is not None:
+        query = query.where('created_at', '>=', created_after)
+    if created_before is not None:
+        query = query.where('created_at', '<=', created_before)
+    query = query.order_by('name_lower').order_by('__name__').limit(limit)
+    if cursor and cursor.get('name_lower') and cursor.get('id'):
+        # Firestore `start_after` takes a single cursor object. The list
+        # values match the order_by chain: name_lower, then __name__.
+        query = query.start_after([cursor['name_lower'], cursor['id']])
+    items = []
+    last_doc = None
+    for doc in query.stream():
+        data = doc.to_dict() or {}
+        data['id'] = doc.id
+        items.append(data)
+        last_doc = doc
+    next_cursor = None
+    if last_doc is not None and len(items) == limit:
+        last_data = last_doc.to_dict() or {}
+        next_cursor = {'name_lower': last_data.get('name_lower', ''), 'id': last_doc.id}
+    return {'items': items, 'next_cursor': next_cursor}
+
+
+def list_org_memberships(
+    *,
+    org_id: str,
+    roles: tuple = ('school_admin', 'teacher'),
+) -> list:
+    """Active memberships for an org, filtered to staff roles by default.
+
+    Students are excluded by default per FERPA. Returns [{ membership_id,
+    uid, email, name, roles[], status, joined_at }, ...].
+
+    NOTE: memberships whose user doc has been deleted are silently dropped
+    in v1. v1.5 may surface them as tombstone rows for ops visibility.
+    """
+    q = (
+        get_db()
+        .collection('memberships')
+        .where('org_id', '==', org_id)
+        .where('status', '==', 'active')
+    )
+    rows = []
+    for m in q.stream():
+        data = m.to_dict() or {}
+        member_roles = data.get('roles') or []
+        if not any(r in member_roles for r in roles):
+            continue
+        uid = data.get('uid')
+        user = get_user(uid) if uid else None
+        if not user:
+            continue
+        rows.append({
+            'membership_id': m.id,
+            'uid': uid,
+            'email': user.get('email'),
+            'name': (user.get('profile') or {}).get('display_name') or user.get('name'),
+            'roles': member_roles,
+            'status': data.get('status'),
+            'joined_at': data.get('joined_at') or data.get('created_at'),
+        })
+    return rows
+
+
+def list_org_classes_summary(*, org_id: str) -> list:
+    """Class metadata rows for an org. No class internals.
+
+    Used by the Lingual admin org-detail Classes tab. Returns a curated
+    summary view — does NOT include status, canvas linkage, locale, etc.
+    For the full record view used by school-admin/teacher routes, see the
+    older ``list_org_classes(org_id, status='active')`` function below.
+
+    NOTE: Plan 5 originally specified the name ``list_org_classes`` for this
+    helper, but that name was already taken by a pre-existing function with
+    a different shape and several active callers (admin.py, lti.py,
+    schools.py). Renamed to ``list_org_classes_summary`` to avoid breaking
+    those callers while preserving the admin-panel intent.
+    """
+    q = (
+        get_db()
+        .collection('classes')
+        .where('org_id', '==', org_id)
+    )
+    rows = []
+    for c in q.stream():
+        data = c.to_dict() or {}
+        rows.append({
+            'id': c.id,
+            'name': data.get('name'),
+            'term': data.get('term'),
+            'subject': data.get('subject'),
+            'teacher_membership_ids': data.get('teacher_membership_ids') or [],
+            'created_at': data.get('created_at'),
+            'last_activity_at': data.get('last_activity_at'),  # TODO: populated by future class-activity tracking task; currently always None
+        })
+    return rows
+
+
+def count_org_students(*, org_id: str) -> int:
+    """Aggregate active student count for an org.
+
+    Counts via enrollments × classes intersection (enrollments don't carry
+    org_id directly). Chunks class ids to respect Firestore's 30-item ``in``
+    limit. Returns 0 when the org has no classes.
+    """
+    class_ids = [
+        c.id for c in get_db()
+        .collection('classes')
+        .where('org_id', '==', org_id)
+        .stream()
+    ]
+    if not class_ids:
+        return 0
+    total = 0
+    for i in range(0, len(class_ids), 30):
+        chunk = class_ids[i:i + 30]
+        snap = (
+            get_db()
+            .collection('enrollments')
+            .where('class_id', 'in', chunk)
+            .where('status', '==', 'active')
+            .count()
+            .get()
+        )
+        total += snap[0][0].value if snap else 0
+    return total
+
+
+def list_org_audit_events(*, org_id: str, limit: int = 50) -> list:
+    """Audit rows scoped to this org, newest first."""
+    q = (
+        get_db()
+        .collection(LINGUAL_ADMIN_AUDIT_COLLECTION)
+        .where('target_org_id', '==', org_id)
+        .order_by('created_at', direction='DESCENDING')
+        .limit(limit)
+    )
+    rows = []
+    for a in q.stream():
+        data = a.to_dict() or {}
+        data['id'] = a.id
+        rows.append(data)
+    return rows
+
+
+# --- Plan 5 lingual-admin overview dashboard helpers ---------------------
+#
+# Four read-only aggregates that back GET /api/lingual-admin/overview:
+# pending request count, org status counts, recent-request velocity, and
+# the activity feed. Kept lightweight — no per-doc reads beyond the feed.
+
+
+def count_school_requests_pending() -> int:
+    """Count school_requests with status == 'pending'."""
+    q = (
+        get_db()
+        .collection('school_requests')
+        .where('status', '==', 'pending')
+    )
+    snap = q.count().get()
+    return snap[0][0].value if snap else 0
+
+
+def count_organizations_by_status(status: str) -> int:
+    """Count organizations filtered by status. Raises ValueError on unknown status."""
+    _validate_org_status(status)
+    q = (
+        get_db()
+        .collection('organizations')
+        .where('status', '==', status)
+    )
+    snap = q.count().get()
+    return snap[0][0].value if snap else 0
+
+
+def count_school_requests_since(*, since) -> int:
+    """Count school_requests created at-or-after the given timestamp."""
+    q = (
+        get_db()
+        .collection('school_requests')
+        .where('created_at', '>=', since)
+    )
+    snap = q.count().get()
+    return snap[0][0].value if snap else 0
+
+
+def list_recent_audit_events(*, limit: int = 20) -> list:
+    """Recent lingual-admin audit rows across all targets, newest first."""
+    q = (
+        get_db()
+        .collection(LINGUAL_ADMIN_AUDIT_COLLECTION)
+        .order_by('created_at', direction='DESCENDING')
+        .limit(limit)
+    )
+    rows = []
+    for a in q.stream():
+        data = a.to_dict() or {}
+        data['id'] = a.id
+        rows.append(data)
+    return rows
+
+
 def list_school_admin_emails(org_id: str):
     """Return [{uid, email, name}] for every active school_admin of the org."""
     membership_docs = (
@@ -1005,15 +1298,101 @@ def _sync_org_admin_uids(org_id: str, uid: str, *, add: bool) -> None:
     Called whenever a membership touching the school_admin role is created or
     removed. Idempotent; ArrayUnion / ArrayRemove are commutative.
 
-    TODO: any future path that revokes a school_admin role (membership
-    deletion, role-change endpoint, org suspension cascading to memberships)
-    MUST call _sync_org_admin_uids(org_id, uid, add=False). Audit when
-    implementing Plan 5 (Lingual admin org panel — suspend/restore).
+    NOTE: Plan 5's `remove_membership` (lines ~1338) inlines the equivalent
+    arrayRemove inside its Firestore batch for atomic audit. Any change to
+    this helper's behavior must be mirrored there.
     """
     if not org_id or not uid:
         return
     op = firestore.ArrayUnion([uid]) if add else firestore.ArrayRemove([uid])
     get_organizations_collection().document(org_id).update({'school_admin_uids': op})
+
+
+def suspend_organization(
+    *,
+    org_id: str,
+    actor_uid: str,
+    reason: str,
+    suspended_until,
+    audit_entry: dict,
+) -> None:
+    """Transition an org from active to suspended.
+
+    The org update AND the audit row commit atomically via a Firestore
+    batch — they cannot diverge. ``audit_entry`` must be the dict produced
+    by ``AuditLogger.build_audit_doc(...)``. ``created_at`` is overwritten
+    with ``SERVER_TIMESTAMP`` so callers cannot back-date.
+
+    ``suspended_until`` is an optional ``datetime`` for auto-restore via the
+    Cloud Function scheduler. ``None`` means indefinite.
+
+    Concurrency note: the status precondition is checked via a read-then-batch
+    sequence, not in a transaction. Two simultaneous suspend calls may both
+    pass the precheck and produce two audit rows; the final state is
+    consistent. Acceptable for low-contention Lingual admin operations.
+    """
+    if audit_entry is None:
+        raise ValueError('audit_entry is required for state transitions')
+    if not (reason or '').strip():
+        raise ValueError('suspend reason is required')
+    org = get_organization(org_id)
+    if not org:
+        raise ValueError(f'organization {org_id} not found')
+    if org.get(ORG_FIELD_STATUS) == ORG_STATUS_SUSPENDED:
+        raise ValueError(f'organization {org_id} is already suspended')
+
+    db = get_db()
+    batch = db.batch()
+    batch.update(get_organization_ref(org_id), {
+        ORG_FIELD_STATUS: ORG_STATUS_SUSPENDED,
+        ORG_FIELD_SUSPENDED_AT: firestore.SERVER_TIMESTAMP,
+        ORG_FIELD_SUSPENDED_BY_UID: actor_uid,
+        ORG_FIELD_SUSPEND_REASON: reason.strip(),
+        ORG_FIELD_SUSPENDED_UNTIL: suspended_until,
+        'updated_at': firestore.SERVER_TIMESTAMP,
+    })
+    audit_doc = dict(audit_entry)
+    audit_doc['created_at'] = firestore.SERVER_TIMESTAMP  # server time, not caller
+    audit_ref = db.collection(LINGUAL_ADMIN_AUDIT_COLLECTION).document()
+    batch.set(audit_ref, audit_doc)
+    batch.commit()
+
+
+def restore_organization(*, org_id: str, actor_uid: str, audit_entry: dict) -> None:
+    """Transition an org from suspended back to active.
+
+    Atomic with audit (see :func:`suspend_organization`). Clears all
+    ``suspended_*`` fields and stamps ``restored_at`` / ``restored_by_uid``.
+
+    Concurrency note: the status precondition is checked via a read-then-batch
+    sequence, not in a transaction. Two simultaneous restore calls may both
+    pass the precheck and produce two audit rows; the final state is
+    consistent. Acceptable for low-contention Lingual admin operations.
+    """
+    if audit_entry is None:
+        raise ValueError('audit_entry is required for state transitions')
+    org = get_organization(org_id)
+    if not org:
+        raise ValueError(f'organization {org_id} not found')
+    if org.get(ORG_FIELD_STATUS) != ORG_STATUS_SUSPENDED:
+        raise ValueError(f'organization {org_id} is not suspended')
+
+    db = get_db()
+    batch = db.batch()
+    batch.update(get_organization_ref(org_id), {
+        ORG_FIELD_STATUS: ORG_STATUS_ACTIVE,
+        ORG_FIELD_SUSPENDED_AT: None,
+        ORG_FIELD_SUSPENDED_BY_UID: None,
+        ORG_FIELD_SUSPEND_REASON: None,
+        ORG_FIELD_SUSPENDED_UNTIL: None,
+        ORG_FIELD_RESTORED_AT: firestore.SERVER_TIMESTAMP,
+        ORG_FIELD_RESTORED_BY_UID: actor_uid,
+        'updated_at': firestore.SERVER_TIMESTAMP,
+    })
+    audit_doc = dict(audit_entry)
+    audit_doc['created_at'] = firestore.SERVER_TIMESTAMP
+    batch.set(db.collection(LINGUAL_ADMIN_AUDIT_COLLECTION).document(), audit_doc)
+    batch.commit()
 
 
 def create_membership(
@@ -1040,6 +1419,51 @@ def create_membership(
     if 'school_admin' in normalized_roles and status == 'active':
         _sync_org_admin_uids(org_id, uid, add=True)
     return doc_ref.id
+
+
+def remove_membership(*, membership_id: str, actor_uid: str, audit_entry: dict) -> dict:
+    """Soft-remove a membership row, atomically with the audit row.
+
+    Sets `status='removed'` and stamps `removed_at` / `removed_by_uid` in
+    a Firestore batch alongside the audit doc. If the membership held the
+    `school_admin` role, ALSO updates the org's `school_admin_uids` array
+    in the same batch (via `arrayRemove`) so the denormalization
+    invariant the Plan 4 codebase-conventions §14 forward obligation
+    requires is preserved atomically.
+
+    Returns the membership dict (pre-removal) for downstream UI/response
+    shaping.
+    """
+    if audit_entry is None:
+        raise ValueError('audit_entry is required for state transitions')
+    m = get_membership(membership_id)
+    if not m:
+        raise ValueError(f'membership {membership_id} not found')
+    if m.get('status') == 'removed':
+        raise ValueError(f'membership {membership_id} is already removed')
+
+    db = get_db()
+    batch = db.batch()
+    batch.update(get_membership_ref(membership_id), {
+        'status': 'removed',
+        'removed_at': firestore.SERVER_TIMESTAMP,
+        'removed_by_uid': actor_uid,
+    })
+    if 'school_admin' in (m.get('roles') or []):
+        org_id = m.get('org_id')
+        uid = m.get('uid')
+        if org_id and uid:
+            # Inline equivalent of _sync_org_admin_uids(org_id, uid, add=False),
+            # kept inline so it commits atomically with the membership update and audit row.
+            batch.update(get_organization_ref(org_id), {
+                'school_admin_uids': firestore.ArrayRemove([uid]),
+                'updated_at': firestore.SERVER_TIMESTAMP,
+            })
+    audit_doc = dict(audit_entry)
+    audit_doc['created_at'] = firestore.SERVER_TIMESTAMP
+    batch.set(db.collection(LINGUAL_ADMIN_AUDIT_COLLECTION).document(), audit_doc)
+    batch.commit()
+    return m
 
 
 def get_membership(membership_id):
@@ -1768,10 +2192,22 @@ def list_student_classes(student_uid):
     return classes
 
 
-def create_practice_session(session_data, session_id=None):
-    """Create a practice session document."""
+def create_practice_session(session_data, session_id=None, *, org_status_when_created=ORG_STATUS_ACTIVE):
+    """Create a practice session document.
+
+    ``org_status_when_created`` snapshots the org's lifecycle status at the
+    moment this session was minted (defaults to ``'active'``). It anchors
+    the in-flight grace policy in ``/api/practice-sessions/<id>/events``:
+    a session that started while the org was ``active`` continues to drain
+    its events to closure even after the org is suspended mid-session. New
+    sessions on a suspended org cannot reach this code path because the
+    route-level guard blocks them first. The kwarg is keyword-only so it
+    cannot accidentally shadow ``session_id`` positionally; the dict
+    payload key takes precedence when the caller has already injected one.
+    """
     doc_ref = get_practice_session_ref(session_id) if session_id else get_practice_sessions_collection().document()
     payload = dict(session_data or {})
+    payload.setdefault('org_status_when_created', org_status_when_created)
     payload.setdefault('created_at', _utc_now())
     payload['updated_at'] = _utc_now()
     doc_ref.set(payload)
@@ -2772,6 +3208,16 @@ def _build_school_request_payload(requester_uid, requester_email, requester_name
         ):
             if key in enriched:
                 payload[key] = enriched[key]
+        # Denormalize location.country to top-level `country` so the Plan 5
+        # `list_school_requests(country=...)` filter (and its composite
+        # index `country ASC, created_at DESC`) matches Plan 3 wizard
+        # submissions. Without this, every wizard request had country
+        # only at `location.country`, the filter queried top-level
+        # `country`, and the Requests page country filter returned 0
+        # matches in production.
+        loc = enriched.get('location') if isinstance(enriched.get('location'), dict) else None
+        if loc and loc.get('country'):
+            payload['country'] = loc['country']
     return payload
 
 
@@ -2880,18 +3326,72 @@ def get_user_school_request(uid):
     return None
 
 
-def list_school_requests(status_filter=None):
-    """List school requests, optionally filtered by status."""
+ALLOWED_REQUEST_SORTS = frozenset({'requested_at_desc', 'requested_at_asc', 'name'})
+
+
+def list_school_requests(
+    *,
+    status_filter=None,
+    school_type=None,
+    country=None,
+    requested_after=None,
+    requested_before=None,
+    sort='requested_at_desc',
+    limit=50,
+    cursor=None,
+):
+    """List school requests with filters, sort, and a deterministic cursor.
+
+    Always returns a dict ``{'items': [...], 'next_cursor': ...}``. Callers
+    in Plan 3 (`admin_list_school_requests`) and Plan 5 (the lingual-admin
+    requests list) both go through this entry point so that the Firestore
+    query shape, audit-relevant filters, and pagination semantics stay
+    consistent across surfaces.
+    """
+    if sort not in ALLOWED_REQUEST_SORTS:
+        raise ValueError(f'Invalid sort {sort!r}')
+
     query = get_school_requests_collection()
     if status_filter:
         query = query.where('status', '==', status_filter)
-    docs = query.order_by('created_at', direction=firestore.Query.DESCENDING).stream()
-    results = []
-    for doc in docs:
+    if school_type:
+        query = query.where('school_type', '==', school_type)
+    if country:
+        query = query.where('country', '==', country)
+    if requested_after is not None:
+        query = query.where('created_at', '>=', requested_after)
+    if requested_before is not None:
+        query = query.where('created_at', '<=', requested_before)
+
+    if sort == 'requested_at_desc':
+        query = query.order_by('created_at', direction=firestore.Query.DESCENDING)
+    elif sort == 'requested_at_asc':
+        query = query.order_by('created_at')
+    else:  # 'name'
+        query = query.order_by('school_name')
+    query = query.order_by('__name__').limit(limit)
+
+    if cursor and cursor.get('id') and 'leading_value' in cursor:
+        query = query.start_after([cursor.get('leading_value'), cursor['id']])
+
+    items = []
+    last_doc = None
+    for doc in query.stream():
         data = doc.to_dict() or {}
         data['id'] = doc.id
-        results.append(data)
-    return results
+        items.append(data)
+        last_doc = doc
+
+    next_cursor = None
+    if last_doc is not None and len(items) == limit:
+        last_data = last_doc.to_dict() or {}
+        if sort in ('requested_at_desc', 'requested_at_asc'):
+            leading_value = last_data.get('created_at')
+        else:
+            leading_value = last_data.get('school_name')
+        next_cursor = {'leading_value': leading_value, 'id': last_doc.id}
+
+    return {'items': items, 'next_cursor': next_cursor}
 
 
 def update_school_request(request_id, updates):
@@ -2900,13 +3400,44 @@ def update_school_request(request_id, updates):
     get_school_request_ref(request_id).update(updates)
 
 
-def approve_school_request(request_id, reviewed_by_uid):
+def approve_school_request(
+    request_id=None,
+    reviewed_by_uid=None,
+    *,
+    reviewer_uid=None,
+    internal_note=None,
+    audit_entry=None,
+):
     """Atomically approve a pending school request and create its admin org.
 
-    Returns a dict with `request`, `org_id`, and `membership_id`.
+    Backward-compat surface (Plan 3 callers):
+        approve_school_request(request_id, reviewed_by_uid=uid)
+    No audit row is written and the legacy return keys (`request`, `org_id`,
+    `membership_id`) are populated.
+
+    Plan 5 surface (audited):
+        approve_school_request(
+            request_id=...,
+            reviewer_uid=...,
+            internal_note=...,
+            audit_entry={...},
+        )
+    The `audit_entry` dict is committed in the same transaction as the
+    org/membership/request writes (atomic-with-audit, matching Tasks 8/9/14).
+    Pre-invite teacher rows from `request.pre_invited_teachers` are also
+    written inside the transaction so a Plan 5 approval is fully atomic.
+
+    The new shape additionally returns `request_id`, `created_org_id`, and
+    `pre_invite_invitation_ids`; the legacy keys remain for Plan 3.
+
     Returns None if the request does not exist.
     Raises ValueError if the request is no longer pending.
     """
+    # Allow `reviewer_uid` (Plan 5) or `reviewed_by_uid` (Plan 3 legacy).
+    actor_uid = reviewer_uid if reviewer_uid is not None else reviewed_by_uid
+    if not actor_uid:
+        raise ValueError('reviewer_uid (or reviewed_by_uid) is required')
+
     client = get_db()
     request_ref = client.collection('school_requests').document(request_id)
     org_ref = client.collection('organizations').document()
@@ -2929,14 +3460,42 @@ def approve_school_request(request_id, reviewed_by_uid):
         if not requester_uid:
             raise ValueError(f'Request {request_id} is missing requester_uid')
 
+        # Denormalized fields populated at approval time:
+        # - `name_lower` powers the orgs-list `order_by('name_lower')` (Plan 5
+        #   `list_organizations`). Without it the new org never appears in the
+        #   sorted page.
+        # - `school_admin_uids` is the denormalized admin-uid array Plan 4
+        #   relies on for teacher-join admin lookup and Plan 5 uses for the
+        #   `restore_organization` outbox fan-out. `create_membership` would
+        #   normally call `_sync_org_admin_uids(add=True)` to populate this,
+        #   but the membership below is written via `transaction.set(...)`
+        #   directly (it has to live inside the transaction) so the
+        #   denormalization is inlined here.
+        # - Plan 3 wizard metadata (`school_type`, `country`, `state`,
+        #   `website_url`, `public_or_private`, `grade_size`) is carried over
+        #   from the request so Plan 5's `list_organizations` filters and the
+        #   Org detail page render real data on every org this flow creates.
+        #   Without this copy the Plan 5 panel rendered blanks on its own
+        #   approvals (LIMITATIONS #49). Note name mapping: the request
+        #   schema uses `public_private` while the org schema uses
+        #   `public_or_private` (filter contract on `list_organizations`).
+        loc = req.get('location') if isinstance(req.get('location'), dict) else None
         org_data = {
             'name': req['school_name'],
+            'name_lower': (req.get('school_name') or '').strip().lower(),
             'type': req.get('org_type', 'school'),
             'status': 'active',
             'pilot_stage': 'beta',
             'default_modality_policy': 'hybrid',
             'default_retention_policy': 'standard_school',
             'lms_capabilities': [],
+            'school_admin_uids': [requester_uid],
+            'school_type': req.get('school_type'),
+            'country': req.get('country') or (loc.get('country') if loc else None),
+            'state': loc.get('state') if loc else None,
+            'website_url': req.get('website_url'),
+            'public_or_private': req.get('public_private'),
+            'grade_size': req.get('grade_size'),
             'created_at': firestore.SERVER_TIMESTAMP,
             'updated_at': firestore.SERVER_TIMESTAMP,
         }
@@ -2951,11 +3510,13 @@ def approve_school_request(request_id, reviewed_by_uid):
         }
         request_updates = {
             'status': 'approved',
-            'reviewed_by_uid': reviewed_by_uid,
+            'reviewed_by_uid': actor_uid,
             'reviewed_at': firestore.SERVER_TIMESTAMP,
             'created_org_id': org_ref.id,
             'updated_at': firestore.SERVER_TIMESTAMP,
         }
+        if internal_note:
+            request_updates['internal_note'] = internal_note
 
         transaction.set(org_ref, org_data)
         transaction.set(membership_ref, membership_data)
@@ -2969,20 +3530,159 @@ def approve_school_request(request_id, reviewed_by_uid):
         )
         transaction.update(request_ref, request_updates)
 
+        # Pre-invite teacher rows — written inside the transaction so the
+        # approve operation is fully atomic when the audited Plan 5 surface
+        # is used. (Plan 3's route still calls `record_school_request_pre_invites`
+        # after the fact for fan-out emails; that's a no-op duplicate guard is
+        # not needed here because the legacy path passes `audit_entry=None`,
+        # which means pre-invite writes are skipped — preserving Plan 3 behavior.)
+        pre_invite_ids: list[str] = []
+        if audit_entry is not None:
+            raw_emails = req.get('pre_invited_teachers') or []
+            cleaned: list[str] = []
+            for raw in raw_emails:
+                if not isinstance(raw, str):
+                    continue
+                addr = raw.strip().lower()
+                if addr:
+                    cleaned.append(addr)
+            invite_coll = client.collection('teacher_invitations')
+            for addr in cleaned:
+                ref = invite_coll.document()
+                pre_invite_ids.append(ref.id)
+                transaction.set(ref, {
+                    'org_id': org_ref.id,
+                    'uid': None,
+                    'email': addr,
+                    'name': None,
+                    'status': 'pending',
+                    'reviewed_by_uid': None,
+                    'reviewed_at': None,
+                    'created_at': firestore.SERVER_TIMESTAMP,
+                    'created_by_uid': requester_uid,
+                    'source': 'pre_invite',
+                })
+
+        # Audit row — committed in the same transaction as the business
+        # writes so a partial approval can never produce a row in the org
+        # collection without a matching audit entry. Plan 3 callers do not
+        # pass `audit_entry`, preserving the legacy un-audited behavior.
+        if audit_entry is not None:
+            audit_doc = dict(audit_entry)
+            audit_doc['created_at'] = firestore.SERVER_TIMESTAMP
+            if audit_doc.get('target_org_id') is None:
+                audit_doc['target_org_id'] = org_ref.id
+            transaction.set(
+                client.collection(LINGUAL_ADMIN_AUDIT_COLLECTION).document(),
+                audit_doc,
+            )
+
         approved = dict(req)
         approved.update({
             'id': request_id,
             'status': 'approved',
-            'reviewed_by_uid': reviewed_by_uid,
+            'reviewed_by_uid': actor_uid,
             'created_org_id': org_ref.id,
         })
         return {
+            # Plan 5 (audited) keys
+            'request_id': request_id,
+            'created_org_id': org_ref.id,
+            'pre_invite_invitation_ids': pre_invite_ids,
+            # Legacy (Plan 3) keys — kept for backward compat.
             'request': approved,
             'org_id': org_ref.id,
             'membership_id': membership_ref.id,
         }
 
     return _approve(transaction)
+
+
+def reject_school_request(
+    *,
+    request_id,
+    reviewer_uid,
+    reason,
+    category,
+    internal_note=None,
+    audit_entry=None,
+):
+    """Atomically reject a pending school request.
+
+    Mirrors `approve_school_request`'s atomic-with-audit pattern (Tasks 8/9/14/16):
+    when `audit_entry` is provided, the audit row is committed in the same
+    Firestore transaction as the request-status update. Plan 3 still uses
+    `update_school_request` directly, so this helper is exclusively the
+    Plan 5 surface — `audit_entry=None` is treated as a programmer error
+    (an unaudited reject path would defeat the trust boundary).
+
+    Args:
+        request_id: school request doc id.
+        reviewer_uid: uid of the Lingual admin issuing the decline.
+        reason: free-form rejection reason (required; surfaced in email).
+        category: one of `ALLOWED_REJECTION_CATEGORIES` (required).
+        internal_note: optional admin-only note (not surfaced in email).
+        audit_entry: dict from `AuditLogger.build_audit_doc(...)`. Required;
+            committed in the same transaction so a partial reject can never
+            produce a status change without a matching audit row.
+
+    Returns:
+        `{'request_id': <id>}` on success.
+
+    Raises:
+        ValueError: if the request doesn't exist, is not pending, the reason
+            is empty, the category is invalid, or `audit_entry` is None.
+    """
+    if not reviewer_uid:
+        raise ValueError('reviewer_uid is required')
+    if not reason or not str(reason).strip():
+        raise ValueError('reason is required')
+    if not category:
+        raise ValueError('category is required')
+    if category not in ALLOWED_REJECTION_CATEGORIES:
+        raise ValueError(f'invalid category: {category!r}')
+    if audit_entry is None:
+        raise ValueError('audit_entry is required')
+
+    client = get_db()
+    request_ref = client.collection('school_requests').document(request_id)
+    transaction = client.transaction()
+
+    @firestore.transactional
+    def _reject(transaction):
+        snap = request_ref.get(transaction=transaction)
+        if not snap.exists:
+            raise ValueError(f'Request {request_id} not found')
+
+        req = snap.to_dict() or {}
+        if req.get('status') != 'pending':
+            raise ValueError(
+                f'Request {request_id} is not pending (status={req.get("status")!r})'
+            )
+
+        request_updates = {
+            'status': 'rejected',
+            'reviewed_by_uid': reviewer_uid,
+            'reviewed_at': firestore.SERVER_TIMESTAMP,
+            'rejection_reason': reason,
+            'rejection_category': category,
+            'updated_at': firestore.SERVER_TIMESTAMP,
+        }
+        if internal_note:
+            request_updates['internal_note'] = internal_note
+
+        transaction.update(request_ref, request_updates)
+
+        audit_doc = dict(audit_entry)
+        audit_doc['created_at'] = firestore.SERVER_TIMESTAMP
+        transaction.set(
+            client.collection(LINGUAL_ADMIN_AUDIT_COLLECTION).document(),
+            audit_doc,
+        )
+
+        return {'request_id': request_id}
+
+    return _reject(transaction)
 
 
 def cancel_school_request(request_id, uid):

@@ -32,6 +32,10 @@ from backend.services.guardian_packets import (
     serialize_guardian_consent_packet,
 )
 from backend.services.membership_context import SchoolContextPermissionError
+from backend.services.suspended_org_guard import (
+    SuspendedOrgError,
+    enforce_org_active,
+)
 
 TEACHER_ALLOWED_ROLES = {"teacher", "school_admin"}
 
@@ -285,6 +289,10 @@ def create_teacher_blueprint(deps: RouteDeps) -> Blueprint:
     def api_create_teacher_class():
         try:
             context = _require_teacher_context(deps)
+            try:
+                enforce_org_active(context.active_organization_id, db=deps.db)
+            except SuspendedOrgError as exc:
+                return jsonify(exc.to_payload()), 403
             data = request.get_json() or {}
 
             class_name = _normalize_string(data.get("name"))

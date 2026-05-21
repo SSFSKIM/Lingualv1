@@ -383,6 +383,9 @@ class FakeRealtimeRouteDb:
     def get_class(self, class_id):
         return self.classes.get(class_id)
 
+    def get_organization(self, org_id):
+        return self.organizations.get(org_id)
+
     def get_student_class_enrollment(self, class_id, student_uid):
         return self.enrollments.get(f'{class_id}_{student_uid}')
 

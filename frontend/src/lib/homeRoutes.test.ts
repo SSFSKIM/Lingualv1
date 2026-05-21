@@ -3,6 +3,7 @@ import {
   getOnboardingDestination,
   LEARNER_HOME_ROUTE,
   TEACHER_HOME_ROUTE,
+  SCHOOL_ADMIN_HOME_ROUTE,
   LINGUAL_ADMIN_HOME_ROUTE,
   STUDENT_SETUP_ROUTE,
   TEACHER_JOIN_ORG_ROUTE,
@@ -30,7 +31,7 @@ describe('getOnboardingDestination', () => {
     expect(dest).toBe(LINGUAL_ADMIN_HOME_ROUTE);
   });
 
-  it('routes active school_admin to teacher home (admin dashboard in this plan)', () => {
+  it('routes active school_admin to the school admin home (/app/admin)', () => {
     const dest = getOnboardingDestination(
       userOf({
         memberships: [
@@ -39,7 +40,7 @@ describe('getOnboardingDestination', () => {
         activeRoles: ['school_admin'],
       }),
     );
-    expect(dest).toBe(TEACHER_HOME_ROUTE);
+    expect(dest).toBe(SCHOOL_ADMIN_HOME_ROUTE);
   });
 
   it('routes active teacher to teacher home', () => {
@@ -128,5 +129,52 @@ describe('getOnboardingDestination', () => {
   it('returns null for unauthenticated', () => {
     expect(getOnboardingDestination(null)).toBeNull();
     expect(getOnboardingDestination(undefined)).toBeNull();
+  });
+});
+
+describe('Plan 5 routing additions', () => {
+  it('exposes SCHOOL_ADMIN_HOME_ROUTE as /app/admin', () => {
+    expect(SCHOOL_ADMIN_HOME_ROUTE).toBe('/app/admin');
+  });
+
+  it('LINGUAL_ADMIN_HOME_ROUTE points at /lingual-admin/requests', () => {
+    expect(LINGUAL_ADMIN_HOME_ROUTE).toBe('/lingual-admin/requests');
+  });
+
+  it('school_admin with no teacher role goes to /app/admin', () => {
+    const user: User = {
+      uid: 'u',
+      email: 'a@x.com',
+      memberships: [{ orgId: 'o', roles: ['school_admin'], status: 'active' }],
+    } as User;
+    expect(getOnboardingDestination(user)).toBe(SCHOOL_ADMIN_HOME_ROUTE);
+  });
+
+  it('school_admin who is also a teacher still goes to /app/admin', () => {
+    const user: User = {
+      uid: 'u',
+      email: 'a@x.com',
+      memberships: [{ orgId: 'o', roles: ['school_admin', 'teacher'], status: 'active' }],
+    } as User;
+    expect(getOnboardingDestination(user)).toBe(SCHOOL_ADMIN_HOME_ROUTE);
+  });
+
+  it('teacher (no school_admin) still goes to /app/teacher', () => {
+    const user: User = {
+      uid: 'u',
+      email: 'a@x.com',
+      memberships: [{ orgId: 'o', roles: ['teacher'], status: 'active' }],
+    } as User;
+    expect(getOnboardingDestination(user)).toBe(TEACHER_HOME_ROUTE);
+  });
+
+  it('lingual_admin still wins over both', () => {
+    const user: User = {
+      uid: 'u',
+      email: 'a@x.com',
+      lingualAdmin: true,
+      memberships: [{ orgId: 'o', roles: ['school_admin'], status: 'active' }],
+    } as User;
+    expect(getOnboardingDestination(user)).toBe(LINGUAL_ADMIN_HOME_ROUTE);
   });
 });
