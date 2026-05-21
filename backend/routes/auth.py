@@ -3,6 +3,8 @@ from flask import Blueprint, jsonify, request, session
 from backend.route_deps import RouteDeps
 from database import ALLOWED_INTENDED_ROLES
 
+ALLOWED_MIGRATE_ROLES = frozenset({'student', 'teacher', 'admin'})
+
 
 def build_auth_user_payload(uid, email, name, school_context):
     """Build the auth payload returned to the frontend."""
@@ -292,15 +294,11 @@ def create_auth_blueprint(deps: RouteDeps) -> Blueprint:
             'assessmentPreference': assessment_preference,
         })
 
-    ALLOWED_MIGRATE_ROLES = frozenset({'student', 'teacher', 'admin'})
-
     @bp.post('/api/auth/migrate-role')
+    @deps.login_required
     def migrate_role():
         """Legacy user role pick — idempotent. Non-legacy users are a no-op 200."""
-        try:
-            uid = deps.get_current_user_uid()
-        except Exception:
-            return jsonify({'error': 'unauthenticated'}), 401
+        uid = deps.get_current_user_uid()
         if not uid:
             return jsonify({'error': 'unauthenticated'}), 401
 

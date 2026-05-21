@@ -113,6 +113,9 @@ class MigrateRoleRouteTests(unittest.TestCase):
         resp = self.client.post('/api/auth/migrate-role', json={'role': 'admin'})
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(self.db.picked, [])
+        body = resp.get_json()
+        self.assertIsNone(body['intendedRole'])
+        self.assertIsNone(body['onboardingState'])
 
     def test_unauthenticated_401(self):
         # No session set.
