@@ -6,7 +6,7 @@ import { useAuth } from '../hooks/useAuth';
 import { Button, Input, Card, Alert, AlertDescription } from '@/components/ui';
 import { AnimatedPage } from '@/components/layout/AnimatedPage';
 import { staggerContainer, staggerItem } from '@/lib/animations';
-import { getOnboardingDestination, LEARNER_HOME_ROUTE } from '@/lib/homeRoutes';
+import { getOnboardingDestination } from '@/lib/homeRoutes';
 
 type Mode = 'signin' | 'reset';
 
@@ -38,7 +38,11 @@ export function LoginPage() {
         navigate(intendedFrom, { replace: true });
         return;
       }
-      navigate(getOnboardingDestination(user) ?? LEARNER_HOME_ROUTE, { replace: true });
+      const dest = getOnboardingDestination(user);
+      if (dest) {
+        navigate(dest, { replace: true });
+      }
+      // else: legacy user awaiting modal; stay on /login (modal will cover it).
     }
   }, [user, loading, navigate, intendedFrom]);
 

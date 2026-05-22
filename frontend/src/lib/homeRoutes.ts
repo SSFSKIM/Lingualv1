@@ -44,6 +44,9 @@ function activeRoles(user: User): Set<SchoolRole> {
  */
 export function getPrivilegedHomeRoute(user: User | null | undefined): string | null {
   if (!user) return null;
+  // Plan 6: same legacy gate as `getOnboardingDestination`. Callers (e.g.,
+  // AppLayout's home-link destination) must accept null and skip linking.
+  if (user.requiresLegacyRolePick) return null;
   if (user.lingualAdmin) return LINGUAL_ADMIN_HOME_ROUTE;
 
   const roles = activeRoles(user);
@@ -68,12 +71,17 @@ export function getPrivilegedHomeRoute(user: User | null | undefined): string | 
  * `/app/admin`, teachers (who are not also school admins) keep going to
  * `/app/teacher`. Lingual admins still win over both branches.
  *
- * Until Plan 6 ships the legacy modal, `requiresLegacyRolePick` users
- * fall back to the existing student setup flow so legacy learners stay
- * functional.
+ * Plan 6 (Task 6) gates legacy users to `null` so AuthProvider's
+ * `LegacyRoleMigrationModal` can take over. Callers MUST treat null as
+ * 'stay on current page'.
  */
 export function getOnboardingDestination(user: User | null | undefined): string | null {
   if (!user) return null;
+
+  // 0) Legacy user awaiting modal — do NOT navigate; AuthProvider mounts
+  //    `LegacyRoleMigrationModal` (Plan 6 Task 5). Callers MUST treat null
+  //    as "stay on current page" so the modal can take over.
+  if (user.requiresLegacyRolePick) return null;
 
   // 1) Lingual admin
   if (user.lingualAdmin) return LINGUAL_ADMIN_HOME_ROUTE;
@@ -107,11 +115,6 @@ export function getOnboardingDestination(user: User | null | undefined): string 
   }
   if (user.intendedRole === 'admin') return ADMIN_ORG_WIZARD_ROUTE;
 
-  // 5) Legacy users without intendedRole. Plan 6 will replace this with
-  //    a blocking modal; until then, fall back to the existing student
-  //    setup so learners keep working.
-  if (user.requiresLegacyRolePick) return STUDENT_SETUP_ROUTE;
-
-  // 6) Brand-new signup that somehow has no signals — force role pick.
+  // 5) Brand-new signup that somehow has no signals — force role pick.
   return ROLE_PICKER_ROUTE;
 }

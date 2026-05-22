@@ -12,7 +12,7 @@ import { SchoolAdminRoute } from './components/layout/SchoolAdminRoute';
 import { LingualAdminRoute } from './components/layout/LingualAdminRoute';
 import { LoadingSpinner } from './components/common';
 import { useAuth } from './hooks/useAuth';
-import { getOnboardingDestination, LEARNER_HOME_ROUTE } from './lib/homeRoutes';
+import { getOnboardingDestination } from './lib/homeRoutes';
 
 const LandingPage = lazy(() => import('./pages/LandingPage').then((module) => ({ default: module.LandingPage })));
 const LoginPage = lazy(() => import('./pages/LoginPage').then((module) => ({ default: module.LoginPage })));
@@ -87,7 +87,12 @@ function withRouteSuspense(element: ReactNode) {
 
 function AppIndexRedirect() {
   const { user } = useAuth();
-  return <Navigate to={getOnboardingDestination(user) ?? LEARNER_HOME_ROUTE} replace />;
+  const dest = getOnboardingDestination(user);
+  // Plan 6: when dest is null (legacy user awaiting modal), render nothing.
+  // AuthProvider's `LegacyRoleMigrationModal` is already mounted and will
+  // overlay this empty render until the user picks a role.
+  if (!dest) return null;
+  return <Navigate to={dest} replace />;
 }
 
 function AnimatedRoutes() {

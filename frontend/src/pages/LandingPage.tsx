@@ -16,7 +16,7 @@ import { motion } from 'motion/react';
 import { useAuth } from '@/hooks/useAuth';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { staggerContainer, staggerItem, cardVariants } from '@/lib/animations';
-import { getOnboardingDestination, LEARNER_HOME_ROUTE } from '@/lib/homeRoutes';
+import { getOnboardingDestination } from '@/lib/homeRoutes';
 import { Button } from '@/components/ui/button';
 
 const HERO_IMAGE = '/imgs/landing/hero.jpg';
@@ -38,7 +38,11 @@ export function LandingPage() {
       navigate('/login');
       return;
     }
-    navigate(getOnboardingDestination(user) ?? LEARNER_HOME_ROUTE);
+    const dest = getOnboardingDestination(user);
+    if (dest) {
+      navigate(dest);
+    }
+    // else: legacy user awaiting modal; stay on landing page (modal will cover it).
   };
 
   type LandingRole = 'student' | 'teacher' | 'admin';

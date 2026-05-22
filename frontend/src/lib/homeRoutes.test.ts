@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   getOnboardingDestination,
+  getPrivilegedHomeRoute,
   LEARNER_HOME_ROUTE,
   TEACHER_HOME_ROUTE,
   SCHOOL_ADMIN_HOME_ROUTE,
@@ -114,11 +115,14 @@ describe('getOnboardingDestination', () => {
     expect(dest).toBe(ADMIN_PENDING_ROUTE);
   });
 
-  it('legacy user without role falls back to student setup until Plan 6', () => {
-    const dest = getOnboardingDestination(
-      userOf({ requiresLegacyRolePick: true }),
-    );
-    expect(dest).toBe(STUDENT_SETUP_ROUTE);
+  it('returns null for requiresLegacyRolePick=true (Plan 6 — modal handles routing)', () => {
+    const user: User = {
+      uid: 'u',
+      email: 'a@x.com',
+      name: 'A',
+      requiresLegacyRolePick: true,
+    };
+    expect(getOnboardingDestination(user)).toBeNull();
   });
 
   it('user with no signals lands on role picker', () => {
@@ -176,5 +180,48 @@ describe('Plan 5 routing additions', () => {
       memberships: [{ orgId: 'o', roles: ['school_admin'], status: 'active' }],
     } as User;
     expect(getOnboardingDestination(user)).toBe(LINGUAL_ADMIN_HOME_ROUTE);
+  });
+});
+
+describe('Plan 6 — legacy modal gating', () => {
+  it('returns null for requiresLegacyRolePick=true even when active memberships exist (defense-in-depth)', () => {
+    // This should never happen in practice (the backend will not flag a user
+    // with active memberships as legacy), but if the flag is somehow true,
+    // the dispatcher MUST yield to the modal — better a brief blank screen
+    // than a broken modal experience.
+    const user: User = {
+      uid: 'u',
+      email: 'a@x.com',
+      name: 'A',
+      requiresLegacyRolePick: true,
+      memberships: [{ id: 'm1', orgId: 'o', orgName: 'O', roles: ['teacher'], status: 'active' }],
+    };
+    expect(getOnboardingDestination(user)).toBeNull();
+  });
+
+  it('still routes legacy users WITHOUT the flag based on memberships (after backfill)', () => {
+    // After the backfill script (Task 7) runs, a previously-legacy user
+    // with active memberships gets `intended_role` set and the flag
+    // becomes false. They should route normally to their dashboard.
+    const user: User = {
+      uid: 'u',
+      email: 'a@x.com',
+      name: 'A',
+      requiresLegacyRolePick: false,
+      intendedRole: 'teacher',
+      onboardingState: 'complete',
+      memberships: [{ id: 'm1', orgId: 'o', orgName: 'O', roles: ['teacher'], status: 'active' }],
+    };
+    expect(getOnboardingDestination(user)).toBe('/app/teacher');
+  });
+
+  it('getPrivilegedHomeRoute also returns null for requiresLegacyRolePick=true', () => {
+    const user: User = {
+      uid: 'u',
+      email: 'a@x.com',
+      name: 'A',
+      requiresLegacyRolePick: true,
+    };
+    expect(getPrivilegedHomeRoute(user)).toBeNull();
   });
 });
