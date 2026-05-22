@@ -5,17 +5,19 @@ import { useEffect, useRef, type ReactNode } from 'react';
 import type { IntendedRole } from '../api/auth';
 import type { User } from '../types';
 
-const { firebaseAuthState, firebaseSignOutMock, verifyTokenMock } = vi.hoisted(() => ({
+const { firebaseAuthState, firebaseSignOutMock, verifyTokenMock, migrateRoleMock } = vi.hoisted(() => ({
   firebaseAuthState: {
     currentUser: null as { getIdToken: () => Promise<string> } | null,
   },
   firebaseSignOutMock: vi.fn().mockResolvedValue(undefined),
   verifyTokenMock: vi.fn(),
+  migrateRoleMock: vi.fn(),
 }));
 
 vi.mock('../api/auth', () => ({
   verifyToken: (...args: unknown[]) => verifyTokenMock(...args),
   logout: vi.fn(),
+  migrateRole: (...args: unknown[]) => migrateRoleMock(...args),
 }));
 
 vi.mock('firebase/auth', async () => {
@@ -303,5 +305,116 @@ describe('AuthContext 5-minute polling (LIMITATIONS #28)', () => {
     const afterLogout = verifyTokenMock.mock.calls.length;
     await act(async () => { await vi.advanceTimersByTimeAsync(30 * 60 * 1000); });
     expect(verifyTokenMock.mock.calls.length).toBe(afterLogout);
+  });
+});
+
+describe('AuthContext — LegacyRoleMigrationModal mount', () => {
+  beforeEach(() => {
+    verifyTokenMock.mockReset();
+    migrateRoleMock.mockReset();
+    firebaseAuthState.currentUser = null;
+    localStorage.clear();
+  });
+
+  function CallSignInOnly() {
+    const { signInWithEmail } = useAuth();
+    const signedInRef = useRef(false);
+    useEffect(() => {
+      if (signedInRef.current) return;
+      signedInRef.current = true;
+      void signInWithEmail('a@b.test', 'password123');
+    }, [signInWithEmail]);
+    return <div>ready</div>;
+  }
+
+  it('mounts the modal when requiresLegacyRolePick is true', async () => {
+    verifyTokenMock.mockResolvedValue({
+      success: true,
+      user: {
+        uid: 'u-legacy', email: 'l@x.com', name: 'L',
+        requiresLegacyRolePick: true,
+        intendedRole: null, onboardingState: null,
+      },
+    });
+    firebaseAuthState.currentUser = {
+      getIdToken: vi.fn().mockResolvedValue('id-token-legacy'),
+    };
+    render(
+      <AuthProvider>
+        <CallSignInOnly />
+      </AuthProvider>,
+    );
+    await waitFor(() => screen.getByText(/welcome back/i));
+  });
+
+  it('does NOT mount the modal when requiresLegacyRolePick is false', async () => {
+    verifyTokenMock.mockResolvedValue({
+      success: true,
+      user: {
+        uid: 'u', email: 'x@x.com', name: 'X',
+        requiresLegacyRolePick: false,
+        intendedRole: 'student',
+      },
+    });
+    firebaseAuthState.currentUser = {
+      getIdToken: vi.fn().mockResolvedValue('id-token-normal'),
+    };
+    render(
+      <AuthProvider>
+        <CallSignInOnly />
+      </AuthProvider>,
+    );
+    await screen.findByText('ready');
+    expect(screen.queryByText(/welcome back/i)).not.toBeInTheDocument();
+  });
+
+  it('calls migrateRole then refreshUser when a role is picked, modal unmounts on next verify', async () => {
+    // First verify (during signInWithEmail): returns a legacy user.
+    // Second verify (refreshUser after migrateRole): returns a non-legacy user.
+    verifyTokenMock
+      .mockResolvedValueOnce({
+        success: true,
+        user: {
+          uid: 'u-legacy', email: 'l@x.com', name: 'L',
+          requiresLegacyRolePick: true,
+        },
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        user: {
+          uid: 'u-legacy', email: 'l@x.com', name: 'L',
+          requiresLegacyRolePick: false,
+          intendedRole: 'student',
+          onboardingState: 'complete',
+        },
+      });
+    migrateRoleMock.mockResolvedValue({
+      intendedRole: 'student',
+      onboardingState: 'complete',
+    });
+    firebaseAuthState.currentUser = {
+      getIdToken: vi.fn().mockResolvedValue('id-token-legacy'),
+    };
+
+    render(
+      <AuthProvider>
+        <CallSignInOnly />
+      </AuthProvider>,
+    );
+
+    // Modal is up after sign-in.
+    await waitFor(() => screen.getByText(/welcome back/i));
+
+    // Click "Student".
+    await act(async () => {
+      screen.getByRole('button', { name: /^student$/i }).click();
+    });
+
+    await waitFor(() => {
+      expect(migrateRoleMock).toHaveBeenCalledWith('student');
+    });
+    await waitFor(() => {
+      expect(screen.queryByText(/welcome back/i)).not.toBeInTheDocument();
+    });
   });
 });

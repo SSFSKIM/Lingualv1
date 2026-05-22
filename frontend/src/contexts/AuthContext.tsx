@@ -16,7 +16,8 @@ import {
   User as FirebaseUser,
 } from 'firebase/auth';
 import { auth, googleProvider, githubProvider, facebookProvider } from '../config/firebase';
-import { verifyToken, type AuthRoleOptions } from '../api/auth';
+import { verifyToken, migrateRole, type AuthRoleOptions, type IntendedRole } from '../api/auth';
+import { LegacyRoleMigrationModal } from '@/components/LegacyRoleMigrationModal';
 import type { User } from '../types';
 
 interface AuthContextType {
@@ -128,6 +129,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     setUser(null);
     setError(result.error || 'Failed to verify token');
+  };
+
+  const handleLegacyRolePick = async (role: IntendedRole) => {
+    await migrateRole(role);
+    // Refresh the user state so `requiresLegacyRolePick` flips to false
+    // and the modal unmounts. Errors propagate to the modal's catch.
+    await refreshUser();
   };
 
   useEffect(() => {
@@ -388,6 +396,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }}
     >
       {children}
+      {user?.requiresLegacyRolePick && (
+        <LegacyRoleMigrationModal onPicked={handleLegacyRolePick} />
+      )}
     </AuthContext.Provider>
   );
 }
