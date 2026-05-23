@@ -7,6 +7,14 @@ Reads `users/` and, for each user without `profile.intended_role`, looks at:
 Writes `profile.intended_role` + `profile.onboarding_state='complete'` so the
 user routes to their existing flow on next sign-in (no modal needed).
 
+Note on `onboarding_state='complete'` for all roles (vs. the modal's
+teacher/admin → `'role_selected'`): every user resolved here has an
+active membership or enrollment, so the dispatcher's membership branch
+(`getOnboardingDestination` step 2) routes them before `onboarding_state`
+is consulted. `'complete'` is therefore safe for all three roles in this
+path. The modal's `'role_selected'` for teacher/admin matters only when
+there is no membership yet — i.e., the user is mid-signup.
+
 Users with neither memberships nor enrollments are left untouched — the
 LegacyRoleMigrationModal handles them at next sign-in.
 

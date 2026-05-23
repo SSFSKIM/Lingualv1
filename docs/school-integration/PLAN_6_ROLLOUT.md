@@ -37,6 +37,8 @@ Plan 6 ships in three deployable units. Do NOT bundle them.
 
 ## Phase 3 — Frontend modal
 
+**Prerequisite (hard stop):** Phase 1 endpoint MUST already be deployed and verified (step 3 above). Skipping Phase 1 will cause the modal to call a non-existent `/api/auth/migrate-role` → 404 → user stuck on a frozen modal with no recovery path (the modal is intentionally non-dismissible). Do not proceed to step 1 below unless `curl -i -X POST $BASE_URL/api/auth/migrate-role -H 'Cookie: …' -d '{"role":"student"}'` returns 200 for a known legacy user.
+
 1. Land Plan 6 Tasks 3–6 (api client + modal + AuthContext mount + dispatcher gate).
 2. Deploy frontend.
 3. Verify in production:
