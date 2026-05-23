@@ -2,25 +2,33 @@
 #
 # Cloud dev-sandbox bootstrap for "Claude Code on the web".
 #
-# The cloud environment's "Setup script" field should contain a single line:
+# Runs the REPO-DEPENDENT half of setup (pip / npm / .env). It is invoked by the
+# committed SessionStart hook in .claude/settings.json, which fires AFTER the
+# repo is cloned:
 #
-#     bash scripts/cloud-setup.sh
+#     "command": "bash \"$CLAUDE_PROJECT_DIR/scripts/cloud-setup.sh\""
 #
-# Keeping the heavy logic here (instead of pasted into the cloud UI) makes it
-# version-controlled and shared with the team. The script runs as root, before
-# the Claude Code session starts, and its result is cached for ~7 days, so the
-# expensive installs only happen on the first session in a fresh environment.
+# Do NOT put this in the cloud "Setup script" field — that field runs BEFORE the
+# repo is cloned, so this file would not exist there (exit 127). The Setup script
+# field holds the repo-INDEPENDENT system tools inline instead (a JRE for the
+# Firestore emulator + the firebase CLI).
 #
 # Goal: reproduce the local dev experience (backend + frontend + Firestore
-# emulator) without any secrets. Live OpenAI calls require adding OPENAI_API_KEY
-# to the cloud "Environment variables" field; everything else works without it
-# because FLASK_ENV=development downgrades the missing-secret fail-fast to a warn.
-#
-# The system-mutating steps (apt, global npm, --break-system-packages) are
-# guarded so an accidental local run is non-destructive.
+# emulator) without secrets. FLASK_ENV=development turns the missing-secret
+# fail-fast into a warning; add OPENAI_API_KEY via the cloud "Environment
+# variables" field to enable live AI.
 
 set -euo pipefail
-cd "$(dirname "$0")/.."   # repo root, regardless of where this is invoked from
+cd "$(dirname "$0")/.."   # repo root (also where $CLAUDE_PROJECT_DIR points)
+
+# The SessionStart hook fires on every session, local and cloud. Only actually
+# bootstrap inside the cloud sandbox — locally this is a silent no-op so it never
+# touches a developer's venv/.env. Force a manual run with: --force
+if [ "${1:-}" != "--force" ] \
+   && [ "${CLAUDE_CODE_REMOTE:-}" != "true" ] \
+   && [ -z "${CLAUDE_CODE_REMOTE_SESSION_ID:-}" ]; then
+  exit 0
+fi
 
 echo "==> Lingual cloud dev setup"
 
@@ -56,7 +64,9 @@ fi
 #    per command, so a venv would need re-activation every call — system install
 #    means `python3 main.py` just works anywhere. Locals inside a venv install normally.
 PIP_FLAGS=""
-if [ -z "${VIRTUAL_ENV:-}" ] && is_root; then
+if [ -z "${VIRTUAL_ENV:-}" ]; then
+  # No venv (the cloud sandbox): system Python is PEP 668 externally-managed,
+  # so installs need --break-system-packages (works for both root and --user).
   PIP_FLAGS="--break-system-packages"
 fi
 echo "--> installing backend requirements ${PIP_FLAGS}"
