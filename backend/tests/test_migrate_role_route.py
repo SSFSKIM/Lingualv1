@@ -100,6 +100,21 @@ class MigrateRoleRouteTests(unittest.TestCase):
         resp = self.client.post('/api/auth/migrate-role', json={})
         self.assertEqual(resp.status_code, 400)
 
+    def test_non_string_role_400(self):
+        self._as('u-legacy')
+        resp = self.client.post('/api/auth/migrate-role', json={'role': 123})
+        self.assertEqual(resp.status_code, 400)
+
+    def test_successful_legacy_pick_logs_transition(self):
+        self._as('u-legacy')
+        with self.assertLogs(self.app.logger, level='INFO') as logs:
+            resp = self.client.post('/api/auth/migrate-role', json={'role': 'student'})
+        self.assertEqual(resp.status_code, 200)
+        joined = '\n'.join(logs.output)
+        self.assertIn('legacy_role_pick', joined)
+        self.assertIn('u-legacy', joined)
+        self.assertIn('student', joined)
+
     def test_non_legacy_user_is_no_op_200(self):
         """Already-migrated user calling the endpoint is idempotent."""
         self._as('u-already-migrated')

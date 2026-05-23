@@ -8,7 +8,7 @@ export function OrgOverviewTab({ org }: { org: OrgDetail }) {
         <dl className="mt-2 grid grid-cols-2 gap-4 text-sm">
           <div><dt className="text-neutral-500">Status</dt><dd>{org.status}</dd></div>
           <div><dt className="text-neutral-500">Type</dt><dd>{org.schoolType || '—'}</dd></div>
-          <div><dt className="text-neutral-500">Country / State</dt><dd>{[org.country, org.state].filter(Boolean).join(' / ') || '—'}</dd></div>
+          <div><dt className="text-neutral-500">Country / State / County</dt><dd>{[org.country, org.state, org.county].filter(Boolean).join(' / ') || '—'}</dd></div>
           <div><dt className="text-neutral-500">Website</dt><dd>{org.websiteUrl || '—'}</dd></div>
         </dl>
       </section>

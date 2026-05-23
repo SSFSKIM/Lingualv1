@@ -1,4 +1,4 @@
-import { useState, FormEvent, useEffect } from 'react';
+import { useState, FormEvent, useEffect, useRef } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import { ArrowLeft, Loader2, Languages, CheckCircle, Sparkles } from 'lucide-react';
@@ -31,19 +31,36 @@ export function LoginPage() {
   const [resetError, setResetError] = useState<string | null>(null);
 
   const intendedFrom = (location.state as { from?: { pathname?: string } } | null)?.from?.pathname;
+  const sawLegacyRolePickRef = useRef(false);
 
   useEffect(() => {
-    if (user && !loading) {
-      if (intendedFrom) {
-        navigate(intendedFrom, { replace: true });
-        return;
-      }
-      const dest = getOnboardingDestination(user);
-      if (dest) {
-        navigate(dest, { replace: true });
-      }
-      // else: legacy user awaiting modal; stay on /login (modal will cover it).
+    if (!user) {
+      sawLegacyRolePickRef.current = false;
+      return;
     }
+
+    if (loading) return;
+
+    const dest = getOnboardingDestination(user);
+    if (!dest) {
+      if (user.requiresLegacyRolePick) {
+        sawLegacyRolePickRef.current = true;
+      }
+      // Legacy user awaiting modal; stay on /login (modal will cover it).
+      return;
+    }
+
+    if (sawLegacyRolePickRef.current) {
+      navigate(dest, { replace: true });
+      return;
+    }
+
+    if (intendedFrom) {
+      navigate(intendedFrom, { replace: true });
+      return;
+    }
+
+    navigate(dest, { replace: true });
   }, [user, loading, navigate, intendedFrom]);
 
   const handleSignIn = async (e: FormEvent) => {

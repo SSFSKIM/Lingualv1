@@ -42,6 +42,7 @@ _PENDING_WIZARD_REQUEST = {
     'location': {
         'country': 'US',
         'state': 'CA',
+        'county': 'Santa Clara',
         'city': 'Bravoville',
     },
 }
@@ -158,7 +159,7 @@ class ApproveOrgDenormalizationTests(unittest.TestCase):
 
 class ApproveOrgWizardPayloadTests(unittest.TestCase):
     """Round-4 regression: Plan 3 wizard's enriched fields (school_type,
-    country, state, website_url, public_or_private, grade_size) must
+    country, state, county, website_url, public_or_private, grade_size) must
     propagate from the request to the new org so the Plan 5 list/detail
     surfaces don't render blanks. See LIMITATIONS #49.
     """
@@ -176,6 +177,7 @@ class ApproveOrgWizardPayloadTests(unittest.TestCase):
         self.assertEqual(payload.get('school_type'), 'elementary')
         self.assertEqual(payload.get('country'), 'US')
         self.assertEqual(payload.get('state'), 'CA')
+        self.assertEqual(payload.get('county'), 'Santa Clara')
         self.assertEqual(payload.get('website_url'), 'https://bravo.example.edu')
         self.assertEqual(payload.get('grade_size'), '50-200')
 

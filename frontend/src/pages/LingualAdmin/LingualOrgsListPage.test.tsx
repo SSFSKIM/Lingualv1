@@ -14,11 +14,22 @@ const renderWithRouter = () =>
 describe('LingualOrgsListPage', () => {
   it('lists orgs', async () => {
     vi.mocked(api.fetchOrgs).mockResolvedValue({
-      items: [{ id: 'o1', name: 'Sunset HS', status: 'active', memberCount: 2 }],
+      items: [{
+        id: 'o1',
+        name: 'Sunset HS',
+        status: 'active',
+        schoolType: 'high',
+        country: 'US',
+        county: 'San Mateo',
+        memberCount: 2,
+      }],
       nextCursor: null,
     });
     renderWithRouter();
     await waitFor(() => screen.getByText('Sunset HS'));
+    expect(screen.getByRole('columnheader', { name: /county \/ district/i })).toBeInTheDocument();
+    expect(screen.getByText('San Mateo')).toBeInTheDocument();
+    expect(screen.queryByText('US')).not.toBeInTheDocument();
   });
 
   it('filters by status', async () => {

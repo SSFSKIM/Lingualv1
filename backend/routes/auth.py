@@ -1,4 +1,4 @@
-from flask import Blueprint, jsonify, request, session
+from flask import Blueprint, current_app, jsonify, request, session
 
 from backend.route_deps import RouteDeps
 from database import ALLOWED_INTENDED_ROLES
@@ -303,7 +303,12 @@ def create_auth_blueprint(deps: RouteDeps) -> Blueprint:
             return jsonify({'error': 'unauthenticated'}), 401
 
         body = request.get_json(silent=True) or {}
-        role = (body.get('role') or '').strip()
+        raw_role = body.get('role')
+        if raw_role is None:
+            return jsonify({'error': 'role is required'}), 400
+        if not isinstance(raw_role, str):
+            return jsonify({'error': 'role must be a string'}), 400
+        role = raw_role.strip()
         if not role:
             return jsonify({'error': 'role is required'}), 400
         if role not in ALLOWED_MIGRATE_ROLES:
@@ -321,6 +326,7 @@ def create_auth_blueprint(deps: RouteDeps) -> Blueprint:
                 deps.db.mark_user_legacy_role_picked(uid=uid, role=role)
             except ValueError as exc:
                 return jsonify({'error': str(exc)}), 400
+            current_app.logger.info('[legacy_role_pick] uid=%s role=%s', uid, role)
             user_doc = deps.db.get_user(uid) or {}
 
         profile = (user_doc or {}).get('profile') or {}

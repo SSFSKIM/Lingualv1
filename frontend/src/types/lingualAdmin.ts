@@ -105,6 +105,7 @@ export interface OrgSummary {
   status: OrgStatus;
   schoolType?: string;
   country?: string;
+  county?: string;
   publicOrPrivate?: string;
   memberCount: number;
   createdAt?: string | null;
@@ -123,6 +124,7 @@ export interface OrgDetail {
   schoolType?: string;
   country?: string;
   state?: string;
+  county?: string;
   websiteUrl?: string;
   createdAt?: string | null;
   lastActivityAt?: string | null;

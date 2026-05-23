@@ -19,6 +19,7 @@ class FakeOrgDetailDb(FakeDbBase):
             return {
                 'id': 'o1', 'name': 'Sunset HS', 'status': 'active',
                 'school_type': 'high', 'country': 'US', 'state': 'CA',
+                'county': 'San Mateo',
                 'website_url': 'https://sunset.edu',
                 'created_at': None, 'last_activity_at': None,
                 'school_admin_uids': ['u1'],
@@ -51,6 +52,7 @@ class OrgDetailRouteTests(unittest.TestCase):
         data = resp.get_json()
         self.assertEqual(data['name'], 'Sunset HS')
         self.assertEqual(data['status'], 'active')
+        self.assertEqual(data['county'], 'San Mateo')
         self.assertEqual(len(data['schoolAdminContacts']), 1)
         self.assertEqual(data['schoolAdminContacts'][0]['email'], 'admin@sunset.edu')
 

@@ -36,6 +36,7 @@ class FakeOrgsDb(FakeDbBase):
                     'status': 'active',
                     'school_type': 'high',
                     'country': 'US',
+                    'county': 'Montgomery',
                     'public_or_private': 'public',
                     'school_admin_uids': ['u1', 'u2'],
                     'created_at': None,
@@ -65,6 +66,7 @@ class OrgsListRouteTests(unittest.TestCase):
         data = resp.get_json()
         self.assertEqual(data['items'][0]['name'], 'Alpha HS')
         self.assertEqual(data['items'][0]['schoolType'], 'high')
+        self.assertEqual(data['items'][0]['county'], 'Montgomery')
         self.assertEqual(data['items'][0]['memberCount'], 2)
         # Cursor inner keys are camelCase on the wire to match FE TS types.
         self.assertEqual(data['nextCursor']['id'], 'o1')

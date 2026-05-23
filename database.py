@@ -3503,7 +3503,7 @@ def approve_school_request(
         #   directly (it has to live inside the transaction) so the
         #   denormalization is inlined here.
         # - Plan 3 wizard metadata (`school_type`, `country`, `state`,
-        #   `website_url`, `public_or_private`, `grade_size`) is carried over
+        #   `county`, `website_url`, `public_or_private`, `grade_size`) is carried over
         #   from the request so Plan 5's `list_organizations` filters and the
         #   Org detail page render real data on every org this flow creates.
         #   Without this copy the Plan 5 panel rendered blanks on its own
@@ -3524,6 +3524,7 @@ def approve_school_request(
             'school_type': req.get('school_type'),
             'country': req.get('country') or (loc.get('country') if loc else None),
             'state': loc.get('state') if loc else None,
+            'county': loc.get('county') if loc else None,
             'website_url': req.get('website_url'),
             'public_or_private': req.get('public_private'),
             'grade_size': req.get('grade_size'),

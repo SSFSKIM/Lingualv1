@@ -63,7 +63,7 @@ export function LingualOrgsListPage() {
       <table className="mt-6 w-full text-sm">
         <thead>
           <tr className="text-left text-neutral-500">
-            <th className="py-2">Name</th><th>Status</th><th>Type</th><th>Country</th><th>Members</th>
+            <th className="py-2">Name</th><th>Status</th><th>Type</th><th>County / District</th><th>Members</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-neutral-200">
@@ -76,7 +76,7 @@ export function LingualOrgsListPage() {
               </td>
               <td>{o.status}</td>
               <td>{o.schoolType || '—'}</td>
-              <td>{o.country || '—'}</td>
+              <td>{o.county || '—'}</td>
               <td>{o.memberCount}</td>
             </tr>
           ))}

@@ -22,10 +22,12 @@ describe('LingualOrgDetailPage', () => {
   it('renders org name and overview tab content', async () => {
     vi.mocked(api.fetchOrgDetail).mockResolvedValue({
       id: 'o1', name: 'Sunset HS', status: 'active',
+      country: 'US', state: 'CA', county: 'San Mateo',
       schoolAdminContacts: [{ membershipId: 'm1', uid: 'u1', email: 'a@x.com' }],
     } as any);
     renderAt('/lingual-admin/organizations/o1');
     await waitFor(() => screen.getByText('Sunset HS'));
+    expect(screen.getByText('US / CA / San Mateo')).toBeInTheDocument();
     expect(screen.getByText('a@x.com', { exact: false })).toBeInTheDocument();
   });
 
