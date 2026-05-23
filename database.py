@@ -1014,18 +1014,22 @@ def search_organizations(query: str, *, limit: int = 10):
     # Unicode private-use code points; [q, q + ''] covers every doc whose
     # name_lower starts with q.
     end = q + ''
+    # `status='active'` is filtered in Firestore (not in Python) so the
+    # `limit` is applied AFTER the status filter. Filtering after the limit
+    # silently drops active orgs whenever inactive orgs sort within the page.
+    # Covered by composite index organizations (status ASC, name_lower ASC).
     docs = (
         get_db()
         .collection('organizations')
+        .where('status', '==', 'active')
         .where('name_lower', '>=', q)
         .where('name_lower', '<=', end)
+        .order_by('name_lower')
         .limit(limit)
     ).stream()
     results = []
     for doc in docs:
         data = doc.to_dict() or {}
-        if data.get('status') != 'active':
-            continue
         results.append({
             'id': doc.id,
             'name': data.get('name', ''),

@@ -176,8 +176,17 @@ class OrgSearchHelperTest(unittest.TestCase):
             docs.append(d)
         query = MagicMock()
         query.stream.return_value = iter(docs)
-        # search_organizations chains: collection().where().where().limit()
-        self.fake_client.collection.return_value.where.return_value.where.return_value.limit.return_value = query
+        # search_organizations chains:
+        #   collection().where(status).where(name_lower>=).where(name_lower<=)
+        #     .order_by(name_lower).limit()
+        (
+            self.fake_client.collection.return_value
+            .where.return_value
+            .where.return_value
+            .where.return_value
+            .order_by.return_value
+            .limit.return_value
+        ) = query
 
     def test_search_organizations_returns_metadata_only(self):
         """Search response excludes sensitive fields."""
@@ -208,17 +217,23 @@ class OrgSearchHelperTest(unittest.TestCase):
         self.assertNotIn('student_count', result)
         self.assertNotIn('teacher_count', result)
 
-    def test_search_organizations_excludes_suspended_archived(self):
+    def test_search_organizations_filters_status_at_query_layer(self):
+        """Inactive orgs are excluded by the Firestore query (status=='active'),
+        not by a post-`limit` Python filter — otherwise inactive orgs sorting
+        within the page silently drop active matches beyond the limit.
+
+        Behavioral coverage (active matches survive interleaved inactive orgs)
+        lives in the emulator test TestOrganizationSearchCorrectness; a
+        MagicMock cannot simulate Firestore's filter, so here we assert the
+        query carries the status filter.
+        """
         self._seed_org_docs([
             {'id': 'org-1', 'name': 'Active', 'name_lower': 'active', 'status': 'active'},
-            {'id': 'org-2', 'name': 'Susp', 'name_lower': 'susp', 'status': 'suspended'},
-            {'id': 'org-3', 'name': 'Arch', 'name_lower': 'arch', 'status': 'archived'},
         ])
-        results = database.search_organizations('a', limit=10)
-        ids = [r['id'] for r in results]
-        self.assertIn('org-1', ids)
-        self.assertNotIn('org-2', ids)
-        self.assertNotIn('org-3', ids)
+        database.search_organizations('a', limit=10)
+        self.fake_client.collection.return_value.where.assert_any_call(
+            'status', '==', 'active'
+        )
 
     def test_search_organizations_blank_query_returns_empty(self):
         """Empty / whitespace-only query yields no results, no DB hit."""

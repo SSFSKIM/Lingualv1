@@ -23,6 +23,7 @@ Requires:
 import os
 import unittest
 from datetime import UTC, datetime
+from unittest.mock import patch
 
 # Skip entire module if emulator is not running
 EMULATOR_HOST = os.environ.get("FIRESTORE_EMULATOR_HOST")
@@ -448,6 +449,59 @@ class TestOrganizationIndexes(FirestoreIndexTestBase):
         )
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0].to_dict()["name"], "Alpha HS")
+
+
+class TestOrganizationSearchCorrectness(FirestoreIndexTestBase):
+    """Reproduces the `search_organizations` limit-then-filter correctness bug.
+
+    The bug: the search fetched a ``limit``-sized page by ``name_lower`` prefix,
+    then dropped non-active orgs in Python. When inactive orgs sort *within* the
+    page, active matches that were bumped past ``limit`` are silently lost. The
+    fix pushes ``status == 'active'`` into the Firestore query, which needs the
+    composite index ``organizations (status ASC, name_lower ASC)``.
+    """
+
+    def _seed_interleaved(self):
+        # Within the 'san' prefix, two inactive orgs sort BEFORE two active
+        # orgs by name_lower. A limit=3 page is [san a, san b, san c]; naive
+        # post-limit filtering keeps only 'San C Active' and loses 'San D Active'.
+        self._create_doc(
+            "organizations",
+            name="San A Closed", name_lower="san a closed", status="suspended",
+        )
+        self._create_doc(
+            "organizations",
+            name="San B Closed", name_lower="san b closed", status="archived",
+        )
+        self._create_doc(
+            "organizations",
+            name="San C Active", name_lower="san c active", status="active",
+        )
+        self._create_doc(
+            "organizations",
+            name="San D Active", name_lower="san d active", status="active",
+        )
+
+    def test_search_does_not_drop_active_orgs_behind_inactive_ones(self):
+        self._seed_interleaved()
+        import database
+        with patch.object(database, "get_db", return_value=self.db):
+            results = database.search_organizations("san", limit=3)
+        names = {r["name"] for r in results}
+        self.assertEqual(
+            names,
+            {"San C Active", "San D Active"},
+            f"active orgs were dropped by limit-then-filter: got {sorted(names)}",
+        )
+
+    def test_search_still_excludes_inactive_orgs(self):
+        # Regression guard: the fix must not return inactive orgs.
+        self._seed_interleaved()
+        import database
+        with patch.object(database, "get_db", return_value=self.db):
+            results = database.search_organizations("san", limit=10)
+        names = {r["name"] for r in results}
+        self.assertEqual(names, {"San C Active", "San D Active"})
 
 
 if __name__ == "__main__":
