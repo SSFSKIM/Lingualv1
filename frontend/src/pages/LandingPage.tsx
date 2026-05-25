@@ -292,7 +292,7 @@ export function LandingPage() {
                 <span className="font-display font-bold text-cream" style={{ fontSize: 'clamp(1rem, 1.5vw, 1.35rem)' }}>
                   AI tutor for every student
                 </span>
-                <span className="font-display font-bold text-cream" style={{ fontSize: 'clamp(1rem, 1.5vw, 1.35rem)' }}>
+                <span className="font-display font-bold text-cream whitespace-nowrap" style={{ fontSize: 'clamp(1rem, 1.5vw, 1.35rem)' }}>
                   one-stop shop for language learning
                 </span>
               </div>
