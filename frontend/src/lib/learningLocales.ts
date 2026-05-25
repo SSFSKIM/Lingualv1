@@ -13,6 +13,7 @@ export const LEARNING_LOCALES: LearningLocaleOption[] = [
   { value: 'fr-FR', label: 'French (France)', shortLabel: 'French', flag: '🇫🇷' },
   { value: 'ru-RU', label: 'Russian (Russia)', shortLabel: 'Russian', flag: '🇷🇺' },
   { value: 'he-IL', label: 'Hebrew (Israel)', shortLabel: 'Hebrew', flag: '🇮🇱' },
+  { value: 'tl-PH', label: 'Tagalog (Philippines)', shortLabel: 'Tagalog', flag: '🇵🇭' },
 ];
 
 export const DEFAULT_LEARNING_LOCALE: LearningLocale = 'ko-KR';

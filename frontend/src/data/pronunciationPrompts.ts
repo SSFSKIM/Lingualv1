@@ -22,4 +22,7 @@ export const PRONUNCIATION_PROMPTS: PronunciationPrompt[] = [
   { id: 'he-hello', locale: 'he-IL', text: 'שלום, נעים מאוד. מה שלומך?' },
   { id: 'he-order', locale: 'he-IL', text: 'אפשר קפה אחד, בבקשה?' },
   { id: 'he-travel', locale: 'he-IL', text: 'איפה תחנת הרכבת התחתית?' },
+  { id: 'tl-hello', locale: 'tl-PH', text: 'Ano ang pangalan mo?' },
+  { id: 'tl-food', locale: 'tl-PH', text: 'Kanin ba ang paboritong pagkain mo?' },
+  { id: 'tl-travel', locale: 'tl-PH', text: 'Nasaan ang pinakamalapit na restaurant?' },
 ];

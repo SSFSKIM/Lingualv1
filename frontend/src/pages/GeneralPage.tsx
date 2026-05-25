@@ -16,6 +16,7 @@ import { updateProfile, getUserProfile } from '../api/user';
 import type { Gender, Rigor, ProfileFormData } from '../types';
 import { useAuth } from '@/hooks/useAuth';
 import { getOnboardingDestination, LEARNER_HOME_ROUTE, STUDENT_SETUP_ROUTE } from '@/lib/homeRoutes';
+import { AGE_RANGES, ageToRangeLabel } from '@/lib/ageRanges';
 
 const GENDER_OPTIONS: { id: Gender; labelKey: string }[] = [
   { id: 'male', labelKey: 'general.male' },
@@ -242,22 +243,23 @@ export function GeneralPage() {
       </div>
 
       <div className="space-y-2">
-        <Label htmlFor="age" className="text-foreground">
+        <Label className="text-foreground">
           {t('general.ageLabel')} *
         </Label>
-        <Input
-          id="age"
-          type="number"
-          min={1}
-          max={120}
-          placeholder={t('general.agePlaceholder') || 'Enter your age'}
-          value={formData.age || ''}
-          onChange={(e) =>
-            updateField('age', e.target.value ? parseInt(e.target.value) : null)
-          }
-          autoFocus
-          className="bg-card border-border focus:border-primary focus:ring-primary/20"
-        />
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          {AGE_RANGES.map((range) => (
+            <motion.div key={range.midpoint} whileHover={{ y: -2 }} whileTap={{ scale: 0.98 }}>
+              <Button
+                variant="option"
+                selected={ageToRangeLabel(formData.age) === range.label}
+                onClick={() => updateField('age', range.midpoint)}
+                className="text-sm rounded-xl border-border bg-card hover:border-primary hover:text-foreground"
+              >
+                {range.label}
+              </Button>
+            </motion.div>
+          ))}
+        </div>
       </div>
 
       <div className="space-y-2">

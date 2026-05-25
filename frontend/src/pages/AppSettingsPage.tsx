@@ -25,6 +25,7 @@ import type { StudentComplianceRecord } from '@/types/school';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useLearningLocale } from '@/contexts/LearningLocaleContext';
 import { DEFAULT_LEARNING_LOCALE, LEARNING_LOCALES } from '@/lib/learningLocales';
+import { AGE_RANGES, ageToRangeLabel } from '@/lib/ageRanges';
 
 export function AppSettingsPage() {
   const { t } = useLanguage();
@@ -35,6 +36,7 @@ export function AppSettingsPage() {
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [selectedLocale, setSelectedLocale] = useState<LearningLocale>(learningLocale);
+  const [selectedAge, setSelectedAge] = useState<number | null>(null);
   const [compliance, setCompliance] = useState<StudentComplianceRecord | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -55,6 +57,7 @@ export function AppSettingsPage() {
         setFirstName(parts[0] || '');
         setLastName(parts.slice(1).join(' '));
         setSelectedLocale(data.learningLocale || learningLocale || DEFAULT_LEARNING_LOCALE);
+        setSelectedAge(data.age ?? null);
       } catch (error) {
         console.error('Failed to load profile:', error);
         toast.error(t('app.settings.toast.loadError'));
@@ -91,7 +94,7 @@ export function AppSettingsPage() {
       await updateProfile(
         {
           displayName: displayName || profile.displayName || '',
-          age: profile.age ?? null,
+          age: selectedAge ?? null,
           gender: profile.gender ?? null,
           rigor: profile.rigor ?? null,
           frequency: profile.frequency ?? 3,
@@ -301,6 +304,31 @@ export function AppSettingsPage() {
                 <p className="text-xs text-muted-foreground">
                   {t('app.settings.learningLocale.subtitle')}
                 </p>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-bold text-foreground">
+                  Age range
+                </label>
+                <div className="grid grid-cols-4 gap-2">
+                  {AGE_RANGES.map((range) => (
+                    <button
+                      key={range.midpoint}
+                      type="button"
+                      disabled={isLoading}
+                      onClick={() => setSelectedAge(range.midpoint)}
+                      className={[
+                        'min-h-10 rounded-xl border-2 px-2 py-2 text-sm font-bold transition-all',
+                        ageToRangeLabel(selectedAge) === range.label
+                          ? 'border-foreground bg-primary text-primary-foreground shadow-stamp'
+                          : 'border-border bg-card text-foreground hover:border-primary',
+                        'disabled:opacity-60 disabled:cursor-not-allowed',
+                      ].join(' ')}
+                    >
+                      {range.label}
+                    </button>
+                  ))}
+                </div>
               </div>
 
               <div className="pt-4 flex justify-end">
