@@ -8,6 +8,7 @@ import type { LearningLocale } from '@/types';
 interface LearningLocaleContextType {
   learningLocale: LearningLocale;
   setLearningLocale: (value: LearningLocale) => void;
+  isRTL: boolean;
 }
 
 const LearningLocaleContext = createContext<LearningLocaleContextType | null>(null);
@@ -36,14 +37,15 @@ export function LearningLocaleProvider({ children }: { children: ReactNode }) {
   }, [user]);
 
   const effectiveLocale = user ? learningLocale : DEFAULT_LEARNING_LOCALE;
+  const isRTL = RTL_LEARNING_LOCALES.has(effectiveLocale);
 
   // Sync document direction with the active learning locale so RTL scripts
   // (currently Hebrew) render correctly without per-component `dir` props.
   useEffect(() => {
     if (typeof document === 'undefined') return;
     const root = document.documentElement;
-    const dir = RTL_LEARNING_LOCALES.has(effectiveLocale) ? 'rtl' : 'ltr';
-    root.setAttribute('dir', dir);
+    //const dir = RTL_LEARNING_LOCALES.has(effectiveLocale) ? 'rtl' : 'ltr';
+    root.setAttribute('dir', 'ltr');
     root.setAttribute('lang', effectiveLocale);
     return () => {
       // Reset to LTR + app UI language on unmount/teardown.
@@ -52,7 +54,13 @@ export function LearningLocaleProvider({ children }: { children: ReactNode }) {
   }, [effectiveLocale]);
 
   return (
-    <LearningLocaleContext.Provider value={{ learningLocale: effectiveLocale, setLearningLocale }}>
+    <LearningLocaleContext.Provider
+  value={{
+    learningLocale: effectiveLocale,
+    setLearningLocale,
+    isRTL,
+  }}
+>
       {children}
     </LearningLocaleContext.Provider>
   );
