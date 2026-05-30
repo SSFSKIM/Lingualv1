@@ -86,9 +86,15 @@ class TestGate(_FlagMixin):
         os.environ[FLAG] = 'true'  # only the literal '1' counts
         self.assertFalse(dual_write._enabled())
 
-    def test_resolve_engine_none_when_flag_off(self):
+    def test_resolve_engine_is_flag_agnostic(self):
+        # Gating is the public shadow_* fns' job; _resolve_engine is a pure
+        # provider resolver shared across shadow families (enrollments + school
+        # chain), so it returns the engine regardless of the flag.
+        sentinel = object()
         self._off()
-        self.assertIsNone(dual_write._resolve_engine(lambda: object()))
+        self.assertIs(dual_write._resolve_engine(lambda: sentinel), sentinel)
+        self._on()
+        self.assertIs(dual_write._resolve_engine(lambda: sentinel), sentinel)
 
     def test_resolve_engine_none_when_provider_none(self):
         self._on()

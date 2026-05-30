@@ -198,6 +198,7 @@ def create_schools_blueprint(deps: RouteDeps) -> Blueprint:
                 name=org_name,
                 org_type=org_type,
                 pilot_stage="beta",
+                sql_engine=deps.sql_engine,
             )
             membership_id = deps.db.create_membership(
                 org_id=org_id,

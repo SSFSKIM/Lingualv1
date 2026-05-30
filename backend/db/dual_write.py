@@ -43,14 +43,17 @@ def _enabled() -> bool:
 
 
 def _resolve_engine(sql_engine: Any) -> Any:
-    """Return the Engine to shadow-write through, or None to skip.
+    """Resolve the deps.sql_engine provider to an Engine, or None to skip.
 
-    `sql_engine` is the deps.sql_engine provider: a zero-arg callable returning
-    the process-singleton engine, or `_no_sql_engine` returning None when no
-    Postgres target is configured. Skips (returns None) when the flag is off, the
-    provider is absent/None, or the provider itself errors.
+    Flag-AGNOSTIC by design: the public `shadow_*` functions own the feature-flag
+    gate (`_enabled` for enrollments, `_enabled_school_chain` for the parent chain)
+    before they ever reach here, so this stays a pure "provider -> engine|None"
+    resolver that `_run` shares across every shadow family. `sql_engine` is the
+    deps.sql_engine provider: a zero-arg callable returning the process-singleton
+    engine, or `_no_sql_engine` returning None when no Postgres target is
+    configured. Returns None when the provider is absent, returns None, or errors.
     """
-    if not _enabled() or sql_engine is None:
+    if sql_engine is None:
         return None
     try:
         return sql_engine() if callable(sql_engine) else sql_engine

@@ -37,7 +37,7 @@ class FakeSuspendDb(FakeDbBase):
             return {'id': 'o1', 'name': 'Sunset HS', 'status': 'active'}
         return None
 
-    def suspend_organization(self, *, org_id, actor_uid, reason, suspended_until, audit_entry):
+    def suspend_organization(self, *, org_id, actor_uid, reason, suspended_until, audit_entry, sql_engine=None):
         if not reason:
             raise ValueError('reason required')
         if audit_entry is None:

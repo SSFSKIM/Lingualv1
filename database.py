@@ -973,8 +973,12 @@ def create_organization(
     default_retention_policy='standard_school',
     lms_capabilities=None,
     org_id=None,
+    sql_engine=None,
 ):
-    """Create an organization document."""
+    """Create an organization document.
+
+    `sql_engine` (deps.sql_engine) opts into the fail-open Postgres parent-chain
+    dual-write (slice 2c), gated on DUAL_WRITE_SCHOOL_CHAIN."""
     doc_ref = get_organization_ref(org_id) if org_id else get_organizations_collection().document()
     org_data = {
         'name': name,
@@ -988,7 +992,10 @@ def create_organization(
         'created_at': firestore.SERVER_TIMESTAMP,
         'updated_at': firestore.SERVER_TIMESTAMP,
     }
-    doc_ref.set(org_data)
+    doc_ref.set(org_data)  # Firestore is the system of record — write it first.
+    if sql_engine is not None:
+        from backend.db import dual_write_school_chain as _sc
+        _sc.shadow_create_organization(sql_engine, org_id=doc_ref.id, org_data=org_data)
     return doc_ref.id
 
 
@@ -1347,6 +1354,7 @@ def suspend_organization(
     reason: str,
     suspended_until,
     audit_entry: dict,
+    sql_engine=None,
 ) -> None:
     """Transition an org from active to suspended.
 
@@ -1388,9 +1396,15 @@ def suspend_organization(
     audit_ref = db.collection(LINGUAL_ADMIN_AUDIT_COLLECTION).document()
     batch.set(audit_ref, audit_doc)
     batch.commit()
+    if sql_engine is not None:
+        from backend.db import dual_write_school_chain as _sc
+        _sc.shadow_suspend_organization(
+            sql_engine, org_id=org_id, actor_uid=actor_uid,
+            reason=reason.strip(), suspended_until=suspended_until,
+        )
 
 
-def restore_organization(*, org_id: str, actor_uid: str, audit_entry: dict) -> None:
+def restore_organization(*, org_id: str, actor_uid: str, audit_entry: dict, sql_engine=None) -> None:
     """Transition an org from suspended back to active.
 
     Atomic with audit (see :func:`suspend_organization`). Clears all
@@ -1425,6 +1439,9 @@ def restore_organization(*, org_id: str, actor_uid: str, audit_entry: dict) -> N
     audit_doc['created_at'] = firestore.SERVER_TIMESTAMP
     batch.set(db.collection(LINGUAL_ADMIN_AUDIT_COLLECTION).document(), audit_doc)
     batch.commit()
+    if sql_engine is not None:
+        from backend.db import dual_write_school_chain as _sc
+        _sc.shadow_restore_organization(sql_engine, org_id=org_id, actor_uid=actor_uid)
 
 
 def create_membership(

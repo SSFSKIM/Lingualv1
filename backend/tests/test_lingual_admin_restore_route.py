@@ -36,7 +36,7 @@ class FakeRestoreDb(FakeDbBase):
             return {'id': 'o1', 'name': 'Sunset HS', 'status': 'suspended'}
         return None
 
-    def restore_organization(self, *, org_id, actor_uid, audit_entry):
+    def restore_organization(self, *, org_id, actor_uid, audit_entry, sql_engine=None):
         if audit_entry is None:
             raise ValueError('audit_entry is required')
         self.restored = dict(

@@ -683,6 +683,7 @@ def create_lingual_admin_blueprint(deps: RouteDeps) -> Blueprint:
                 reason=reason,
                 suspended_until=suspended_until,
                 audit_entry=audit_entry,
+                sql_engine=deps.sql_engine,
             )
         except ValueError as exc:
             return jsonify({'error': str(exc)}), 400
@@ -759,6 +760,7 @@ def create_lingual_admin_blueprint(deps: RouteDeps) -> Blueprint:
                 org_id=org_id,
                 actor_uid=uid,
                 audit_entry=audit_entry,
+                sql_engine=deps.sql_engine,
             )
         except ValueError as exc:
             return jsonify({'error': str(exc)}), 400
