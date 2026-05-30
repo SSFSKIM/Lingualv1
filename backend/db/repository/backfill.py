@@ -32,6 +32,7 @@ from typing import Any
 
 from sqlalchemy import select
 
+from backend.db.models.migration import MigrationImportRun
 from backend.db.models.org import Class, Enrollment, Membership, Organization
 from backend.db.repository.normalization import (
     coerce_str_list,
@@ -449,3 +450,94 @@ def _dry_run_one(
         entity_stats['inserted'] += 1
     else:
         entity_stats['updated'] += 1
+
+
+# --- Import-run ledger -------------------------------------------------------
+
+def _summarize_stats(stats: dict[str, dict[str, Any]]) -> tuple[dict[str, Any], list[str]]:
+    """Compact per-entity counts (for the ledger `counts` jsonb) + a flat list of
+    'entity:id error' strings (for `error_summary` text[])."""
+    counts: dict[str, Any] = {}
+    error_summary: list[str] = []
+    for name, est in stats.items():
+        counts[name] = {
+            'inserted': est['inserted'],
+            'updated': est['updated'],
+            'skipped': est['skipped'],
+            'errors': len(est['errors']),
+            'warnings': len(est['warnings']),
+        }
+        for err in est['errors']:
+            error_summary.append(f"{name}:{err.get('id')!r} {err.get('error')}")
+    return counts, error_summary
+
+
+def start_import_run(session: Any, source: str) -> MigrationImportRun:
+    """Open a ledger row (status='running') before the backfill begins, so a
+    crashed run leaves a visible 'running' record. Returns the row."""
+    run = MigrationImportRun(source=source, status='running')
+    session.add(run)
+    session.flush()
+    return run
+
+
+def finish_import_run(
+    session: Any,
+    run: MigrationImportRun,
+    stats: dict[str, dict[str, Any]],
+    *,
+    finished_at: Any,
+    status: str | None = None,
+) -> MigrationImportRun:
+    """Close a ledger row with the run summary. `status` defaults to 'completed',
+    or 'completed_with_errors' if any entity reported errors. `finished_at` is
+    passed by the caller (a timezone-aware datetime)."""
+    counts, error_summary = _summarize_stats(stats)
+    run.counts = counts
+    run.error_summary = error_summary
+    run.finished_at = finished_at
+    run.status = status or ('completed_with_errors' if error_summary else 'completed')
+    session.flush()
+    return run
+
+
+# --- Parity report -----------------------------------------------------------
+
+def parity_report(
+    session: Any,
+    *,
+    organizations: Any = (),
+    memberships: Any = (),
+    classes: Any = (),
+    enrollments: Any = (),
+) -> dict[str, dict[str, Any]]:
+    """Compare the Firestore source id-set against migrated Postgres rows.
+
+    For each entity, reports firestore vs postgres counts and the symmetric
+    difference of legacy_firestore_id sets (capped samples). A clean cutover has
+    matching counts and empty diffs. Read-only.
+    """
+    inputs = {
+        'organizations': (Organization, organizations),
+        'memberships': (Membership, memberships),
+        'classes': (Class, classes),
+        'enrollments': (Enrollment, enrollments),
+    }
+    report: dict[str, dict[str, Any]] = {}
+    for name, (model, docs) in inputs.items():
+        fs_ids = {d.get('id') for d in docs if d.get('id')}
+        pg_ids = {
+            r
+            for r in session.execute(select(model.legacy_firestore_id)).scalars().all()
+            if r is not None
+        }
+        missing = sorted(fs_ids - pg_ids)
+        extra = sorted(pg_ids - fs_ids)
+        report[name] = {
+            'firestore_count': len(fs_ids),
+            'postgres_count': len(pg_ids),
+            'in_sync': not missing and not extra,
+            'missing_in_postgres': missing[:50],
+            'extra_in_postgres': extra[:50],
+        }
+    return report

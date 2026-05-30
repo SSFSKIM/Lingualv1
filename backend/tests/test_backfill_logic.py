@@ -399,5 +399,28 @@ class TestDryRun(unittest.TestCase):
         self.assertEqual(len(s.added), added_before)  # dry run wrote nothing
 
 
+class TestSummarizeStats(unittest.TestCase):
+    def test_compacts_counts_and_flattens_errors(self):
+        stats = {
+            'organizations': {'inserted': 2, 'updated': 1, 'skipped': 0, 'errors': [], 'warnings': []},
+            'enrollments': {
+                'inserted': 1,
+                'updated': 0,
+                'skipped': 0,
+                'errors': [{'id': 'c_x', 'error': 'boom'}],
+                'warnings': [{'id': 'c_y', 'warning': 'fk null'}],
+            },
+        }
+        counts, error_summary = backfill._summarize_stats(stats)
+        self.assertEqual(counts['organizations'], {
+            'inserted': 2, 'updated': 1, 'skipped': 0, 'errors': 0, 'warnings': 0,
+        })
+        self.assertEqual(counts['enrollments']['errors'], 1)
+        self.assertEqual(counts['enrollments']['warnings'], 1)
+        self.assertEqual(len(error_summary), 1)
+        self.assertIn('boom', error_summary[0])
+        self.assertIn('enrollments', error_summary[0])
+
+
 if __name__ == '__main__':
     unittest.main()

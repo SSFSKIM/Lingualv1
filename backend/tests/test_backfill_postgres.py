@@ -17,6 +17,7 @@ Proves the parts a fake session cannot:
   (d) a second run is IDEMPOTENT — no duplicate rows, stats show updates.
 """
 
+import datetime
 import os
 import unittest
 
@@ -29,6 +30,7 @@ from sqlalchemy.orm import Session
 
 import backend.db.models  # noqa: F401  (populate metadata)
 from backend.db.base import Base
+from backend.db.models.migration import MigrationImportRun
 from backend.db.models.org import Class, Enrollment, Membership, Organization
 from backend.db.repository import backfill
 
@@ -101,7 +103,7 @@ class TestBackfillEndToEnd(unittest.TestCase):
     def setUp(self):
         # Clean slate per test (children first to respect FKs).
         with Session(_engine) as s:
-            for model in (Enrollment, Class, Membership, Organization):
+            for model in (Enrollment, Class, Membership, Organization, MigrationImportRun):
                 s.query(model).delete()
             s.commit()
 
@@ -216,6 +218,56 @@ class TestBackfillEndToEnd(unittest.TestCase):
             self.assertEqual(self._count(s, Membership), 3)
             self.assertEqual(self._count(s, Class), 2)
             self.assertEqual(self._count(s, Enrollment), 3)
+
+    def test_parity_report_in_sync_after_full_backfill(self):
+        fixture = _fixture()
+        with Session(_engine) as s:
+            backfill.run_backfill(s, **fixture)
+            s.commit()
+        with Session(_engine) as s:
+            report = backfill.parity_report(s, **fixture)
+            for name in ('organizations', 'memberships', 'classes', 'enrollments'):
+                self.assertTrue(report[name]['in_sync'], name)
+                self.assertEqual(report[name]['missing_in_postgres'], [], name)
+                self.assertEqual(report[name]['extra_in_postgres'], [], name)
+            self.assertEqual(report['organizations']['firestore_count'], 2)
+            self.assertEqual(report['organizations']['postgres_count'], 2)
+            self.assertEqual(report['enrollments']['postgres_count'], 3)
+
+    def test_parity_report_flags_unmigrated_entities(self):
+        # Migrate only organizations; the rest of the fixture is "missing".
+        fixture = _fixture()
+        with Session(_engine) as s:
+            backfill.run_backfill(s, organizations=fixture['organizations'])
+            s.commit()
+        with Session(_engine) as s:
+            report = backfill.parity_report(s, **fixture)
+            self.assertTrue(report['organizations']['in_sync'])
+            self.assertFalse(report['enrollments']['in_sync'])
+            self.assertEqual(len(report['enrollments']['missing_in_postgres']), 3)
+            self.assertEqual(report['enrollments']['postgres_count'], 0)
+
+    def test_import_run_ledger_records_summary(self):
+        fixture = _fixture()
+        with Session(_engine) as s:
+            run = backfill.start_import_run(s, source='enrollment_chain')
+            self.assertEqual(run.status, 'running')
+            stats = backfill.run_backfill(s, **fixture)
+            backfill.finish_import_run(
+                s, run, stats,
+                finished_at=datetime.datetime(2026, 5, 30, tzinfo=datetime.UTC),
+            )
+            s.commit()
+            run_id = run.id
+
+        with Session(_engine) as s:
+            row = s.get(MigrationImportRun, run_id)
+            self.assertEqual(row.source, 'enrollment_chain')
+            self.assertEqual(row.status, 'completed')
+            self.assertIsNotNone(row.finished_at)
+            self.assertEqual(row.counts['enrollments']['inserted'], 3)
+            self.assertEqual(row.counts['organizations']['errors'], 0)
+            self.assertEqual(row.error_summary, [])
 
     def test_dry_run_writes_nothing(self):
         with Session(_engine) as s:
