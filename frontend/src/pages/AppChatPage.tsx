@@ -13,10 +13,11 @@ import {
   CircleUserRound,
   Hand,
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
+import { m, AnimatePresence } from 'framer-motion';
 import { clsx } from 'clsx';
 import { useRealtimeChat } from '@/hooks/useRealtimeChat';
 import { useRealtimeSpeakingSpeed } from '@/hooks/useRealtimeSpeakingSpeed';
+import { useLazyRef } from '@/hooks/useLazyRef';
 import {
   createChatSession,
   getChatSession,
@@ -112,7 +113,7 @@ export function AppChatPage() {
   const [error, setError] = useState<string | null>(null);
   const [isConnecting, setIsConnecting] = useState(false);
   const [assessmentResults, setAssessmentResults] = useState<AssessmentResults | null>(null);
-  const [profileSummary, setProfileSummary] = useState<UserProfile | null>(null);
+  const [profileSummary, setProfileSummary] = useState<UserProfile>();
   const [languageMixLevel, setLanguageMixLevel] = useState<LanguageMixLevel>(DEFAULT_LANGUAGE_MIX_LEVEL);
   const [languageMixNotice, setLanguageMixNotice] = useState<string | null>(null);
   const [speakingSpeed, setSpeakingSpeed] = useRealtimeSpeakingSpeed();
@@ -122,7 +123,7 @@ export function AppChatPage() {
   const [mode, setMode] = useState<Mode>('realtime');
   const [inputValue, setInputValue] = useState('');
   const [isSendingText, setIsSendingText] = useState(false);
-  const [isDeletingChat, setIsDeletingChat] = useState(false);
+  const isDeletingChatRef = useRef(false);
   const [isSidebarExpanded, setIsSidebarExpanded] = useState(false);
   const [isSidebarDialogOpen, setIsSidebarDialogOpen] = useState(false);
   const [textAvatarActivity, setTextAvatarActivity] = useState<AvatarActivity>('idle');
@@ -148,11 +149,24 @@ export function AppChatPage() {
     }
   });
 
+  const updateAvatarEnabled = useCallback((enabled: boolean) => {
+    if (!CHAT_AVATAR_AVAILABLE) {
+      setIsAvatarEnabled(false);
+      return;
+    }
+    setIsAvatarEnabled(enabled);
+    try {
+      window.localStorage.setItem(CHAT_AVATAR_ENABLED_KEY, String(enabled));
+    } catch {
+      // ignore storage failures
+    }
+  }, []);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const currentChatIdRef = useRef<string | null>(null);
   const previousMessageCountRef = useRef(0);
   const textAvatarTimeoutRef = useRef<number | null>(null);
-  const realtimeSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const realtimeSaveQueueRef = useLazyRef(() => Promise.resolve());
   const nextRealtimeMessageOrderRef = useRef(0);
   currentChatIdRef.current = currentChatId;
 
@@ -172,7 +186,7 @@ export function AppChatPage() {
   const resetRealtimePersistence = useCallback((messageCount = 0) => {
     realtimeSaveQueueRef.current = Promise.resolve();
     nextRealtimeMessageOrderRef.current = messageCount;
-  }, []);
+  }, [realtimeSaveQueueRef]);
 
   const playTextAvatarSpeech = useCallback((content: string) => {
     clearTextAvatarTimeout();
@@ -221,7 +235,8 @@ export function AppChatPage() {
       return [updated, ...prev.filter((session) => session.id !== chatId)];
     });
 
-    realtimeSaveQueueRef.current = realtimeSaveQueueRef.current
+    const currentSaveQueue = realtimeSaveQueueRef.current;
+    realtimeSaveQueueRef.current = currentSaveQueue
       .catch(() => undefined)
       .then(async () => {
         const response = await saveMessageToChat(chatId, role, content, { timestamp, sortOrder });
@@ -236,7 +251,7 @@ export function AppChatPage() {
       .catch((err) => {
         console.error('Failed to save realtime message:', err);
       });
-  }, []);
+  }, [realtimeSaveQueueRef]);
 
   const realtimeSessionParams = useMemo(
     () => ({
@@ -465,6 +480,7 @@ export function AppChatPage() {
     }
   }, [clearMessages, clearTextAvatarTimeout, disconnect, resetRealtimePersistence, resetTextAvatarPerformance]);
 
+  // react-doctor-disable-next-line react-doctor/no-initialize-state -- profileSummary already starts undefined and is populated by an async profile fetch.
   useEffect(() => {
     let isActive = true;
 
@@ -525,6 +541,7 @@ export function AppChatPage() {
       }
     };
 
+    // react-doctor-disable-next-line react-doctor/no-initialize-state -- profileSummary already starts undefined and is populated by an async profile fetch.
     loadSummary();
     return () => {
       isActive = false;
@@ -674,8 +691,8 @@ export function AppChatPage() {
 
   const handleDeleteChat = async (chatId: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (isDeletingChat) return;
-    setIsDeletingChat(true);
+    if (isDeletingChatRef.current) return;
+    isDeletingChatRef.current = true;
 
     try {
       await deleteChatSession(chatId);
@@ -700,7 +717,7 @@ export function AppChatPage() {
       console.error('Failed to delete chat:', err);
       setError('Failed to delete chat');
     } finally {
-      setIsDeletingChat(false);
+      isDeletingChatRef.current = false;
     }
   };
 
@@ -751,22 +768,6 @@ export function AppChatPage() {
   ];
 
   useEffect(() => {
-    if (!CHAT_AVATAR_AVAILABLE) {
-      setIsAvatarEnabled(false);
-      return;
-    }
-  }, []);
-
-  useEffect(() => {
-    if (!CHAT_AVATAR_AVAILABLE) return;
-    try {
-      window.localStorage.setItem(CHAT_AVATAR_ENABLED_KEY, String(isAvatarEnabled));
-    } catch {
-      // ignore storage failures
-    }
-  }, [isAvatarEnabled]);
-
-  useEffect(() => {
     let mediaQueryList: MediaQueryList | null = null;
 
     try {
@@ -776,8 +777,6 @@ export function AppChatPage() {
     }
 
     if (!mediaQueryList) return;
-
-    setIsDesktop(mediaQueryList.matches);
 
     const handleChange = (event: MediaQueryListEvent) => {
       setIsDesktop(event.matches);
@@ -802,7 +801,7 @@ export function AppChatPage() {
             onClick={() => setIsSidebarExpanded((prev) => !prev)}
             aria-label={isSidebarExpanded ? 'Collapse sidebar' : 'Expand sidebar'}
             title={isSidebarExpanded ? 'Collapse sidebar' : 'Expand sidebar'}
-            className="inline-flex h-10 w-10 items-center justify-center rounded-xl border-2 border-border bg-card text-foreground transition-colors hover:bg-secondary"
+            className="inline-flex size-10 items-center justify-center rounded-xl border-2 border-border bg-card text-foreground transition-colors hover:bg-secondary"
           >
             {isSidebarExpanded ? <ChevronLeft size={18} strokeWidth={2.5} /> : <ChevronRight size={18} strokeWidth={2.5} />}
           </button>
@@ -811,7 +810,7 @@ export function AppChatPage() {
             onClick={() => setIsSidebarExpanded(true)}
             aria-label={t('app.learn.path.title')}
             title={t('app.learn.path.title')}
-            className="inline-flex h-10 w-10 items-center justify-center rounded-xl border-2 border-border bg-card text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+            className="inline-flex size-10 items-center justify-center rounded-xl border-2 border-border bg-card text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
           >
             <BookOpen size={18} strokeWidth={2.5} />
           </button>
@@ -822,7 +821,7 @@ export function AppChatPage() {
       <AnimatePresence initial={false}>
         {isSidebarExpanded ? (
           <>
-            <motion.div
+            <m.div
               key="sidebar-backdrop"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -830,7 +829,7 @@ export function AppChatPage() {
               className="fixed inset-0 z-20 hidden lg:block"
               onClick={() => setIsSidebarExpanded(false)}
             />
-            <motion.div
+            <m.div
               key="desktop-sidebar-content"
               initial={{ opacity: 0, x: -12 }}
               animate={{ opacity: 1, x: 0 }}
@@ -848,21 +847,21 @@ export function AppChatPage() {
                 onDelete={handleDeleteChat}
                 t={t}
               />
-            </motion.div>
+            </m.div>
           </>
         ) : null}
       </AnimatePresence>
 
       {/* Main Content: Avatar (5) + Chat (3) */}
       <div className="flex h-full min-h-0 min-w-0 flex-1 gap-3">
-        {/* Virtual Avatar Panel — only available when Live2D SDK is present */}
+        {/* Virtual Avatar Panel - only available when Live2D SDK is present */}
         {CHAT_AVATAR_AVAILABLE && isAvatarEnabled && isDesktop && (
           <div className="hidden h-full min-h-0 flex-[5] overflow-hidden rounded-2xl border-3 border-foreground bg-card shadow-stamp lg:flex lg:flex-col">
             <Suspense
               fallback={
                 <div className="flex flex-1 items-center justify-center">
                   <div className="text-center text-muted-foreground">
-                    <div className="mx-auto mb-3 flex h-20 w-20 items-center justify-center rounded-2xl border-3 border-border bg-secondary">
+                    <div className="mx-auto mb-3 flex size-20 items-center justify-center rounded-2xl border-3 border-border bg-secondary">
                       <span className="text-3xl">🧑‍🏫</span>
                     </div>
                     <p className="text-sm font-bold">{t('app.learn.chat.title')}</p>
@@ -894,7 +893,7 @@ export function AppChatPage() {
         )}>
           <div className="z-10 flex items-center justify-between border-b-3 border-foreground bg-card p-4">
             <div className="min-w-0 flex-1">
-              <div className="flex items-center space-x-2 text-sm text-primary font-bold mb-0.5">
+              <div className="flex items-center gap-x-2 text-sm text-primary font-bold mb-0.5">
                 <MessageSquare size={16} strokeWidth={2.5} />
                 <span>{t('app.learn.chat.label')}</span>
               </div>
@@ -928,7 +927,7 @@ export function AppChatPage() {
                 </div>
               )}
             </div>
-            <div className="flex items-center space-x-2 shrink-0 ml-3">
+            <div className="flex items-center gap-x-2 shrink-0 ml-3">
               <div className="flex flex-col items-end gap-1 mr-1">
                 <select
                   aria-label={t('chat.languageMix.label')}
@@ -980,18 +979,18 @@ export function AppChatPage() {
                 onClick={() => setIsSidebarDialogOpen(true)}
                 aria-label={t('app.learn.sessions.title')}
                 title={t('app.learn.sessions.title')}
-                className="inline-flex h-8 w-8 items-center justify-center rounded-xl border-2 border-border bg-card text-foreground transition-colors hover:bg-secondary lg:hidden"
+                className="inline-flex size-8 items-center justify-center rounded-xl border-2 border-border bg-card text-foreground transition-colors hover:bg-secondary lg:hidden"
               >
                 <Menu size={14} strokeWidth={2.5} />
               </button>
               {CHAT_AVATAR_AVAILABLE && (
                 <button
                   type="button"
-                  onClick={() => setIsAvatarEnabled((prev) => !prev)}
+                  onClick={() => updateAvatarEnabled(!isAvatarEnabled)}
                   aria-label={isAvatarEnabled ? 'Hide avatar' : 'Show avatar'}
                   title={isAvatarEnabled ? 'Hide avatar' : 'Show avatar'}
                   className={clsx(
-                    'hidden lg:inline-flex h-8 w-8 items-center justify-center rounded-xl border-2 transition-colors',
+                    'hidden lg:inline-flex size-8 items-center justify-center rounded-xl border-2 transition-colors',
                     isAvatarEnabled
                       ? 'border-primary bg-primary/10 text-primary'
                       : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-secondary hover:border-border'
@@ -1005,7 +1004,7 @@ export function AppChatPage() {
                 onClick={createNewChat}
                 aria-label={t('app.learn.sessions.newChatTitle')}
                 title={t('app.learn.sessions.newChatTitle')}
-                className="h-8 w-8 text-muted-foreground hover:text-foreground hover:bg-secondary rounded-xl border-2 border-transparent hover:border-border transition-colors"
+                className="size-8 text-muted-foreground hover:text-foreground hover:bg-secondary rounded-xl border-2 border-transparent hover:border-border transition-colors"
               >
                 <RefreshCcw size={16} strokeWidth={2.5} />
               </button>
@@ -1021,7 +1020,7 @@ export function AppChatPage() {
 
             {loadingChat ? (
               <div className="flex items-center gap-3 text-sm text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" />
+                <Loader2 className="size-4 animate-spin" />
                 {t('app.learn.chat.loading')}
               </div>
             ) : displayMessages.length === 0 ? (
@@ -1031,7 +1030,7 @@ export function AppChatPage() {
                 {displayMessages.map((msg) => {
                   const isUser = msg.role === 'user';
                   return (
-                    <motion.div
+                    <m.div
                       key={msg.id}
                       initial={{ opacity: 0, y: 10 }}
                       animate={{ opacity: 1, y: 0 }}
@@ -1040,15 +1039,15 @@ export function AppChatPage() {
                       {isUser && !userAvatar ? (
                         <div
                           aria-label="You"
-                          className="w-10 h-10 shrink-0 rounded-xl bg-secondary border-2 border-foreground flex items-center justify-center text-muted-foreground"
+                          className="size-10 shrink-0 rounded-xl bg-secondary border-2 border-foreground flex items-center justify-center text-muted-foreground"
                         >
-                          <CircleUserRound className="h-6 w-6" strokeWidth={1.75} />
+                          <CircleUserRound className="size-6" strokeWidth={1.75} />
                         </div>
                       ) : (
                         <img
                           src={isUser ? (userAvatar as string) : AI_AVATAR}
                           alt={isUser ? 'You' : 'Lingual AI'}
-                          className="w-10 h-10 shrink-0 rounded-xl bg-card border-2 border-foreground object-cover object-center"
+                          className="size-10 shrink-0 rounded-xl bg-card border-2 border-foreground object-cover object-center"
                         />
                       )}
                       <div
@@ -1061,7 +1060,7 @@ export function AppChatPage() {
                       >
                         {msg.content}
                       </div>
-                    </motion.div>
+                    </m.div>
                   );
                 })}
                 <div ref={messagesEndRef} />
@@ -1072,7 +1071,7 @@ export function AppChatPage() {
           <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-card via-card to-transparent">
           <AnimatePresence mode="wait">
             {mode === 'text' ? (
-              <motion.div
+              <m.div
                 key="text-input"
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -1085,9 +1084,9 @@ export function AppChatPage() {
                   disabled={isSendingText || !currentChatId}
                   placeholder={t('chat.placeholder')}
                 />
-              </motion.div>
+              </m.div>
             ) : (
-              <motion.div
+              <m.div
                 key="voice-input"
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -1150,7 +1149,7 @@ export function AppChatPage() {
                     <Mic size={20} strokeWidth={2.5} />
                   </button>
                 </div>
-              </motion.div>
+              </m.div>
             )}
           </AnimatePresence>
         </div>
