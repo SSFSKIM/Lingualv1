@@ -27,7 +27,7 @@ import uuid
 import backend.db.models  # noqa: F401  (populate metadata)
 from backend.db import dual_write_school_chain as sc
 from backend.db.base import Base
-from backend.db.models.org import Class, Membership, Organization
+from backend.db.models.org import Class, Enrollment, Membership, Organization
 from backend.db.repository import backfill
 
 _engine = None
@@ -334,6 +334,73 @@ class TestClassAndPrimaryShadowEndToEnd(unittest.TestCase):
             ).scalar_one()
             self.assertFalse(org.teacher_invite_code_active)
             self.assertEqual(org.teacher_invite_code, 'ABC123')  # code preserved, only active flipped
+
+
+class TestDeleteOrgScopeEndToEnd(unittest.TestCase):
+    def setUp(self):
+        self._orig = os.environ.get(FLAG)
+        os.environ[FLAG] = '1'
+        with Session(_engine) as s:
+            for model in (Enrollment, Class, Membership, Organization):
+                s.query(model).delete()
+            s.commit()
+        # Seed a full chain: org -> membership + class -> enrollment.
+        sc.shadow_create_organization(lambda: _engine, org_id='org1', org_data=_org_data())
+        sc.shadow_create_membership(
+            lambda: _engine, membership_id='org1_stuA',
+            membership_data={'org_id': 'org1', 'uid': 'stuA', 'roles': ['student'], 'status': 'active'},
+        )
+        sc.shadow_create_class(
+            lambda: _engine, class_id='class1',
+            class_data={'org_id': 'org1', 'name': 'Spanish I', 'learning_locale': 'es-ES', 'status': 'active'},
+        )
+        # Enrollment via the backfill upsert (FK resolves to the migrated class).
+        with Session(_engine) as s:
+            backfill.upsert_enrollment(s, {
+                'id': 'class1_stuA', 'class_id': 'class1', 'student_uid': 'stuA',
+                'student_membership_id': 'org1_stuA', 'status': 'active', 'join_source': 'join_code',
+            })
+            s.commit()
+
+    def tearDown(self):
+        if self._orig is None:
+            os.environ.pop(FLAG, None)
+        else:
+            os.environ[FLAG] = self._orig
+
+    def _count(self, s, model):
+        return s.execute(select(func.count()).select_from(model)).scalar_one()
+
+    def test_org_scope_delete_removes_children_keeps_org(self):
+        # Sanity: the full chain exists.
+        with Session(_engine) as s:
+            self.assertEqual(self._count(s, Organization), 1)
+            self.assertEqual(self._count(s, Membership), 1)
+            self.assertEqual(self._count(s, Class), 1)
+            self.assertEqual(self._count(s, Enrollment), 1)
+
+        sc.shadow_delete_org_scope(lambda: _engine, org_id='org1')
+
+        with Session(_engine) as s:
+            # Org row KEPT (Firestore org-scope deletion does not delete the org doc).
+            self.assertEqual(self._count(s, Organization), 1)
+            # Classes + memberships deleted; enrollments cascade away with their class.
+            self.assertEqual(self._count(s, Class), 0)
+            self.assertEqual(self._count(s, Membership), 0)
+            self.assertEqual(self._count(s, Enrollment), 0)
+
+    def test_delete_unresolved_org_is_noop(self):
+        sc.shadow_delete_org_scope(lambda: _engine, org_id='ghost')
+        with Session(_engine) as s:
+            self.assertEqual(self._count(s, Class), 1)
+            self.assertEqual(self._count(s, Membership), 1)
+
+    def test_flag_off_deletes_nothing(self):
+        os.environ.pop(FLAG, None)
+        sc.shadow_delete_org_scope(lambda: _engine, org_id='org1')
+        with Session(_engine) as s:
+            self.assertEqual(self._count(s, Class), 1)
+            self.assertEqual(self._count(s, Membership), 1)
 
 
 if __name__ == '__main__':

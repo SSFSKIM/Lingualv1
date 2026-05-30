@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 from datetime import UTC, datetime
 
 from flask import Flask, session
@@ -290,6 +291,8 @@ class FakeRouteDeps:
     def __init__(self, fake_db, current_uid='admin-1'):
         self.db = fake_db
         self._current_uid = current_uid
+        # slice-2c dual-write provider; None-returning -> shadow is a no-op here.
+        self.sql_engine = lambda: None
 
     def get_school_request_context(self):
         school_context = self.db.resolve_user_school_context(self._current_uid)
@@ -466,6 +469,30 @@ class TestDeletionRequestServiceUnit(unittest.TestCase):
         self.assertNotIn('ps-1', self.db.practice_sessions)
         self.assertNotIn('le-1', self.db.learning_events)
         self.assertNotIn(f'{self.org_id}_student-1', self.db.student_compliance_records)
+
+    def test_org_scope_execution_invokes_postgres_shadow_delete(self):
+        # slice 2c-4: org-scope deletion fires the fail-open Postgres shadow delete
+        # (after the ledger writes), keyed by org_id.
+        request = create_deletion_request(
+            self.deps, org_id=self.org_id, scope_type='org', scope_id=self.org_id,
+            requested_by_uid='admin-1', actor_roles={'school_admin'},
+        )
+        approve_deletion_request(self.deps, request_id=request['id'], approved_by_uid='admin-1')
+        with patch('backend.db.dual_write_school_chain.shadow_delete_org_scope') as shadow:
+            execute_deletion(self.deps, request_id=request['id'], executor_uid='admin-1')
+        shadow.assert_called_once()
+        self.assertEqual(shadow.call_args.kwargs['org_id'], self.org_id)
+
+    def test_student_scope_execution_does_not_shadow_delete(self):
+        # student scope targets only non-mirrored collections -> no parent-chain shadow.
+        request = create_deletion_request(
+            self.deps, org_id=self.org_id, scope_type='student', scope_id='student-1',
+            requested_by_uid='admin-1', actor_roles={'school_admin'},
+        )
+        approve_deletion_request(self.deps, request_id=request['id'], approved_by_uid='admin-1')
+        with patch('backend.db.dual_write_school_chain.shadow_delete_org_scope') as shadow:
+            execute_deletion(self.deps, request_id=request['id'], executor_uid='admin-1')
+        shadow.assert_not_called()
 
     def test_execute_requires_approved_status(self):
         request = create_deletion_request(

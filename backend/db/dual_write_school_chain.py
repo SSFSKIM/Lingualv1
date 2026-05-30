@@ -301,3 +301,37 @@ def shadow_deactivate_org_invite_code(sql_engine: Any, *, org_id: str) -> None:
         )
 
     _run(sql_engine, 'deactivate_org_invite_code', op)
+
+
+# --- Hard-delete mirroring (slice 2c-4) --------------------------------------
+
+
+def shadow_delete_org_scope(sql_engine: Any, *, org_id: str) -> None:
+    """Mirror an org-scope GDPR/FERPA deletion (deletion_requests.execute_deletion).
+
+    Faithful to the Firestore path, which targets ORG_SCOPE_COLLECTIONS — classes
+    and memberships (both carry org_id) — but NOT the `organizations` document
+    itself. So we DELETE the org's classes and memberships and KEEP the org row.
+    Deleting a class CASCADEs to its enrollments (FK ON DELETE CASCADE); the
+    Firestore path leaves those enrollment docs orphaned (they have no org_id to
+    match on), so Postgres ends up slightly cleaner — see LIMITATIONS #43a.
+
+    Resolves the org to a UUID (quiet no-op if absent). Both DELETEs run in one
+    _run session so they commit atomically; fail-open like every shadow.
+    """
+    if not _enabled_school_chain():
+        return
+    from sqlalchemy import delete
+
+    from backend.db.models.org import Class, Membership, Organization
+    from backend.db.repository.resolution import resolve_legacy_id
+
+    def op(session: Any) -> None:
+        org_uuid = resolve_legacy_id(session, Organization, org_id)
+        if org_uuid is None:
+            return
+        # Classes first: their enrollments cascade away. Then memberships.
+        session.execute(delete(Class).where(Class.org_id == org_uuid))
+        session.execute(delete(Membership).where(Membership.org_id == org_uuid))
+
+    _run(sql_engine, 'delete_org_scope', op)

@@ -389,6 +389,15 @@ def execute_deletion(
         },
     )
 
+    # Postgres parent-chain shadow (slice 2c-4, fail-open, gated on
+    # DUAL_WRITE_SCHOOL_CHAIN). Placed AFTER all ledger + consent writes so it can
+    # never affect the authoritative deletion result. Only org-scope touches
+    # dual-written tables (classes/memberships; enrollments cascade); student/class
+    # scope target collections that are not mirrored yet, so no shadow is needed.
+    if scope_type == "org":
+        from backend.db import dual_write_school_chain as _sc
+        _sc.shadow_delete_org_scope(deps.sql_engine, org_id=org_id)
+
     run = deps.db.get_deletion_execution_run(run_id)
     request = deps.db.get_deletion_request(request_id)
     return request, run

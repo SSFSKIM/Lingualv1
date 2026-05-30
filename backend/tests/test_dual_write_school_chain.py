@@ -304,6 +304,38 @@ class TestShadowInviteCode(_FlagMixin):
         self.assertEqual(params['teacher_invite_code_active'], False)
 
 
+class TestShadowDeleteOrgScope(_FlagMixin):
+    def setUp(self):
+        super().setUp()
+        self._on()
+
+    def test_resolves_org_then_deletes_classes_and_memberships(self):
+        captured, fake_run = _capture_run()
+        with patch.object(sc, '_run', fake_run), patch(
+            'backend.db.repository.resolution.resolve_legacy_id', lambda s, m, fid: uuid.uuid4()
+        ):
+            sc.shadow_delete_org_scope(lambda: object(), org_id='org1')
+        sqls = [str(stmt.compile(dialect=postgresql.dialect())) for stmt in captured['session'].executed]
+        self.assertEqual(len(sqls), 2)
+        self.assertTrue(any('DELETE FROM classes' in s for s in sqls))
+        self.assertTrue(any('DELETE FROM memberships' in s for s in sqls))
+        # The organizations row is intentionally NOT deleted (Firestore keeps it).
+        self.assertFalse(any('DELETE FROM organizations' in s for s in sqls))
+
+    def test_noop_when_org_unresolved(self):
+        captured, fake_run = _capture_run()
+        with patch.object(sc, '_run', fake_run), patch(
+            'backend.db.repository.resolution.resolve_legacy_id', lambda s, m, fid: None
+        ):
+            sc.shadow_delete_org_scope(lambda: object(), org_id='ghost')
+        self.assertEqual(captured['session'].executed, [])
+
+    def test_noop_when_flag_off(self):
+        self._off()
+        with patch.object(sc, '_run', side_effect=AssertionError('must not run')):
+            sc.shadow_delete_org_scope(lambda: object(), org_id='org1')
+
+
 class _FakeBatch:
     def update(self, *a, **k):
         pass
