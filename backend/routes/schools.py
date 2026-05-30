@@ -204,6 +204,7 @@ def create_schools_blueprint(deps: RouteDeps) -> Blueprint:
                 org_id=org_id,
                 uid=uid,
                 roles=["school_admin", "teacher"],
+                sql_engine=deps.sql_engine,
             )
             class_id = deps.db.create_class(
                 org_id=org_id,
@@ -295,6 +296,7 @@ def create_schools_blueprint(deps: RouteDeps) -> Blueprint:
                     roles=["student"],
                     primary_class_ids=[class_id],
                     membership_id=membership_id,
+                    sql_engine=deps.sql_engine,
                 )
             else:
                 deps.db.add_primary_class_to_membership(membership_id, class_id)
@@ -510,6 +512,7 @@ def create_schools_blueprint(deps: RouteDeps) -> Blueprint:
                 org_id=ctx.active_organization_id,
                 uid=invitation["uid"],
                 roles=["teacher"],
+                sql_engine=deps.sql_engine,
             )
             deps.db.set_user_last_active_membership(invitation["uid"], membership_id)
 

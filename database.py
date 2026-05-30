@@ -1451,8 +1451,12 @@ def create_membership(
     status='active',
     primary_class_ids=None,
     membership_id=None,
+    sql_engine=None,
 ):
-    """Create a membership document."""
+    """Create a membership document.
+
+    `sql_engine` (deps.sql_engine) opts into the fail-open Postgres parent-chain
+    dual-write (slice 2c), gated on DUAL_WRITE_SCHOOL_CHAIN."""
     doc_ref = get_membership_ref(membership_id) if membership_id else get_memberships_collection().document()
     normalized_roles = _normalize_string_list(roles)
     membership_data = {
@@ -1467,10 +1471,13 @@ def create_membership(
     doc_ref.set(membership_data)
     if 'school_admin' in normalized_roles and status == 'active':
         _sync_org_admin_uids(org_id, uid, add=True)
+    if sql_engine is not None:
+        from backend.db import dual_write_school_chain as _sc
+        _sc.shadow_create_membership(sql_engine, membership_id=doc_ref.id, membership_data=membership_data)
     return doc_ref.id
 
 
-def remove_membership(*, membership_id: str, actor_uid: str, audit_entry: dict) -> dict:
+def remove_membership(*, membership_id: str, actor_uid: str, audit_entry: dict, sql_engine=None) -> dict:
     """Soft-remove a membership row, atomically with the audit row.
 
     Sets `status='removed'` and stamps `removed_at` / `removed_by_uid` in
@@ -1512,6 +1519,9 @@ def remove_membership(*, membership_id: str, actor_uid: str, audit_entry: dict) 
     audit_doc['created_at'] = firestore.SERVER_TIMESTAMP
     batch.set(db.collection(LINGUAL_ADMIN_AUDIT_COLLECTION).document(), audit_doc)
     batch.commit()
+    if sql_engine is not None:
+        from backend.db import dual_write_school_chain as _sc
+        _sc.shadow_remove_membership(sql_engine, membership_id=membership_id, actor_uid=actor_uid)
     return m
 
 
@@ -3509,6 +3519,7 @@ def approve_school_request(
     reviewer_uid=None,
     internal_note=None,
     audit_entry=None,
+    sql_engine=None,
 ):
     """Atomically approve a pending school request and create its admin org.
 
@@ -3698,7 +3709,23 @@ def approve_school_request(
             'membership_id': membership_ref.id,
         }
 
-    return _approve(transaction)
+    result = _approve(transaction)
+    # Postgres parent-chain shadow (slice 2c, fail-open, gated on
+    # DUAL_WRITE_SCHOOL_CHAIN). org_data/membership_data are local to the
+    # transactional closure, so re-read the just-persisted docs (a rare admin op
+    # -> the extra reads are negligible) and mirror org BEFORE membership so the
+    # membership FK resolves. The shadows are no-ops when the flag is off.
+    if sql_engine is not None and result is not None:
+        from backend.db import dual_write_school_chain as _sc
+        org_doc = get_organization(org_ref.id)
+        if org_doc:
+            _sc.shadow_create_organization(sql_engine, org_id=org_ref.id, org_data=org_doc)
+        membership_doc = get_membership(membership_ref.id)
+        if membership_doc:
+            _sc.shadow_create_membership(
+                sql_engine, membership_id=membership_ref.id, membership_data=membership_doc
+            )
+    return result
 
 
 def reject_school_request(

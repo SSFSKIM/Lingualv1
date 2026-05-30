@@ -133,3 +133,52 @@ def shadow_restore_organization(sql_engine: Any, *, org_id: str, actor_uid: str)
         )
 
     _run(sql_engine, 'restore_organization', op)
+
+
+# --- Memberships (slice 2c-2) ------------------------------------------------
+
+
+def shadow_create_membership(sql_engine: Any, *, membership_id: str, membership_data: dict[str, Any]) -> None:
+    """Mirror a membership CREATE into Postgres (idempotent upsert).
+
+    `membership_data` is the same dict the Firestore write used (or a re-read of
+    the persisted doc, as in approve_school_request); `membership_id` is the
+    Firestore doc id ({org_id}_{uid}). upsert_membership resolves org_id -> UUID
+    and raises UnresolvedParentError (a quiet coexistence no-op) if the org is not
+    in Postgres yet. primary_class_ids stays [] here (owned by 2c-3 ARRAY writes).
+    """
+    if not _enabled_school_chain():
+        return
+    from backend.db.repository import backfill
+
+    doc = {**_strip_sentinels(membership_data), 'id': membership_id}
+    _run(sql_engine, 'create_membership', lambda s: backfill.upsert_membership(s, doc))
+
+
+def shadow_remove_membership(sql_engine: Any, *, membership_id: str, actor_uid: str) -> None:
+    """Mirror a soft-remove: targeted UPDATE of status + removed_* only.
+
+    Keyed by legacy_firestore_id; updates the existing row in place (so the
+    one-active-per-(org,uid) partial-unique index is never threatened — no new
+    INSERT), no-op when the membership row is absent. Field rename:
+    Firestore removed_by_uid -> Postgres removed_by_firebase_uid.
+    """
+    if not _enabled_school_chain():
+        return
+    from sqlalchemy import update
+
+    from backend.db.models.org import Membership
+
+    def op(session: Any) -> None:
+        session.execute(
+            update(Membership)
+            .where(Membership.legacy_firestore_id == membership_id)
+            .values(
+                status='removed',
+                removed_at=_utcnow(),
+                removed_by_firebase_uid=actor_uid,
+                updated_at=_utcnow(),
+            )
+        )
+
+    _run(sql_engine, 'remove_membership', op)

@@ -155,7 +155,7 @@ class FakeTeacherRequestsDb(FakeDbBase):
             return None
         return {'id': request_id, **rec}
 
-    def create_membership(self, *, org_id, uid, roles):
+    def create_membership(self, *, org_id, uid, roles, sql_engine=None):
         self._mem_counter = getattr(self, '_mem_counter', 0) + 1
         membership_id = f'mem-{self._mem_counter}'
         self._membership_list.append({

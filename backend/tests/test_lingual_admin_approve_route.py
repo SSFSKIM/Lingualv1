@@ -71,6 +71,7 @@ class FakeApproveDb(FakeDbBase):
         reviewer_uid,
         internal_note=None,
         audit_entry=None,
+        sql_engine=None,
     ):
         if audit_entry is None:
             raise ValueError('audit_entry is required')

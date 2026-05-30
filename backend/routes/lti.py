@@ -529,6 +529,7 @@ def create_lti_blueprint(deps: RouteDeps) -> Blueprint:
                 status='active',
                 primary_class_ids=[],
                 membership_id=f'{org_id}_{uid}',
+                sql_engine=deps.sql_engine,
             )
 
         user = deps.db.get_user(uid) or user

@@ -69,7 +69,7 @@ class FakeSchoolDb:
         }
         return org_id
 
-    def create_membership(self, org_id, uid, roles, status='active', primary_class_ids=None, membership_id=None):
+    def create_membership(self, org_id, uid, roles, status='active', primary_class_ids=None, membership_id=None, sql_engine=None):
         self.membership_counter += 1
         membership_id = membership_id or f'mem-{self.membership_counter}'
         self.memberships[membership_id] = {

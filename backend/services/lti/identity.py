@@ -156,6 +156,7 @@ def auto_enroll_student(db, *, uid, org_id, class_id, membership_id='', sql_engi
             status='active',
             primary_class_ids=[class_id],
             membership_id=deterministic_membership_id,
+            sql_engine=sql_engine,
         )
 
     # 2. Add class to membership's primaryClassIds if not already present

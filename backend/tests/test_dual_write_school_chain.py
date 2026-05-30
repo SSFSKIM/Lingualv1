@@ -193,8 +193,66 @@ class TestShadowSuspendRestore(_FlagMixin):
         self.assertEqual(params['restored_by_firebase_uid'], 'admin-1')
 
 
+class TestShadowMembership(_FlagMixin):
+    def setUp(self):
+        super().setUp()
+        self._on()
+
+    def test_create_builds_doc_with_id(self):
+        captured, fake_run = _capture_run()
+        seen = {}
+        with patch.object(sc, '_run', fake_run), patch(
+            'backend.db.repository.backfill.upsert_membership', lambda s, doc: seen.update(doc)
+        ):
+            sc.shadow_create_membership(
+                lambda: object(), membership_id='org1_uidA',
+                membership_data={'org_id': 'org1', 'uid': 'uidA', 'roles': ['student'], 'status': 'active'},
+            )
+        self.assertEqual(captured['op'], 'create_membership')
+        self.assertEqual(seen['id'], 'org1_uidA')
+        self.assertEqual(seen['org_id'], 'org1')
+        self.assertEqual(seen['uid'], 'uidA')
+
+    def test_create_noop_when_flag_off(self):
+        self._off()
+        with patch.object(sc, '_run', side_effect=AssertionError('must not run')):
+            sc.shadow_create_membership(lambda: object(), membership_id='m', membership_data={})
+
+    def test_remove_targeted_update_sets_only_removal_fields(self):
+        captured, fake_run = _capture_run()
+        with patch.object(sc, '_run', fake_run):
+            sc.shadow_remove_membership(lambda: object(), membership_id='org1_uidA', actor_uid='admin-1')
+        sql, params = _update_params(captured['session'])
+        self.assertIn('UPDATE memberships', sql)
+        self.assertEqual(params['status'], 'removed')
+        self.assertEqual(params['removed_by_firebase_uid'], 'admin-1')
+        # Stable fields must NOT be clobbered.
+        self.assertNotIn('roles', params)
+        self.assertNotIn('firebase_uid', params)
+        self.assertIn('org1_uidA', params.values())
+
+
+class _FakeBatch:
+    def update(self, *a, **k):
+        pass
+
+    def set(self, *a, **k):
+        pass
+
+    def commit(self):
+        pass
+
+
+class _FakeClient:
+    def batch(self):
+        return _FakeBatch()
+
+    def collection(self, *a, **k):
+        return MagicMock()
+
+
 class TestDatabaseWiring(_FlagMixin):
-    """database.py org helpers shadow only when sql_engine is passed."""
+    """database.py parent-chain helpers shadow only when sql_engine is passed."""
 
     def setUp(self):
         super().setUp()
@@ -217,6 +275,42 @@ class TestDatabaseWiring(_FlagMixin):
         ) as shadow:
             self.database.create_organization('Springfield', org_id='org1')
         shadow.assert_not_called()
+
+    def test_create_membership_shadows_when_engine_passed(self):
+        ref = MagicMock()
+        ref.id = 'o1_u1'
+        with patch.object(self.database, 'get_membership_ref', return_value=ref), patch(
+            'backend.db.dual_write_school_chain.shadow_create_membership'
+        ) as shadow:
+            self.database.create_membership(
+                org_id='o1', uid='u1', roles=['student'], membership_id='o1_u1',
+                sql_engine=lambda: object(),
+            )
+        shadow.assert_called_once()
+        self.assertEqual(shadow.call_args.kwargs['membership_id'], 'o1_u1')
+
+    def test_create_membership_no_shadow_without_engine(self):
+        ref = MagicMock()
+        ref.id = 'o1_u1'
+        with patch.object(self.database, 'get_membership_ref', return_value=ref), patch(
+            'backend.db.dual_write_school_chain.shadow_create_membership'
+        ) as shadow:
+            self.database.create_membership(org_id='o1', uid='u1', roles=['student'], membership_id='o1_u1')
+        shadow.assert_not_called()
+
+    def test_remove_membership_shadows_when_engine_passed(self):
+        m = {'id': 'o1_u1', 'status': 'active', 'roles': ['teacher'], 'org_id': 'o1', 'uid': 'u1'}
+        with patch.object(self.database, 'get_membership', return_value=m), patch.object(
+            self.database, 'get_db', return_value=_FakeClient()
+        ), patch.object(self.database, 'get_membership_ref', return_value=MagicMock()), patch(
+            'backend.db.dual_write_school_chain.shadow_remove_membership'
+        ) as shadow:
+            self.database.remove_membership(
+                membership_id='o1_u1', actor_uid='admin-1',
+                audit_entry={'a': 1}, sql_engine=lambda: object(),
+            )
+        shadow.assert_called_once()
+        self.assertEqual(shadow.call_args.kwargs['membership_id'], 'o1_u1')
 
 
 if __name__ == '__main__':

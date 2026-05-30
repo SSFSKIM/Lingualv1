@@ -29,7 +29,7 @@ class FakeMemberRemoveDb(FakeDbBase):
                     'roles': ['school_admin'], 'status': 'active'}
         return None
 
-    def remove_membership(self, *, membership_id, actor_uid, audit_entry):
+    def remove_membership(self, *, membership_id, actor_uid, audit_entry, sql_engine=None):
         if audit_entry is None:
             raise ValueError('audit_entry is required')
         self.removed = dict(membership_id=membership_id, actor_uid=actor_uid,

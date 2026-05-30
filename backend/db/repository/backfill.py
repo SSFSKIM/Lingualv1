@@ -189,6 +189,12 @@ def upsert_membership(
         session.add(row)
     else:
         for key, value in fields.items():
+            # primary_class_ids is deferred to [] on INSERT, but on UPDATE it must
+            # NOT be clobbered: the live-path shadow (slice 2c-3 shadow_add/remove_
+            # primary_class) writes real class UUIDs into it, and a backfill re-run
+            # must preserve those rather than zero them back to [].
+            if key == 'primary_class_ids':
+                continue
             setattr(row, key, value)
     session.flush()
     return row

@@ -298,6 +298,7 @@ def create_teacher_requests_blueprint(deps: RouteDeps) -> Blueprint:
             org_id=org_id,
             uid=target_uid,
             roles=['teacher'],
+            sql_engine=deps.sql_engine,
         )
         deps.db.set_user_last_active_membership(target_uid, membership_id)
         deps.db.update_teacher_join_request_status(

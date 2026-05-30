@@ -22,10 +22,13 @@ if not DATABASE_URL:
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session
 
+import uuid
+
 import backend.db.models  # noqa: F401  (populate metadata)
 from backend.db import dual_write_school_chain as sc
 from backend.db.base import Base
-from backend.db.models.org import Organization
+from backend.db.models.org import Membership, Organization
+from backend.db.repository import backfill
 
 _engine = None
 FLAG = 'DUAL_WRITE_SCHOOL_CHAIN'
@@ -139,6 +142,109 @@ class TestOrgShadowEndToEnd(unittest.TestCase):
         sc.shadow_create_organization(self._provider(), org_id='org1', org_data=_org_data())
         with Session(_engine) as s:
             self.assertEqual(self._count(s), 0)
+
+
+class TestMembershipShadowEndToEnd(unittest.TestCase):
+    def setUp(self):
+        self._orig = os.environ.get(FLAG)
+        os.environ[FLAG] = '1'
+        with Session(_engine) as s:
+            s.query(Membership).delete()
+            s.query(Organization).delete()
+            s.commit()
+        # Seed the parent org so membership FKs resolve.
+        sc.shadow_create_organization(lambda: _engine, org_id='org1', org_data=_org_data())
+
+    def tearDown(self):
+        if self._orig is None:
+            os.environ.pop(FLAG, None)
+        else:
+            os.environ[FLAG] = self._orig
+
+    def _provider(self):
+        return lambda: _engine
+
+    def _mdata(self, uid='uidA', roles=('student',), status='active'):
+        return {'org_id': 'org1', 'uid': uid, 'roles': list(roles), 'status': status}
+
+    def _count_memberships(self, s):
+        return s.execute(select(func.count()).select_from(Membership)).scalar_one()
+
+    def test_create_membership_lands_with_resolved_org_fk(self):
+        sc.shadow_create_membership(self._provider(), membership_id='org1_uidA', membership_data=self._mdata())
+        with Session(_engine) as s:
+            org_uuid = s.execute(
+                select(Organization.id).where(Organization.legacy_firestore_id == 'org1')
+            ).scalar_one()
+            mem = s.execute(
+                select(Membership).where(Membership.legacy_firestore_id == 'org1_uidA')
+            ).scalar_one()
+            self.assertEqual(mem.org_id, org_uuid)
+            self.assertEqual(mem.firebase_uid, 'uidA')
+            self.assertEqual(mem.status, 'active')
+            self.assertEqual(mem.roles, ['student'])
+
+    def test_create_membership_idempotent(self):
+        for _ in range(2):
+            sc.shadow_create_membership(self._provider(), membership_id='org1_uidA', membership_data=self._mdata())
+        with Session(_engine) as s:
+            self.assertEqual(self._count_memberships(s), 1)
+
+    def test_create_membership_noop_when_org_absent(self):
+        # Membership referencing an org not in PG -> UnresolvedParentError -> quiet no-op.
+        sc.shadow_create_membership(
+            self._provider(), membership_id='ghost_uidZ',
+            membership_data={'org_id': 'ghost', 'uid': 'uidZ', 'roles': ['student'], 'status': 'active'},
+        )
+        with Session(_engine) as s:
+            self.assertEqual(self._count_memberships(s), 0)
+
+    def test_remove_membership_flips_status(self):
+        sc.shadow_create_membership(self._provider(), membership_id='org1_uidA', membership_data=self._mdata())
+        sc.shadow_remove_membership(self._provider(), membership_id='org1_uidA', actor_uid='admin-1')
+        with Session(_engine) as s:
+            mem = s.execute(
+                select(Membership).where(Membership.legacy_firestore_id == 'org1_uidA')
+            ).scalar_one()
+            self.assertEqual(mem.status, 'removed')
+            self.assertEqual(mem.removed_by_firebase_uid, 'admin-1')
+            self.assertIsNotNone(mem.removed_at)
+
+    def test_partial_unique_allows_removed_plus_active_for_same_org_uid(self):
+        # The one-active-per-(org,uid) partial index covers only active/invited.
+        # A removed row + a new active row for the same (org, uid) must coexist.
+        sc.shadow_create_membership(
+            self._provider(), membership_id='org1_uidA_old',
+            membership_data=self._mdata(status='active'),
+        )
+        sc.shadow_remove_membership(self._provider(), membership_id='org1_uidA_old', actor_uid='admin-1')
+        sc.shadow_create_membership(
+            self._provider(), membership_id='org1_uidA',
+            membership_data=self._mdata(status='active'),
+        )
+        with Session(_engine) as s:
+            self.assertEqual(self._count_memberships(s), 2)  # no IntegrityError
+
+    def test_backfill_rerun_preserves_primary_class_ids(self):
+        # The upsert_membership UPDATE branch must NOT clobber primary_class_ids
+        # (which the 2c-3 shadow_add_primary_class writes).
+        sc.shadow_create_membership(self._provider(), membership_id='org1_uidA', membership_data=self._mdata())
+        class_uuid = uuid.uuid4()
+        with Session(_engine) as s:
+            mem = s.execute(
+                select(Membership).where(Membership.legacy_firestore_id == 'org1_uidA')
+            ).scalar_one()
+            mem.primary_class_ids = [class_uuid]
+            s.commit()
+        # Re-run the backfill upsert on the same doc.
+        with Session(_engine) as s:
+            backfill.upsert_membership(s, {**self._mdata(), 'id': 'org1_uidA'})
+            s.commit()
+        with Session(_engine) as s:
+            mem = s.execute(
+                select(Membership).where(Membership.legacy_firestore_id == 'org1_uidA')
+            ).scalar_one()
+            self.assertEqual(mem.primary_class_ids, [class_uuid])
 
 
 if __name__ == '__main__':
