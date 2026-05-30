@@ -90,11 +90,37 @@ def _match_anchor(
     return None
 
 
+def _new_anchor_from_extraction(d: dict, header: list[str]) -> dict:
+    anchor = {field: "" for field in header}
+    anchor.update({
+        "state": d.get("state", ""),
+        "district": d.get("district", "") or "independent",
+        "county": d.get("county", ""),
+        "school_name": d.get("school_name", ""),
+        "school_level": d.get("school_level", "") or "HS",
+        "school_type": d.get("school_type", "") or "independent",
+        "nces_school_type": d.get("nces_school_type", "") or "Nonpublic",
+        "school_url": d.get("school_url", ""),
+        "source_url": d.get("faculty_page_url") or d.get("school_url", ""),
+        "outreach_status": "not_started",
+        "sequence_step": "0",
+        "demo_booked": "N",
+        "demo_completed": "N",
+        "tried_with_class": "N",
+        "referred_admin": "N",
+        "unsubscribed": "N",
+        "notes": "non-DMV independent target from extraction ledger",
+    })
+    return anchor
+
+
 def main():
     with open(CSV_PATH, newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         header = reader.fieldnames
         anchors = list(reader)
+    if not header:
+        raise SystemExit(f"{CSV_PATH} is missing a CSV header")
     if any(r.get("teacher_first_name") for r in anchors):
         raise SystemExit(
             "teacher_dmv.csv already contains teacher rows. Rebuild the "
@@ -121,12 +147,15 @@ def main():
             d.get("county", ""),
         )
         if idx is None:
-            print(f"  WARN no anchor matched for {d['school_name']} ({d['state']})",
-                  file=sys.stderr)
-            stats["no_anchor"] += 1
-            continue
-        anchor = anchors[idx]
-        consumed_anchor_idx.add(idx)
+            anchor = _new_anchor_from_extraction(d, header)
+            print(
+                f"  INFO synthesized anchor for {d['school_name']} ({d['state']})",
+                file=sys.stderr,
+            )
+            stats["synthetic_anchor"] += 1
+        else:
+            anchor = anchors[idx]
+            consumed_anchor_idx.add(idx)
         teachers = d.get("teachers", [])
         status = d.get("extraction_status", "?")
         stats[status] += 1
