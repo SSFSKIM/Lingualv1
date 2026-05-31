@@ -6,13 +6,17 @@ Postgres unique key, the student reference is a Firebase UID (stable across
 both stores, no resolution needed), and the row has no ref-leak or sentinel
 coupling.
 
-These functions operate in Postgres-native terms: `class_id` is the resolved
-Postgres UUID and `student_uid` is the Firebase UID. They serialize rows back
-into the Firestore-shaped dicts that routes already consume (note the
-`student_firebase_uid` -> `student_uid` rename), so the eventual `deps.db`
-adapter is a thin pass-through. The adapter (a cutover-increment concern)
-resolves Firestore string `class_id`s to UUIDs via
-`resolution.resolve_legacy_id` and owns the Session lifecycle.
+These functions take Postgres-native INPUTS — `class_id` is the resolved
+Postgres UUID, `student_uid` is the Firebase UID (the router resolves the
+Firestore string `class_id` -> UUID via `resolution.resolve_legacy_id` before
+calling, and owns the Session lifecycle). But the serialized OUTPUT is
+Firestore-shaped: foreign keys (`class_id`, `student_membership_id`) are
+emitted as the PARENT's `legacy_firestore_id` (its Firestore doc id), resolved
+by JOIN in the read queries — NOT the Postgres UUID. This is the read-side
+serializer invariant (READ_CUTOVER.md §3.0): a caller that does
+`get_class(enrollment['class_id'])` must receive a Firestore class id, or the
+lookup silently misses. Emitting `str(row.class_id)` (the UUID) was the
+original twin's bug (defect D1).
 
 Nothing here is wired into a route yet.
 """
@@ -25,10 +29,7 @@ from typing import Any
 
 from sqlalchemy import select
 
-from backend.db.models.org import Enrollment
-
-# Firestore-shaped keys, in the order routes expect them.
-_RENAME = {'student_firebase_uid': 'student_uid'}
+from backend.db.models.org import Class, Enrollment, Membership
 
 
 def _utcnow() -> datetime.datetime:
@@ -36,20 +37,30 @@ def _utcnow() -> datetime.datetime:
     return datetime.datetime.now(datetime.timezone.utc)
 
 
-def _serialize(row: Enrollment) -> dict[str, Any]:
+def _serialize(
+    row: Enrollment,
+    class_legacy_id: str | None,
+    membership_legacy_id: str | None,
+) -> dict[str, Any]:
     """Render an Enrollment row as the Firestore-shaped dict routes consume.
 
     `id` is the composite Firestore key when known (legacy_firestore_id), else
     the Postgres UUID as a string, preserving the `{class_id}_{student_uid}`
     addressing routes rely on during coexistence.
+
+    `class_legacy_id` / `membership_legacy_id` are the parents'
+    `legacy_firestore_id`s (their Firestore doc ids), supplied by the JOIN in
+    the read queries. Foreign keys are emitted as these Firestore ids — never
+    the Postgres UUID — so `get_class(enrollment['class_id'])` keeps resolving
+    (READ_CUTOVER.md §3.0 / defect D1). `class_id` falls back to the stringified
+    UUID only if a class somehow lacks a legacy id (never in coexistence);
+    `student_membership_id` stays None when the FK is NULL, matching Firestore.
     """
     return {
         'id': row.legacy_firestore_id or str(row.id),
-        'class_id': str(row.class_id),
+        'class_id': class_legacy_id or str(row.class_id),
         'student_uid': row.student_firebase_uid,
-        'student_membership_id': (
-            str(row.student_membership_id) if row.student_membership_id else None
-        ),
+        'student_membership_id': membership_legacy_id,
         'status': row.status,
         'join_source': row.join_source,
         'student_number': row.student_number or '',
@@ -100,38 +111,59 @@ def create_enrollment(
     return row
 
 
+def _joined_select():
+    """SELECT an enrollment alongside its parents' Firestore doc ids.
+
+    The serializer must emit `class_id`/`student_membership_id` as the parents'
+    `legacy_firestore_id` (READ_CUTOVER.md §3.0), and no ORM relationship /
+    reverse-id helper exists — so the FK translation is a JOIN here, resolved
+    once per query (no per-row lookup). LEFT JOINs so a row is never dropped:
+    the enrollment->class FK is NOT NULL (CASCADE) so that side always matches;
+    student_membership_id is nullable, so its join may yield None.
+    """
+    return (
+        select(
+            Enrollment,
+            Class.legacy_firestore_id,
+            Membership.legacy_firestore_id,
+        )
+        .outerjoin(Class, Class.id == Enrollment.class_id)
+        .outerjoin(Membership, Membership.id == Enrollment.student_membership_id)
+    )
+
+
 def get_student_class_enrollment(
     session: Any, class_id: uuid.UUID, student_uid: str
 ) -> dict[str, Any] | None:
     """Return the (class, student) enrollment as a Firestore-shaped dict, or None."""
-    stmt = select(Enrollment).where(
+    stmt = _joined_select().where(
         Enrollment.class_id == class_id,
         Enrollment.student_firebase_uid == student_uid,
     )
-    row = session.execute(stmt).scalar_one_or_none()
-    return _serialize(row) if row is not None else None
+    result = session.execute(stmt).one_or_none()
+    return _serialize(*result) if result is not None else None
 
 
 def list_class_enrollments(
     session: Any, class_id: uuid.UUID, status: str | None = 'active'
 ) -> list[dict[str, Any]]:
     """List a class's enrollments (newest first), Firestore-shaped."""
-    stmt = select(Enrollment).where(Enrollment.class_id == class_id)
+    stmt = _joined_select().where(Enrollment.class_id == class_id)
     if status:
         stmt = stmt.where(Enrollment.status == status)
     stmt = stmt.order_by(Enrollment.updated_at.desc())
-    return [_serialize(r) for r in session.execute(stmt).scalars().all()]
+    return [_serialize(*r) for r in session.execute(stmt).all()]
 
 
 def list_student_enrollments(
     session: Any, student_uid: str, status: str | None = 'active'
 ) -> list[dict[str, Any]]:
     """List a student's enrollments (newest first), Firestore-shaped."""
-    stmt = select(Enrollment).where(Enrollment.student_firebase_uid == student_uid)
+    stmt = _joined_select().where(Enrollment.student_firebase_uid == student_uid)
     if status:
         stmt = stmt.where(Enrollment.status == status)
     stmt = stmt.order_by(Enrollment.updated_at.desc())
-    return [_serialize(r) for r in session.execute(stmt).scalars().all()]
+    return [_serialize(*r) for r in session.execute(stmt).all()]
 
 
 def _set_status(session: Any, class_id: uuid.UUID, student_uid: str, status: str) -> None:

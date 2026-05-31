@@ -2,8 +2,10 @@
 
 Drives the repo functions with a fake SQLAlchemy session to verify the
 Firestore-shaped serialization (student_firebase_uid -> student_uid rename,
-composite-key id), the status filter, and the soft-delete branch — without a
-real Postgres engine.
+composite-key id, and the §3.0 foreign-key invariant: class_id /
+student_membership_id are emitted as the parents' Firestore legacy ids, NOT the
+Postgres UUIDs), the status filter, and the soft-delete branch — without a real
+Postgres engine.
 """
 
 import datetime
@@ -15,15 +17,20 @@ from backend.db.repository import enrollments as repo
 
 
 class _FakeResult:
-    def __init__(self, scalar=None, items=None):
-        self._scalar = scalar
-        self._items = items or []
+    """Fakes the SQLAlchemy Result for both the read path (Row tuples of
+    `(Enrollment, class_legacy_id, membership_legacy_id)`) and the write path
+    (a scalar Enrollment for _set_status / lti_reactivate)."""
+
+    def __init__(self, *, scalar=None, row=None, items=None):
+        self._scalar = scalar        # write-path .scalar_one_or_none()
+        self._row = row              # read-path .one_or_none()
+        self._items = items or []    # read-path .all()
 
     def scalar_one_or_none(self):
         return self._scalar
 
-    def scalars(self):
-        return self
+    def one_or_none(self):
+        return self._row
 
     def all(self):
         return self._items
@@ -67,7 +74,7 @@ def _make_row(**overrides):
 class TestSerialize(unittest.TestCase):
     def test_renames_student_uid_and_uses_legacy_id(self):
         row = _make_row(legacy_firestore_id='class1_studentA', student_firebase_uid='studentA')
-        out = repo._serialize(row)
+        out = repo._serialize(row, 'class1', None)
         self.assertEqual(out['id'], 'class1_studentA')
         self.assertEqual(out['student_uid'], 'studentA')
         self.assertNotIn('student_firebase_uid', out)
@@ -75,15 +82,38 @@ class TestSerialize(unittest.TestCase):
     def test_id_falls_back_to_uuid_when_no_legacy_id(self):
         rid = uuid.uuid4()
         row = _make_row(id=rid, legacy_firestore_id=None)
-        out = repo._serialize(row)
+        out = repo._serialize(row, 'class1', None)
         self.assertEqual(out['id'], str(rid))
 
     def test_includes_timestamps_for_roster_enrolled_at(self):
         ts = datetime.datetime(2026, 1, 2)
         row = _make_row(created_at=ts, updated_at=ts)
-        out = repo._serialize(row)
+        out = repo._serialize(row, 'class1', None)
         self.assertEqual(out['created_at'], ts)
         self.assertEqual(out['updated_at'], ts)
+
+    def test_class_id_is_firestore_legacy_not_uuid(self):
+        """Defect D1 regression: class_id must be the JOINed Firestore class id,
+        so get_class(enrollment['class_id']) resolves — never the PG UUID."""
+        row = _make_row(class_id=uuid.uuid4())
+        out = repo._serialize(row, 'class-firestore-id', None)
+        self.assertEqual(out['class_id'], 'class-firestore-id')
+        self.assertNotEqual(out['class_id'], str(row.class_id))
+
+    def test_class_id_falls_back_to_uuid_only_without_legacy(self):
+        row = _make_row(class_id=uuid.uuid4())
+        out = repo._serialize(row, None, None)
+        self.assertEqual(out['class_id'], str(row.class_id))
+
+    def test_student_membership_id_is_legacy_or_none(self):
+        row = _make_row(student_membership_id=uuid.uuid4())
+        # JOIN resolved the membership's Firestore id:
+        self.assertEqual(
+            repo._serialize(row, 'c', 'membership-firestore-id')['student_membership_id'],
+            'membership-firestore-id',
+        )
+        # No membership FK -> None (matches the Firestore doc):
+        self.assertIsNone(repo._serialize(row, 'c', None)['student_membership_id'])
 
 
 class TestCreateEnrollment(unittest.TestCase):
@@ -103,29 +133,36 @@ class TestCreateEnrollment(unittest.TestCase):
 
 
 class TestQueries(unittest.TestCase):
-    def test_get_found_returns_serialized(self):
+    def test_get_found_returns_serialized_with_legacy_class_id(self):
         row = _make_row()
-        session = _FakeSession(_FakeResult(scalar=row))
+        session = _FakeSession(_FakeResult(row=(row, 'class1', None)))
         out = repo.get_student_class_enrollment(session, row.class_id, 'studentA')
         self.assertEqual(out['student_uid'], 'studentA')
+        self.assertEqual(out['class_id'], 'class1')
 
     def test_get_missing_returns_none(self):
-        session = _FakeSession(_FakeResult(scalar=None))
+        session = _FakeSession(_FakeResult(row=None))
         self.assertIsNone(
             repo.get_student_class_enrollment(session, uuid.uuid4(), 'ghost')
         )
 
     def test_list_class_serializes_all(self):
-        rows = [_make_row(student_firebase_uid='a'), _make_row(student_firebase_uid='b')]
+        rows = [
+            (_make_row(student_firebase_uid='a'), 'class1', 'm1'),
+            (_make_row(student_firebase_uid='b'), 'class1', None),
+        ]
         session = _FakeSession(_FakeResult(items=rows))
         out = repo.list_class_enrollments(session, uuid.uuid4())
         self.assertEqual([r['student_uid'] for r in out], ['a', 'b'])
+        self.assertEqual([r['class_id'] for r in out], ['class1', 'class1'])
+        self.assertEqual([r['student_membership_id'] for r in out], ['m1', None])
 
     def test_list_student_serializes_all(self):
-        rows = [_make_row(status='active')]
+        rows = [(_make_row(status='active'), 'class1', None)]
         session = _FakeSession(_FakeResult(items=rows))
         out = repo.list_student_enrollments(session, 'studentA')
         self.assertEqual(len(out), 1)
+        self.assertEqual(out[0]['class_id'], 'class1')
 
 
 class TestSoftDelete(unittest.TestCase):
