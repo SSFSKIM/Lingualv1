@@ -91,6 +91,13 @@ Run a single test file:
 python3 -m unittest backend.tests.test_curriculum_admin_routes -v
 cd frontend && npm run test -- --run src/pages/TeacherAssignmentBuilderPage.test.tsx
 ```
+For live Web test, or smoke test, use playwright-cli, and below test account credentials if 
+needed:
+
+School admin: testorg@testing.com,  pw lingual123
+Teacher account: testteacher@testing.com, pw lingual123, join code for example class KCRWSK
+Student account: teststudent@testing.com, pw lingual123
+
 
 ### Docker
 ```bash
