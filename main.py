@@ -158,6 +158,7 @@ from backend.avatar_chat import register_avatar_chat_routes
 from backend.route_deps import RouteDeps, _no_sql_engine
 from backend.services.audit import AuditLogger
 from backend.db.sql import get_engine, sql_enabled  # inert Postgres engine provider (ADR-0001)
+from backend.db.read_router import ReadRouter  # flag-gated PG read cutover (default OFF)
 from backend.routes.auth import create_auth_blueprint
 from backend.routes.chat import create_chat_blueprint
 from backend.routes.assessment import create_assessment_blueprint
@@ -416,8 +417,20 @@ def register_domain_blueprints():
         g.school_request_context = context
         return context
 
+    # Shared Postgres engine provider: the real lazy engine when a Cloud SQL
+    # target is configured, else the None-returning sentinel (so the provider's
+    # "None means unavailable -> fall back to Firestore" contract holds and
+    # get_engine() never raises pre-fork). Used by BOTH the read router and the
+    # dual-write sql_engine dep.
+    sql_engine_provider = get_engine if sql_enabled() else _no_sql_engine
+
     deps = RouteDeps(
-        db=db,
+        # Wrap the Firestore `database` module in the read-cutover router. With
+        # every READ_PG_* flag OFF (default) it is a pure pass-through — routes
+        # behave exactly as today. A flag set to 'shadow'/'1' routes that entity
+        # family's reads to Postgres (fail-open). Reads stay 100% Firestore until
+        # a flag flips. See backend/db/read_router.py + READ_CUTOVER.md.
+        db=ReadRouter(db, sql_engine=sql_engine_provider),
         firebase_auth=firebase_auth,
         get_current_user_uid=get_current_user_uid,
         get_openai_client=get_openai_client,
@@ -440,7 +453,7 @@ def register_domain_blueprints():
         # call (post-fork). Consumed by the slice-2b enrollment dual-write
         # (fail-open SHADOW, gated on DUAL_WRITE_ENROLLMENTS); Firestore stays
         # the system of record.
-        sql_engine=(get_engine if sql_enabled() else _no_sql_engine),
+        sql_engine=sql_engine_provider,
     )
 
     # Surface the dual-write toggle at startup: confirm when ON, warn loudly when
@@ -463,6 +476,19 @@ def register_domain_blueprints():
                 '[startup warning] DUAL_WRITE_SCHOOL_CHAIN=1 but no Cloud SQL target '
                 '(INSTANCE_CONNECTION_NAME/DATABASE_URL) set — parent-chain shadow writes '
                 'are a no-op until one is configured'
+            )
+
+    # Read-cutover flag (default OFF). 'shadow' = Firestore authoritative + PG
+    # parity compare logged; '1' = PG authoritative, fail-open to Firestore.
+    _read_org = os.environ.get('READ_PG_ORGANIZATIONS', '')
+    if _read_org in ('shadow', '1'):
+        if sql_enabled():
+            print(f'[startup] READ_PG_ORGANIZATIONS={_read_org} — organization reads '
+                  f'{"shadow-compared against" if _read_org == "shadow" else "served from"} Postgres')
+        else:
+            print(
+                f'[startup warning] READ_PG_ORGANIZATIONS={_read_org} but no Cloud SQL '
+                'target set — organization reads stay on Firestore (router fails open)'
             )
 
     app.register_blueprint(create_auth_blueprint(deps))
