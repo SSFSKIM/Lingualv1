@@ -1,9 +1,10 @@
-"""Tier 1 (no DB): read-cutover router + organizations read adapter.
+"""Tier 1 (no DB): read-cutover router + organizations/memberships read adapters.
 
 Verifies the 3-state per-entity routing (off / shadow / '1'), fail-open,
-pass-through, the shadow parity diff helpers, and the org serializer's
-Firestore-shape (the suspended_by_uid inverse rename, school_admin_uids
-omission). The PG Session is stubbed via _pg_read so no engine is needed.
+pass-through, the shadow parity diff helpers, and the serializers' Firestore-shape
+(the *_uid inverse renames, school_admin_uids omission, the membership org-JOIN
+enrichment + primary_class_ids UUID->legacy translation). The PG Session is stubbed
+via _pg_read / fake sessions so no engine is needed.
 """
 
 import datetime
@@ -15,8 +16,8 @@ from unittest import mock
 
 from backend.db import read_router
 from backend.db.read_router import ReadRouter, _diff, _diff_dict, _diff_list, _norm
-from backend.db.models.org import Organization
-from backend.db.repository import organizations_read
+from backend.db.models.org import Membership, Organization
+from backend.db.repository import memberships_read, organizations_read
 
 
 _FLAG = 'READ_PG_ORGANIZATIONS'
@@ -394,6 +395,149 @@ class TestOrganizationsReadMoreAdapters(unittest.TestCase):
                 _FlexSession(_FlexResult(scalar_one=42)), 'active'),
             42,
         )
+
+
+def _make_membership(**o):
+    m = Membership()
+    m.id = o.get('id', uuid.uuid4())
+    m.legacy_firestore_id = o.get('legacy_firestore_id', 'mem-1')
+    m.org_id = o.get('org_id', uuid.uuid4())
+    m.firebase_uid = o.get('firebase_uid', 'user-1')
+    m.roles = o.get('roles', ['teacher'])
+    m.status = o.get('status', 'active')
+    m.primary_class_ids = o.get('primary_class_ids', [])
+    m.removed_at = o.get('removed_at', None)
+    m.removed_by_firebase_uid = o.get('removed_by_firebase_uid', None)
+    m.created_at = o.get('created_at', datetime.datetime(2026, 5, 30))
+    m.updated_at = o.get('updated_at', datetime.datetime(2026, 5, 30))
+    return m
+
+
+class _SeqResult:
+    """One execute() result exposing both .one_or_none() and .all()."""
+    def __init__(self, rows):
+        self._rows = rows
+
+    def one_or_none(self):
+        return self._rows[0] if self._rows else None
+
+    def all(self):
+        return self._rows
+
+
+class _SeqSession:
+    """Returns queued results in order across successive execute() calls (the
+    membership adapters issue the row query first, then the class-id map query)."""
+    def __init__(self, *results):
+        self._results = list(results)
+        self._n = 0
+
+    def execute(self, stmt):
+        r = self._results[self._n] if self._n < len(self._results) else _SeqResult([])
+        self._n += 1
+        return r
+
+
+class TestMembershipsReadAdapter(unittest.TestCase):
+    def test_get_membership_inverse_renames_and_legacy_ids(self):
+        m = _make_membership(
+            legacy_firestore_id='mem-7', firebase_uid='u-1',
+            removed_by_firebase_uid='admin-9', primary_class_ids=[],
+        )
+        sess = _SeqSession(_SeqResult([(m, 'org-fs-1')]))  # no class query (empty ids)
+        out = memberships_read.get_membership(sess, 'mem-7')
+        self.assertEqual(out['id'], 'mem-7')
+        self.assertEqual(out['org_id'], 'org-fs-1')      # org UUID FK -> legacy id
+        self.assertEqual(out['uid'], 'u-1')              # firebase_uid -> uid
+        self.assertEqual(out['removed_by_uid'], 'admin-9')  # *_firebase_uid -> *_uid
+        self.assertNotIn('firebase_uid', out)
+        self.assertEqual(out['primary_class_ids'], [])
+
+    def test_get_membership_translates_primary_class_ids_in_order(self):
+        ua, ub = uuid.uuid4(), uuid.uuid4()
+        m = _make_membership(primary_class_ids=[ua, ub])
+        sess = _SeqSession(
+            _SeqResult([(m, 'org-fs-1')]),
+            _SeqResult([(ub, 'cls-b'), (ua, 'cls-a')]),  # map returns out of order
+        )
+        out = memberships_read.get_membership(sess, 'mem-1')
+        self.assertEqual(out['primary_class_ids'], ['cls-a', 'cls-b'])  # array order preserved
+
+    def test_get_membership_missing_returns_none(self):
+        self.assertIsNone(memberships_read.get_membership(_SeqSession(_SeqResult([])), 'ghost'))
+
+    def test_get_user_memberships_enriches_and_sorts_by_role(self):
+        teacher = _make_membership(legacy_firestore_id='m-t', roles=['teacher'])
+        admin = _make_membership(legacy_firestore_id='m-a', roles=['school_admin'])
+        rows = [
+            (teacher, 'org-fs-1', 'Beta School', 'school'),
+            (admin, 'org-fs-1', 'Beta School', 'school'),
+        ]
+        out = memberships_read.get_user_memberships(_SeqSession(_SeqResult(rows)), 'u-1')
+        # school_admin (priority 0) sorts before teacher (priority 1):
+        self.assertEqual([m['id'] for m in out], ['m-a', 'm-t'])
+        self.assertEqual(out[0]['orgId'], 'org-fs-1')
+        self.assertEqual(out[0]['orgName'], 'Beta School')
+        self.assertEqual(out[0]['orgType'], 'school')
+        self.assertEqual(out[0]['primaryClassIds'], [])
+
+    def test_get_user_memberships_unresolved_class_uuid_falls_back_to_str(self):
+        u = uuid.uuid4()
+        m = _make_membership(legacy_firestore_id='m-1', primary_class_ids=[u])
+        sess = _SeqSession(
+            _SeqResult([(m, 'org-fs-1', 'Org', 'school')]),
+            _SeqResult([]),  # class map empty -> uuid unresolved
+        )
+        out = memberships_read.get_user_memberships(sess, 'u-1')
+        self.assertEqual(out[0]['primaryClassIds'], [str(u)])
+
+
+class TestMembershipRouting(unittest.TestCase):
+    def setUp(self):
+        os.environ.pop('READ_PG_MEMBERSHIPS', None)
+        self.addCleanup(lambda: os.environ.pop('READ_PG_MEMBERSHIPS', None))
+        read_router._shadow_stats.clear()
+        self.addCleanup(read_router._shadow_stats.clear)
+
+    def test_overrides_passthrough_when_off(self):
+        fs = types.SimpleNamespace(
+            get_membership=lambda mid: {'id': mid, 'src': 'fs'},
+            get_user_memberships=lambda uid: [{'id': 'm1', 'uid': uid}],
+        )
+        router = ReadRouter(fs, sql_engine=lambda: object())
+        self.assertEqual(router.get_membership('m1'), {'id': 'm1', 'src': 'fs'})
+        self.assertEqual(router.get_user_memberships('u1')[0]['uid'], 'u1')
+
+    def test_get_user_memberships_shadow_diffs_by_id_set(self):
+        os.environ['READ_PG_MEMBERSHIPS'] = 'shadow'
+        fs = types.SimpleNamespace(
+            get_user_memberships=lambda uid: [{'id': 'm1'}, {'id': 'm2'}])
+        router = ReadRouter(fs, sql_engine=lambda: object())
+        # PG missing m2 -> the id-set diff (the role-guard parity) must surface it
+        with mock.patch.object(ReadRouter, '_pg_read', lambda self, pc, eng: [{'id': 'm1'}]):
+            with self.assertLogs('backend.db.read_router', level='WARNING') as cm:
+                out = router.get_user_memberships('u1')
+        self.assertEqual(out, [{'id': 'm1'}, {'id': 'm2'}])  # Firestore authoritative
+        joined = ' '.join(cm.output)
+        self.assertIn('missing_in_pg', joined)
+        self.assertIn("'m2'", joined)
+
+    def test_get_membership_shadow_allowlists_deferred_primary_class_ids(self):
+        os.environ['READ_PG_MEMBERSHIPS'] = 'shadow'
+        fs = types.SimpleNamespace(
+            get_membership=lambda mid: {'id': mid, 'roles': ['teacher'],
+                                        'primary_class_ids': ['cls-a']})
+        router = ReadRouter(fs, sql_engine=lambda: object())
+        # PG returns [] for the deferred field — must NOT be flagged as a mismatch
+        with mock.patch.object(
+            ReadRouter, '_pg_read',
+            lambda self, pc, eng: {'id': 'm1', 'roles': ['teacher'], 'primary_class_ids': []},
+        ):
+            with self.assertLogs('backend.db.read_router', level='WARNING') as cm:
+                router.get_membership('m1')
+        joined = ' '.join(cm.output)
+        self.assertNotIn('MISMATCH', joined)            # allowlisted -> clean
+        self.assertIn('1 compared, 0 mismatched', joined)
 
 
 if __name__ == '__main__':

@@ -58,6 +58,19 @@ _ORG_SHADOW_IGNORE = frozenset(
     {'school_admin_uids', 'last_activity_at', 'created_at', 'updated_at'}
 )
 
+# Known-divergent membership keys to allowlist in point-get shadow parity:
+#   primary_class_ids - DEFERRED to [] by the backfill (upsert_membership) while
+#                       the live add/remove path mirrors it; a backfill gap (D5),
+#                       not benign drift — a flip prereq, surfaced via parity_report
+#                       (a clean shadow can't prove it). No UI consumer.
+#   created_at/updated_at/removed_at - clock skew (Firestore SERVER_TIMESTAMP vs PG
+#                       now()/app-clock), same as the org rule.
+# (get_user_memberships is a LIST read -> diffed by id-set, so it never reaches
+# this field-level allowlist; the id-set IS the role-guard parity that matters.)
+_MEMBERSHIP_SHADOW_IGNORE = frozenset(
+    {'primary_class_ids', 'created_at', 'updated_at', 'removed_at'}
+)
+
 
 def _norm(value: Any) -> Any:
     """Normalize a value for cross-store comparison: datetimes -> ISO string, and
@@ -253,4 +266,32 @@ class ReadRouter:
             lambda: self._fs.list_organizations(**kwargs),
             pg_call,
             extract=lambda r: (r or {}).get('items', []),
+        )
+
+    def get_membership(self, membership_id):
+        """memberships point-get, routed by READ_PG_MEMBERSHIPS."""
+        def pg_call(session):
+            from backend.db.repository import memberships_read
+            return memberships_read.get_membership(session, membership_id)
+
+        return self._route_read(
+            'READ_PG_MEMBERSHIPS',
+            lambda: self._fs.get_membership(membership_id),
+            pg_call,
+            ignore=_MEMBERSHIP_SHADOW_IGNORE,
+        )
+
+    def get_user_memberships(self, uid):
+        """User membership list (the role-guard feed), routed by READ_PG_MEMBERSHIPS.
+        Shadow compares the membership id-SET — the parity that actually gates auth
+        (which orgs/roles a user has). Per-row field parity (roles, primaryClassIds)
+        is a follow-up; primaryClassIds is a known backfill gap (D5)."""
+        def pg_call(session):
+            from backend.db.repository import memberships_read
+            return memberships_read.get_user_memberships(session, uid)
+
+        return self._route_read(
+            'READ_PG_MEMBERSHIPS',
+            lambda: self._fs.get_user_memberships(uid),
+            pg_call,
         )
