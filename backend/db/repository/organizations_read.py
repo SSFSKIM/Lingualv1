@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from backend.db.models.org import Organization
 
@@ -75,3 +75,56 @@ def get_organization(session: Any, org_id: str) -> dict[str, Any] | None:
     stmt = select(Organization).where(Organization.legacy_firestore_id == org_id)
     row = session.execute(stmt).scalar_one_or_none()
     return _serialize(row) if row is not None else None
+
+
+def get_org_by_teacher_invite_code(session: Any, code: str) -> dict[str, Any] | None:
+    """Look up an ACTIVE org by its active teacher invite code (teacher-join flow).
+
+    Mirrors the Firestore reader's three-predicate filter exactly — code match +
+    `teacher_invite_code_active` + `status='active'` — so a deactivated code or a
+    suspended org never resolves. Full org shape (callers read org.name / status).
+    """
+    stmt = (
+        select(Organization)
+        .where(Organization.teacher_invite_code == code)
+        .where(Organization.teacher_invite_code_active.is_(True))
+        .where(Organization.status == 'active')
+        .limit(1)
+    )
+    row = session.execute(stmt).scalars().first()
+    return _serialize(row) if row is not None else None
+
+
+def search_organizations(session: Any, query: str, *, limit: int = 10) -> list[dict[str, Any]]:
+    """Active-org name-prefix search — the slim metadata projection (no PII).
+
+    Matches the Firestore reader: `status='active'` AND `name_lower` prefix,
+    ordered by `name_lower`, limited. `startswith(autoescape=True)` escapes any
+    `%`/`_` so a literal query never becomes a wildcard. Empty query -> [].
+    """
+    q = (query or '').strip().lower()
+    if not q:
+        return []
+    stmt = (
+        select(Organization)
+        .where(Organization.status == 'active')
+        .where(Organization.name_lower.startswith(q, autoescape=True))
+        .order_by(Organization.name_lower)
+        .limit(limit)
+    )
+    return [
+        {
+            'id': r.legacy_firestore_id or str(r.id),
+            'name': r.name or '',
+            'city': r.city,
+            'state': r.state,
+            'school_type': r.school_type,
+        }
+        for r in session.execute(stmt).scalars().all()
+    ]
+
+
+def count_organizations_by_status(session: Any, status: str) -> int:
+    """COUNT of orgs in a status (lingual-admin dashboard tiles)."""
+    stmt = select(func.count()).select_from(Organization).where(Organization.status == status)
+    return int(session.execute(stmt).scalar_one())

@@ -79,6 +79,11 @@ class TestDiffHelpers(unittest.TestCase):
         self.assertEqual(_diff([{'id': 'a'}], [{'id': 'a'}], frozenset()), {})
         self.assertEqual(_diff({'k': 1}, {'k': 1}, frozenset()), {})
 
+    def test_diff_scalar_counts(self):
+        # a COUNT reader returns an int — must not crash the dict path
+        self.assertEqual(_diff(5, 5, frozenset()), {})
+        self.assertEqual(_diff(5, 6, frozenset()), {'<value>': (5, 6)})
+
 
 class TestPassthrough(unittest.TestCase):
     def test_unknown_attr_and_constants_proxy_to_firestore(self):
@@ -172,6 +177,18 @@ class TestRouting(unittest.TestCase):
         router = ReadRouter(fs, sql_engine=lambda: object())
         self.assertEqual(router.get_organization('org-1'), {'id': 'org-1', 'src': 'fs'})
 
+    def test_new_org_overrides_passthrough_when_off(self):
+        # signatures must match the Firestore readers so flag-OFF is transparent
+        fs = types.SimpleNamespace(
+            get_org_by_teacher_invite_code=lambda c: {'id': 'o', 'code': c},
+            search_organizations=lambda q, limit=10: [{'id': 'o', 'q': q, 'limit': limit}],
+            count_organizations_by_status=lambda s: 7,
+        )
+        router = ReadRouter(fs, sql_engine=lambda: object())
+        self.assertEqual(router.get_org_by_teacher_invite_code('X')['code'], 'X')
+        self.assertEqual(router.search_organizations('a', limit=3)[0], {'id': 'o', 'q': 'a', 'limit': 3})
+        self.assertEqual(router.count_organizations_by_status('active'), 7)
+
 
 def _make_org(**overrides):
     org = Organization()
@@ -259,6 +276,65 @@ class TestOrganizationsReadAdapter(unittest.TestCase):
         )
         self.assertIsNone(
             organizations_read.get_organization(_FakeOrgSession(None), 'ghost')
+        )
+
+
+class _FlexResult:
+    def __init__(self, *, scalar_one=None, first=None, all_=None):
+        self._scalar_one = scalar_one
+        self._first = first
+        self._all = all_ or []
+
+    def scalar_one(self):
+        return self._scalar_one
+
+    def scalars(self):
+        return self
+
+    def first(self):
+        return self._first
+
+    def all(self):
+        return self._all
+
+
+class _FlexSession:
+    def __init__(self, result):
+        self._r = result
+
+    def execute(self, stmt):
+        return self._r
+
+
+class TestOrganizationsReadMoreAdapters(unittest.TestCase):
+    def test_invite_code_found_and_missing(self):
+        org = _make_org(legacy_firestore_id='org-fs-1')
+        self.assertEqual(
+            organizations_read.get_org_by_teacher_invite_code(
+                _FlexSession(_FlexResult(first=org)), 'ABC')['id'],
+            'org-fs-1',
+        )
+        self.assertIsNone(
+            organizations_read.get_org_by_teacher_invite_code(
+                _FlexSession(_FlexResult(first=None)), 'nope')
+        )
+
+    def test_search_returns_slim_projection(self):
+        a = _make_org(legacy_firestore_id='o1', name='Alpha', city='NYC', state='NY', school_type='public')
+        b = _make_org(legacy_firestore_id='o2', name='Alphabet')
+        out = organizations_read.search_organizations(_FlexSession(_FlexResult(all_=[a, b])), 'alph')
+        self.assertEqual([r['id'] for r in out], ['o1', 'o2'])
+        self.assertEqual(set(out[0].keys()), {'id', 'name', 'city', 'state', 'school_type'})
+        self.assertEqual(out[0]['city'], 'NYC')
+
+    def test_search_empty_query_short_circuits(self):
+        self.assertEqual(organizations_read.search_organizations(None, '   '), [])
+
+    def test_count_returns_int(self):
+        self.assertEqual(
+            organizations_read.count_organizations_by_status(
+                _FlexSession(_FlexResult(scalar_one=42)), 'active'),
+            42,
         )
 
 

@@ -119,5 +119,52 @@ class TestOrganizationsReadPG(unittest.TestCase):
         self.assertEqual(out['suspended_by_uid'], 'admin-uid')
 
 
+class TestOrganizationsReadMoreAdaptersPG(unittest.TestCase):
+    """Exercises the real SQL of the search / invite-code / count adapters
+    (startswith/LIKE escaping, the 3-predicate invite filter, COUNT) — which the
+    Tier-1 fake sessions build but never execute."""
+
+    def setUp(self):
+        with Session(_engine) as s:
+            s.execute(text('DELETE FROM organizations'))
+            s.commit()
+        with Session(_engine) as s:
+            backfill.upsert_organization(s, {
+                'id': 'a1', 'name': 'Alpha School', 'name_lower': 'alpha school',
+                'status': 'active', 'teacher_invite_code': 'ABC',
+                'teacher_invite_code_active': True, 'city': 'NYC', 'state': 'NY',
+                'school_type': 'public'})
+            backfill.upsert_organization(s, {
+                'id': 'a2', 'name': 'Alphabet Inc', 'name_lower': 'alphabet inc',
+                'status': 'active'})
+            backfill.upsert_organization(s, {
+                'id': 'b1', 'name': 'Beta School', 'name_lower': 'beta school',
+                'status': 'suspended', 'teacher_invite_code': 'XYZ',
+                'teacher_invite_code_active': True})
+            s.commit()
+
+    def test_search_active_prefix_slim(self):
+        with Session(_engine) as s:
+            out = organizations_read.search_organizations(s, 'alph')
+        self.assertEqual(sorted(r['id'] for r in out), ['a1', 'a2'])
+        self.assertEqual(set(out[0]), {'id', 'name', 'city', 'state', 'school_type'})
+
+    def test_search_excludes_suspended(self):
+        with Session(_engine) as s:
+            self.assertEqual(organizations_read.search_organizations(s, 'beta'), [])
+
+    def test_invite_code_resolves_active_org_only(self):
+        with Session(_engine) as s:
+            self.assertEqual(
+                organizations_read.get_org_by_teacher_invite_code(s, 'ABC')['id'], 'a1')
+            # the suspended org's (active) code must NOT resolve:
+            self.assertIsNone(organizations_read.get_org_by_teacher_invite_code(s, 'XYZ'))
+
+    def test_count_by_status(self):
+        with Session(_engine) as s:
+            self.assertEqual(organizations_read.count_organizations_by_status(s, 'active'), 2)
+            self.assertEqual(organizations_read.count_organizations_by_status(s, 'suspended'), 1)
+
+
 if __name__ == '__main__':
     unittest.main()

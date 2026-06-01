@@ -108,7 +108,11 @@ def _diff(fs: Any, pg: Any, ignore: frozenset) -> dict:
     if isinstance(fs, list) or isinstance(pg, list):
         return _diff_list(fs if isinstance(fs, list) else None,
                           pg if isinstance(pg, list) else None, ignore)
-    return _diff_dict(fs, pg, ignore)
+    if isinstance(fs, dict) or isinstance(pg, dict):
+        return _diff_dict(fs, pg, ignore)
+    # scalar (e.g. a COUNT): direct compare after normalization.
+    a, b = _norm(fs), _norm(pg)
+    return {} if a == b else {'<value>': (a, b)}
 
 
 class ReadRouter:
@@ -190,4 +194,43 @@ class ReadRouter:
             lambda: self._fs.get_organization(org_id),
             pg_call,
             ignore=_ORG_SHADOW_IGNORE,
+        )
+
+    def get_org_by_teacher_invite_code(self, code):
+        """Teacher-join invite-code lookup, routed by READ_PG_ORGANIZATIONS.
+        (§3.0a: required for entity-atomicity — a teacher-join request must not
+        read the org entity from two stores.)"""
+        def pg_call(session):
+            from backend.db.repository import organizations_read
+            return organizations_read.get_org_by_teacher_invite_code(session, code)
+
+        return self._route_read(
+            'READ_PG_ORGANIZATIONS',
+            lambda: self._fs.get_org_by_teacher_invite_code(code),
+            pg_call,
+            ignore=_ORG_SHADOW_IGNORE,
+        )
+
+    def search_organizations(self, query, *, limit=10):
+        """Active-org name-prefix search (slim list), routed by READ_PG_ORGANIZATIONS."""
+        def pg_call(session):
+            from backend.db.repository import organizations_read
+            return organizations_read.search_organizations(session, query, limit=limit)
+
+        return self._route_read(
+            'READ_PG_ORGANIZATIONS',
+            lambda: self._fs.search_organizations(query, limit=limit),
+            pg_call,
+        )
+
+    def count_organizations_by_status(self, status):
+        """Org COUNT by status (dashboard tile), routed by READ_PG_ORGANIZATIONS."""
+        def pg_call(session):
+            from backend.db.repository import organizations_read
+            return organizations_read.count_organizations_by_status(session, status)
+
+        return self._route_read(
+            'READ_PG_ORGANIZATIONS',
+            lambda: self._fs.count_organizations_by_status(status),
+            pg_call,
         )
