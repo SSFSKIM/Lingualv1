@@ -177,6 +177,22 @@ class TestRouting(unittest.TestCase):
         router = ReadRouter(fs, sql_engine=lambda: object())
         self.assertEqual(router.get_organization('org-1'), {'id': 'org-1', 'src': 'fs'})
 
+    def test_list_organizations_shadow_compares_items_by_id(self):
+        os.environ[_FLAG] = 'shadow'
+        fs_result = {'items': [{'id': 'a'}, {'id': 'b'}], 'next_cursor': None}
+        pg_result = {'items': [{'id': 'a'}, {'id': 'c'}], 'next_cursor': {'x': 1}}
+        with mock.patch.object(ReadRouter, '_pg_read', lambda self, pc, eng: pg_result):
+            with self.assertLogs('backend.db.read_router', level='WARNING') as cm:
+                out = self.router._route_read(
+                    _FLAG, lambda: fs_result, lambda s: pg_result,
+                    extract=lambda r: (r or {}).get('items', []))
+        self.assertEqual(out, fs_result)  # Firestore returned unchanged (incl. next_cursor)
+        # extract -> items diffed by id: 'b' missing in pg, 'c' extra in pg
+        joined = ' '.join(cm.output)
+        self.assertIn('missing_in_pg', joined)
+        self.assertIn("'b'", joined)
+        self.assertIn("'c'", joined)
+
     def test_new_org_overrides_passthrough_when_off(self):
         # signatures must match the Firestore readers so flag-OFF is transparent
         fs = types.SimpleNamespace(
@@ -304,6 +320,48 @@ class _FlexSession:
 
     def execute(self, stmt):
         return self._r
+
+
+class _ListResult:
+    """Serves both `.scalars().all()` (org rows) and `.all()` (admin tuples)."""
+    def __init__(self, items):
+        self._items = items
+
+    def scalars(self):
+        return self
+
+    def all(self):
+        return self._items
+
+
+class _ListSession:
+    """1st execute -> org rows; 2nd -> (org_uuid, uid) admin tuples."""
+    def __init__(self, org_rows, admin_rows):
+        self._org_rows = org_rows
+        self._admin_rows = admin_rows
+        self._n = 0
+
+    def execute(self, stmt):
+        self._n += 1
+        return _ListResult(self._org_rows if self._n == 1 else self._admin_rows)
+
+
+class TestListOrganizationsAdapter(unittest.TestCase):
+    def test_items_cursor_and_derived_admin_uids(self):
+        o1 = _make_org(legacy_firestore_id='o1', name='Alpha', name_lower='alpha')
+        o2 = _make_org(legacy_firestore_id='o2', name='Beta', name_lower='beta')
+        admin = [(o1.id, 'sa1'), (o1.id, 'sa2')]  # o1 has two school admins, o2 none
+        out = organizations_read.list_organizations(_ListSession([o1, o2], admin), limit=2)
+        self.assertEqual([i['id'] for i in out['items']], ['o1', 'o2'])
+        self.assertEqual(out['items'][0]['school_admin_uids'], ['sa1', 'sa2'])
+        self.assertEqual(out['items'][1]['school_admin_uids'], [])
+        # the documented quirk: a full page (len == limit) always sets the cursor
+        self.assertEqual(out['next_cursor'], {'name_lower': 'beta', 'id': 'o2'})
+
+    def test_partial_page_has_no_cursor(self):
+        o1 = _make_org(legacy_firestore_id='o1', name_lower='alpha')
+        out = organizations_read.list_organizations(_ListSession([o1], []), limit=25)
+        self.assertIsNone(out['next_cursor'])
 
 
 class TestOrganizationsReadMoreAdapters(unittest.TestCase):

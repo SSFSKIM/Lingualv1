@@ -166,5 +166,56 @@ class TestOrganizationsReadMoreAdaptersPG(unittest.TestCase):
             self.assertEqual(organizations_read.count_organizations_by_status(s, 'suspended'), 1)
 
 
+class TestListOrganizationsPG(unittest.TestCase):
+    """Real keyset pagination + status filter + the derived school_admin_uids
+    subquery (roles @> ARRAY['school_admin']) — none of which the Tier-1 fakes
+    execute."""
+
+    def setUp(self):
+        with Session(_engine) as s:
+            s.execute(text('DELETE FROM memberships'))
+            s.execute(text('DELETE FROM organizations'))
+            s.commit()
+        from backend.db.models.org import Membership
+        with Session(_engine) as s:
+            a = backfill.upsert_organization(s, {
+                'id': 'a', 'name': 'Alpha', 'name_lower': 'alpha',
+                'status': 'active', 'school_type': 'public'})
+            b = backfill.upsert_organization(s, {
+                'id': 'b', 'name': 'Beta', 'name_lower': 'beta', 'status': 'active'})
+            backfill.upsert_organization(s, {
+                'id': 'c', 'name': 'Gamma', 'name_lower': 'gamma', 'status': 'suspended'})
+            s.flush()
+            s.add_all([
+                Membership(org_id=a.id, firebase_uid='sa1', roles=['school_admin'],
+                           status='active', legacy_firestore_id='m1'),
+                Membership(org_id=a.id, firebase_uid='sa2', roles=['school_admin', 'teacher'],
+                           status='active', legacy_firestore_id='m2'),
+                Membership(org_id=a.id, firebase_uid='t1', roles=['teacher'],
+                           status='active', legacy_firestore_id='m3'),
+                Membership(org_id=b.id, firebase_uid='sa3', roles=['school_admin'],
+                           status='active', legacy_firestore_id='m4'),
+            ])
+            s.commit()
+
+    def test_keyset_pagination_and_derived_admin_uids(self):
+        with Session(_engine) as s:
+            page1 = organizations_read.list_organizations(s, limit=2)
+        # ordered by name_lower: alpha, beta (gamma is page 2)
+        self.assertEqual([i['id'] for i in page1['items']], ['a', 'b'])
+        self.assertEqual(sorted(page1['items'][0]['school_admin_uids']), ['sa1', 'sa2'])
+        self.assertEqual(page1['items'][1]['school_admin_uids'], ['sa3'])
+        self.assertEqual(page1['next_cursor'], {'name_lower': 'beta', 'id': 'b'})
+        with Session(_engine) as s:
+            page2 = organizations_read.list_organizations(s, limit=2, cursor=page1['next_cursor'])
+        self.assertEqual([i['id'] for i in page2['items']], ['c'])
+        self.assertIsNone(page2['next_cursor'])  # partial page -> no cursor
+
+    def test_status_filter(self):
+        with Session(_engine) as s:
+            active = organizations_read.list_organizations(s, status='active', limit=25)
+        self.assertEqual(sorted(i['id'] for i in active['items']), ['a', 'b'])
+
+
 if __name__ == '__main__':
     unittest.main()

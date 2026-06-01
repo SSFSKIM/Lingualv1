@@ -141,16 +141,19 @@ class ReadRouter:
             )
             return pg_call(session)
 
-    def _shadow_compare(self, flag, fs_result, pg_call, engine, ignore) -> None:
+    def _shadow_compare(self, flag, fs_result, pg_call, engine, ignore, extract=None) -> None:
         """Read PG, compare to the Firestore result, log mismatches + a periodic
         rolling summary. Never raises, never mutates the response (Firestore stays
-        authoritative in shadow)."""
+        authoritative in shadow). `extract` maps each result to the comparable part
+        (e.g. a paginated reader's `items` list) without changing what's returned."""
         try:
             pg_result = self._pg_read(pg_call, engine)
         except Exception:  # noqa: BLE001 — a broken shadow read must not affect the request
             _log.exception('shadow-read %s: PG side errored', flag)
             return
-        diff = _diff(fs_result, pg_result, ignore)
+        fs_cmp = extract(fs_result) if extract else fs_result
+        pg_cmp = extract(pg_result) if extract else pg_result
+        diff = _diff(fs_cmp, pg_cmp, ignore)
         stats = _shadow_stats.setdefault(flag, [0, 0])
         stats[0] += 1
         if diff:
@@ -163,8 +166,9 @@ class ReadRouter:
                 flag, stats[0], stats[1],
             )
 
-    def _route_read(self, flag, fs_call, pg_call, *, ignore=frozenset()):
-        """The 3-state per-entity gate. See module docstring."""
+    def _route_read(self, flag, fs_call, pg_call, *, ignore=frozenset(), extract=None):
+        """The 3-state per-entity gate. See module docstring. `extract` (shadow
+        only) maps each result to its comparable part for paginated/wrapped reads."""
         mode = os.environ.get(flag, '')
         if mode not in ('shadow', '1'):
             return fs_call()
@@ -173,7 +177,7 @@ class ReadRouter:
             return fs_call()
         if mode == 'shadow':
             fs_result = fs_call()
-            self._shadow_compare(flag, fs_result, pg_call, engine, ignore)
+            self._shadow_compare(flag, fs_result, pg_call, engine, ignore, extract)
             return fs_result
         try:                                     # mode == '1': PG authoritative
             return self._pg_read(pg_call, engine)
@@ -233,4 +237,20 @@ class ReadRouter:
             'READ_PG_ORGANIZATIONS',
             lambda: self._fs.count_organizations_by_status(status),
             pg_call,
+        )
+
+    def list_organizations(self, **kwargs):
+        """Paged lingual-admin org list (returns {items, next_cursor}), routed by
+        READ_PG_ORGANIZATIONS. Shadow compares the `items` by id-set (the whole
+        {items,next_cursor} dict isn't a meaningful field-level diff); per-item
+        field parity (e.g. memberCount) is a follow-up refinement."""
+        def pg_call(session):
+            from backend.db.repository import organizations_read
+            return organizations_read.list_organizations(session, **kwargs)
+
+        return self._route_read(
+            'READ_PG_ORGANIZATIONS',
+            lambda: self._fs.list_organizations(**kwargs),
+            pg_call,
+            extract=lambda r: (r or {}).get('items', []),
         )

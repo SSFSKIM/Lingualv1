@@ -20,9 +20,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, tuple_
 
-from backend.db.models.org import Organization
+from backend.db.models.org import Membership, Organization
+
+_PAGE_SIZE = 25  # mirrors database.LINGUAL_ADMIN_ORGS_PAGE_SIZE
 
 
 def _serialize(row: Organization) -> dict[str, Any]:
@@ -128,3 +130,85 @@ def count_organizations_by_status(session: Any, status: str) -> int:
     """COUNT of orgs in a status (lingual-admin dashboard tiles)."""
     stmt = select(func.count()).select_from(Organization).where(Organization.status == status)
     return int(session.execute(stmt).scalar_one())
+
+
+def _school_admin_uids_for(session: Any, org_uuids: list) -> dict:
+    """Derive `school_admin_uids` per org from ACTIVE school_admin memberships.
+
+    The Firestore org doc stores this denormalized; PG derives it (defect D3 — it
+    drives lingual-admin `memberCount`). One grouped query covers the whole page,
+    so no N+1. `roles.contains(['school_admin'])` -> the PG `roles @> ARRAY[...]`.
+    """
+    if not org_uuids:
+        return {}
+    stmt = (
+        select(Membership.org_id, Membership.firebase_uid)
+        .where(Membership.org_id.in_(org_uuids))
+        .where(Membership.status == 'active')
+        .where(Membership.roles.contains(['school_admin']))
+    )
+    out: dict[Any, list[str]] = {}
+    for org_uuid, uid in session.execute(stmt).all():
+        out.setdefault(org_uuid, []).append(uid)
+    return out
+
+
+def list_organizations(
+    session: Any,
+    *,
+    status: str | None = None,
+    school_type: str | None = None,
+    country: str | None = None,
+    public_or_private: str | None = None,
+    created_after: Any = None,
+    created_before: Any = None,
+    cursor: dict | None = None,
+    limit: int = _PAGE_SIZE,
+) -> dict[str, Any]:
+    """Paged lingual-admin org list -> ``{'items': [...], 'next_cursor': {...}|None}``.
+
+    Mirrors the Firestore reader: keyset on ``(name_lower, doc-id)`` where the PG
+    doc-id is ``legacy_firestore_id`` (Firestore's ``__name__``); the documented
+    "full-page-always-sets-cursor" quirk; ``None`` filter = no filter. Each item
+    is the full org shape PLUS the derived ``school_admin_uids`` (the only field
+    `_camel_org_row`/`memberCount` needs that isn't a column — D3).
+    """
+    stmt = select(Organization)
+    if status is not None:
+        stmt = stmt.where(Organization.status == status)
+    if school_type:
+        stmt = stmt.where(Organization.school_type == school_type)
+    if country:
+        stmt = stmt.where(Organization.country == country)
+    if public_or_private:
+        stmt = stmt.where(Organization.public_or_private == public_or_private)
+    if created_after is not None:
+        stmt = stmt.where(Organization.created_at >= created_after)
+    if created_before is not None:
+        stmt = stmt.where(Organization.created_at <= created_before)
+    if cursor and cursor.get('name_lower') is not None and cursor.get('id'):
+        # start_after: row-value > on the same (name_lower, doc-id) order key.
+        stmt = stmt.where(
+            tuple_(Organization.name_lower, Organization.legacy_firestore_id)
+            > (cursor['name_lower'], cursor['id'])
+        )
+    stmt = stmt.order_by(
+        Organization.name_lower, Organization.legacy_firestore_id
+    ).limit(limit)
+    rows = list(session.execute(stmt).scalars().all())
+
+    admin_uids = _school_admin_uids_for(session, [r.id for r in rows])
+    items = []
+    for r in rows:
+        item = _serialize(r)
+        item['school_admin_uids'] = admin_uids.get(r.id, [])
+        items.append(item)
+
+    next_cursor = None
+    if rows and len(rows) == limit:  # quirk: a full page always sets the cursor
+        last = rows[-1]
+        next_cursor = {
+            'name_lower': last.name_lower or '',
+            'id': last.legacy_firestore_id or str(last.id),
+        }
+    return {'items': items, 'next_cursor': next_cursor}
