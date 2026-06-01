@@ -133,18 +133,21 @@ def _parse_stmt(stmt):
         Returns ('active', org_id_value, firebase_uid_value).
     """
     crits = list(stmt._where_criteria)
+
+    # Junction reads/writes (reconcile_class_teachers / _join_code) target the
+    # junction tables — checked FIRST (before the criteria-count branch) so the
+    # multi-criteria global-active-code UPDATE isn't misparsed as _active_membership.
+    # Existence reads answer empty; the UPDATE's return value is ignored by callers.
+    first_table = getattr(crits[0].left, 'table', None) if crits else None
+    if first_table is not None and first_table.name in ('class_teachers', 'class_join_codes'):
+        return ('junction',)
+
     if len(crits) > 1:
         # criteria order mirrors _active_membership: [org_id==, firebase_uid==, status.in_]
         return ('active', crits[0].right.value, crits[1].right.value)
 
     crit = crits[0]
     model = crit.left.table  # Table object
-
-    # Junction existence reads (reconcile_class_teachers / _join_code) filter on
-    # class_id, not legacy_firestore_id — the fake answers them as empty.
-    if model.name in ('class_teachers', 'class_join_codes'):
-        return ('junction',)
-
     legacy_value = crit.right.value
 
     # Map the Table back to its ORM model.

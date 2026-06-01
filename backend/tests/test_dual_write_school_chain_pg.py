@@ -505,6 +505,30 @@ class TestClassJunctionShadow(unittest.TestCase):
             self.assertFalse(row.active)
             self.assertIsNotNone(row.deactivated_at)
 
+    def test_global_active_code_slot_converges_across_classes(self):
+        # The global unique-active-code index forbids two classes holding the same
+        # code active. If a second class takes a code the first holds active, the
+        # reconcile must CONVERGE (deactivate the first), not raise an IntegrityError
+        # that _run would swallow into a silent divergence. (Near-impossible live —
+        # generate collision-checks active codes — but the dirty-data safety net.)
+        sc.shadow_create_class(self._provider(), class_id='c1', class_data=self._class_data([]))
+        sc.shadow_create_class(self._provider(), class_id='c2', class_data=self._class_data([]))
+        sc.shadow_generate_class_join_code(self._provider(), class_id='c1', code='ABC123')
+        sc.shadow_generate_class_join_code(self._provider(), class_id='c2', code='ABC123')
+        with Session(_engine) as s:
+            c1_active = s.execute(
+                select(ClassJoinCode.active).where(
+                    ClassJoinCode.class_id == self._class_uuid(s, 'c1'),
+                    ClassJoinCode.code == 'ABC123')
+            ).scalar_one()
+            c2_active = s.execute(
+                select(ClassJoinCode.active).where(
+                    ClassJoinCode.class_id == self._class_uuid(s, 'c2'),
+                    ClassJoinCode.code == 'ABC123')
+            ).scalar_one()
+            self.assertFalse(c1_active)  # global slot freed for the new owner
+            self.assertTrue(c2_active)
+
     def test_join_code_on_absent_class_is_noop(self):
         sc.shadow_generate_class_join_code(self._provider(), class_id='ghost', code='ABC123')
         with Session(_engine) as s:

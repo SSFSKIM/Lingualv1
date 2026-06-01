@@ -31,7 +31,7 @@ from __future__ import annotations
 import datetime
 from typing import Any
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 
 from backend.db.models.migration import MigrationImportRun
 from backend.db.models.org import (
@@ -344,9 +344,14 @@ def reconcile_class_join_code(
       code + inactive -> keep the (now inactive) code row, no active row.
       no code         -> no active row.
 
-    Deactivate-then-flush BEFORE activating the target: the unique-active index
-    is checked per-statement, and the UoW emits INSERTs before UPDATEs, so the
-    old active row must be cleared first or the new one collides.
+    Deactivate-then-flush BEFORE activating the target: BOTH partial-unique
+    indexes (one_active_per_class AND the GLOBAL unique-active-code) are checked
+    per-statement, and the UoW emits INSERTs before UPDATEs, so every conflicting
+    active row must be cleared first or the (re)activation collides. We free the
+    same-class slot AND any OTHER class that holds this code active. The latter is
+    near-impossible live (generate_class_join_code collision-checks active codes
+    across classes) but makes a backfill of dirty data CONVERGE instead of raising
+    an IntegrityError that _run would swallow into a silent PG/Firestore divergence.
     """
     rows = session.execute(
         select(ClassJoinCode).where(ClassJoinCode.class_id == class_uuid)
@@ -357,7 +362,20 @@ def reconcile_class_join_code(
         if r.active and r.code != keep_active_code:
             r.active = False
             r.deactivated_at = r.deactivated_at or _utcnow()
-    session.flush()  # free the one-active-per-class slot before (re)activating
+    if code and active:
+        # Free the GLOBAL unique-active-code slot: deactivate any OTHER class's
+        # active row holding this code, so the (re)activation can't violate
+        # class_join_codes_active_code_idx.
+        session.execute(
+            update(ClassJoinCode)
+            .where(
+                ClassJoinCode.code == code,
+                ClassJoinCode.active.is_(True),
+                ClassJoinCode.class_id != class_uuid,
+            )
+            .values(active=False, deactivated_at=_utcnow())
+        )
+    session.flush()  # free both unique-active slots before (re)activating
 
     if not code:
         return
