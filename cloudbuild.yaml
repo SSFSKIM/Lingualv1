@@ -80,12 +80,15 @@ substitutions:
   _DB_NAME: lingual
   _DUAL_WRITE_SCHOOL_CHAIN: '1'
   _DUAL_WRITE_ENROLLMENTS: '1'
-  # Read-cutover flags (read phase). DEFAULT OFF ('0'): reads stay 100% Firestore.
-  # Flip per entity to 'shadow' (Firestore authoritative + PG parity compare,
-  # logged) for a soak, then '1' (PG authoritative, fail-open) — via
-  # --substitutions, no edit. memberships: get_membership + get_user_memberships
-  # only (admin lists + resolve_user_school_context stay on Firestore — D4/§5).
-  _READ_PG_ORGANIZATIONS: '0'
+  # Read-cutover flags (read phase). Per entity: '0'/'' = Firestore only,
+  # 'shadow' = Firestore authoritative + PG parity compare (logged), '1' = PG
+  # authoritative, fail-open to Firestore. organizations FLIPPED to '1' on
+  # 2026-06-01 (rev 00045) after a clean shadow soak (25+ compares, 0 mismatched)
+  # + dual-write drop-rate 0 + parity at the documented-junk baseline. memberships
+  # still 'shadow' (get_membership + get_user_memberships only; admin lists +
+  # resolve_user_school_context stay on Firestore — D4/§5). Rollback = flip back to
+  # 'shadow'/'0' (instant, no rebuild: gcloud run services update --update-env-vars).
+  _READ_PG_ORGANIZATIONS: '1'
   _READ_PG_MEMBERSHIPS: '0'
 
 # Store images in Artifact Registry
