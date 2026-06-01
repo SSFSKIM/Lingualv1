@@ -1,7 +1,7 @@
 # Analytics Family (practice_sessions + learning_events) Migration Design
 
 **ADR-0001 Coexistence — Analytics Slice**
-Date: 2026-06-02 | Status: **DESIGN (proposed)** — verdict **GO-WITH-FIXES**, produced via a map→design→adversarial-critique→synthesis workflow. Implementation NOT started; 5 flag-gated slices (§5). Companion to `READ_CUTOVER.md` (which covered the relational chain, now flipped). The five baked-in fixes from the critiques: session-summary moves into the session-close batch (pool exhaustion); batch handler is a separate Cloud Run Job; `insert(...).on_conflict_do_nothing` not `bulk_save_objects`; split-pass aggregate parity; term-scope backfill is mandatory.
+Date: 2026-06-02 | Status: **DESIGN (proposed) — NEEDS REVISION on the events-ingest strategy.** Internal workflow verdict was GO-WITH-FIXES; an **independent codex code-grounded review (2026-06-02, see "Codex Independent Review" at the end) returned RECONSIDER** — 3 P1 shape problems, all in the EVENTS-INGEST path (Slices B/C/E). **Slice A (assignments dual-write + read adapters) is VALIDATED and independent — safe to implement.** Slices B/C/E need redesign first. Companion to `READ_CUTOVER.md` (relational chain, now flipped). NOTE: §2/§5 below describe the ORIGINAL (pre-codex) events design; read the Codex Independent Review section for what must change before B/C/E are built.
 
 ---
 
@@ -454,3 +454,24 @@ When batch handler finds `session_uuid is None`:
 | session_summary NOT sufficient for all analytics | ACCEPTED — Pass 2 parity + LIMITATIONS entry |
 | READ_PG_ASSIGNMENTS=1 gate deferred out-of-scope | ACCEPTED — assignment read adapters scoped into Slice A |
 | uuidv7 asymmetry + Alembic revision ordering | ACCEPTED — revision 0002 explicitly called out; handler must not run before migration applied |
+
+---
+
+## Codex Independent Review (2026-06-02) — VERDICT: RECONSIDER
+
+An independent gpt-5.5 (codex) review grounded against the live code, AFTER the internal workflow's GO-WITH-FIXES. It found 3 P1 shape problems — all in the events-ingest path (Slices B/C/E). **Slice A is validated and unaffected.** These must be resolved before B/C/E are implemented; §2/§5 above are the pre-review design.
+
+**P1 — must fix (events-ingest redesign):**
+1. **No post-cutover event source.** The batch reads events from Firestore (`database.list_session_learning_events`, design §2.5 ↔ `curriculum_admin.py:552`→`database.py:2459`), yet Slice E retires Firestore writes — the batcher would then have no durable source. Session-close-from-Firestore is a COEXISTENCE BRIDGE only. **Fix:** define the end-state event source — write events to PG directly from the `POST /events` request, OR carry event payloads in the Cloud Tasks message — never re-read Firestore post-cutover.
+2. **The session-close trigger is client-driven & on the wrong seam.** `session.ended` arrives via the events POST route (`curriculum_admin.py:535/578`), not session-create; the frontend fires it fire-and-forget on page-leave (`AssignmentPracticeWorkspace.tsx:1068`), so a browser-close orphans the batch. **Fix:** enqueue server-side after `update_practice_session` in the `session.ended` route + add a sweeper/reconciler for sessions that never send a close event.
+3. **"Cloud Run Job" is the wrong primitive.** Jobs don't serve HTTP; Cloud Tasks targets a request-serving URL with OIDC. The repo deploys one Cloud Run *service* via `cloudbuild.yaml:41`/`Dockerfile:58`. **Fix:** a separate Cloud Run **Service** from the same image (still pool-isolated), or an explicit admin job-runner flow — not a Cloud-Tasks-HTTP-handler "Job".
+
+**P2 — real risks:**
+4. **Python-over-PG reloads every event** unless callers change — `list_assignment_learning_events` is called with no type filter (`curriculum_admin.py:600`); analytics only needs context/error families (`practice_analytics.py:2053`). A GIN index doesn't fix "load every event"; push the `event_type` filter into the PG reader.
+5. **`_run_with_timeout(1000ms)` doesn't cap pool CHECKOUT** — `sql.py` confirmed `pool_size=8/max_overflow=2/pool_timeout=3` on one Gunicorn worker / 8 threads; checkout can still wait 3s before the statement timeout applies.
+
+**P3 — confirmations (design was right):**
+6. Assignments ARE a hard FK prereq — `PracticeSession.assignment_id`/`LearningEvent.assignment_id` are NOT-NULL FKs (`practice.py:29/86`), assignments not yet in backfill (`backfill.py`). Slice A ordering correct.
+7. `_route_read(also=tuple)` is a clean small extension (`read_router.py:109/189`) — add string-vs-tuple test coverage.
+
+**Disposition:** Slice A proceeds as designed. Slices B/C/E events-ingest to be redesigned around a durable post-cutover event source (likely: dual-write events to PG from the request, or task-payload-sourced batch via a Cloud Run *service*) + a server-owned trigger + a reconciler. Re-review the revised events design before implementing.
