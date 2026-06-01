@@ -95,11 +95,12 @@ substitutions:
   _READ_PG_ORGANIZATIONS: '1'
   _READ_PG_MEMBERSHIPS: 'shadow'
   _READ_PG_CLASSES: '1'
-  # enrollments-read slice (8): adapters built, flag OFF until its own
-  # shadow-deploy → soak → flip (the roster / studentCount / practice-launch
-  # gate; ride after classes per the dependency order). list_student_classes
-  # rides this flag too (enrollments⋈classes JOIN).
-  _READ_PG_ENROLLMENTS: '0'
+  # enrollments-read slice (8): SHADOW as of 2026-06-02 (roster / studentCount /
+  # practice-launch gate; the LAST read family). list_student_classes rides this
+  # flag too but gates on min(READ_PG_ENROLLMENTS, READ_PG_CLASSES). Flip to '1'
+  # after a clean soak + a fresh timestamp-preserving re-backfill; rollback =
+  # instant --update-env-vars READ_PG_ENROLLMENTS=shadow (or '0').
+  _READ_PG_ENROLLMENTS: 'shadow'
 
 # Store images in Artifact Registry
 images:
