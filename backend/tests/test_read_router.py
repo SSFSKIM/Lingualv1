@@ -31,9 +31,28 @@ class TestDiffHelpers(unittest.TestCase):
         self.assertIsNone(_norm(None))
         self.assertIsNone(_norm(''))
         self.assertIsNone(_norm([]))
+        # PG NOT-NULL boolean default vs Firestore-absent: False collapses to None
+        self.assertIsNone(_norm(False))
+        # but meaningful values are preserved (incl. a real 0, not collapsed):
+        self.assertIs(_norm(True), True)
+        self.assertEqual(_norm(0), 0)
         ts = datetime.datetime(2026, 1, 2, 3, 4, 5)
         self.assertEqual(_norm(ts), ts.isoformat())
         self.assertEqual(_norm('x'), 'x')
+
+    def test_diff_treats_pg_default_false_as_firestore_absent(self):
+        # the exact divergence the first shadow soak surfaced: fs None vs pg False
+        self.assertEqual(
+            _diff_dict({'teacher_invite_code_active': None},
+                       {'teacher_invite_code_active': False}, frozenset()),
+            {},
+        )
+        # True vs None is still a real mismatch (dual-write bug not masked):
+        self.assertIn(
+            'teacher_invite_code_active',
+            _diff_dict({'teacher_invite_code_active': True},
+                       {'teacher_invite_code_active': None}, frozenset()),
+        )
 
     def test_diff_dict_ignores_allowlisted_and_loose_empties(self):
         fs = {'name': 'A', 'city': '', 'school_admin_uids': ['u1'], 'status': 'active'}

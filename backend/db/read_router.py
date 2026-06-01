@@ -61,8 +61,13 @@ _ORG_SHADOW_IGNORE = frozenset(
 
 def _norm(value: Any) -> Any:
     """Normalize a value for cross-store comparison: datetimes -> ISO string, and
-    Firestore-loose empties (None / '' / []) collapse to None."""
-    if value is None or value == '' or value == []:
+    the falsy-equivalents the two stores disagree on SHAPE for collapse to None —
+    `None` (Firestore omits an unset field), `''` / `[]` (empty), and `False` (a
+    PG `NOT NULL` boolean column materializes to its `False` default where
+    Firestore simply omits the field). A meaningful value present on only one side
+    is still flagged (`True` vs `None`, `'x'` vs `None`); `is False` is used so a
+    real numeric `0` is NOT collapsed."""
+    if value is None or value == '' or value == [] or value is False:
         return None
     iso = getattr(value, 'isoformat', None)
     if callable(iso):
