@@ -1,7 +1,4 @@
 {
-  "enabledPlugins": {
-    "lingual-dev-agents": true
-  },
   "permissions": {
     "allow": [
       "Bash"
@@ -23,5 +20,9 @@
         ]
       }
     ]
+  },
+  "enabledPlugins": {
+    "lingual-dev-agents": true,
+    "cloud-sql-postgresql@claude-plugins-official": true
   }
 }
