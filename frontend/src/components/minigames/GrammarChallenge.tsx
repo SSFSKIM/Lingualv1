@@ -7,6 +7,7 @@ import type { MinigameCompletionResult } from './ListeningQuiz';
 
 interface GrammarChallengeProps {
   questions: GrammarChallengeQuestion[];
+  dir: 'ltr' | 'rtl';
   scenarioTitle: string;
   onClose: () => void;
   onComplete: (result: MinigameCompletionResult) => void;
@@ -61,6 +62,7 @@ function grammarChallengeReducer(
 
 export function GrammarChallenge({
   questions,
+  dir,
   scenarioTitle,
   onClose,
   onComplete,
@@ -116,6 +118,7 @@ export function GrammarChallenge({
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       className="fixed inset-0 bg-foreground/60 flex items-center justify-center z-50 p-4"
+      dir={dir}
     >
       <m.div
         initial={{ scale: 0.94, opacity: 0 }}

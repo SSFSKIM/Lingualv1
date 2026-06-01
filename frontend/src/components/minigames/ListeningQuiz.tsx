@@ -14,6 +14,7 @@ export interface MinigameCompletionResult {
 
 interface ListeningQuizProps {
   questions: ListeningQuizQuestion[];
+  dir: 'ltr' | 'rtl';
   locale: string;
   scenarioTitle: string;
   onClose: () => void;
@@ -69,6 +70,7 @@ function listeningQuizReducer(
 
 export function ListeningQuiz({
   questions,
+  dir,
   locale,
   scenarioTitle,
   onClose,
@@ -135,6 +137,7 @@ export function ListeningQuiz({
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       className="fixed inset-0 bg-foreground/60 flex items-center justify-center z-50 p-4"
+      dir={dir}
     >
       <m.div
         initial={{ scale: 0.94, opacity: 0 }}
@@ -213,7 +216,7 @@ export function ListeningQuiz({
                     onClick={() => handleSelectChoice(index)}
                     disabled={isAnswered}
                     className={[
-                      'w-full rounded-xl border-2 px-4 py-3 text-left font-medium transition-all',
+                      'w-full rounded-xl border-2 px-4 py-3 text-start font-medium transition-all',
                       !isAnswered && 'border-border bg-card hover:border-foreground hover:shadow-stamp-sm',
                       isAnswered && isCorrectChoice && 'border-success bg-success/10 text-success',
                       isAnswered && isSelected && !isCorrectChoice && 'border-destructive bg-destructive/10 text-destructive',

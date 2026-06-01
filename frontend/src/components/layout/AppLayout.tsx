@@ -24,7 +24,7 @@ import { Toaster, toast } from 'sonner';
 import { useAuth } from '@/hooks/useAuth';
 import { useMembership } from '@/contexts/MembershipContext';
 import { useLanguage } from '@/contexts/LanguageContext';
-import { getLearningLocaleDirection, useLearningLocale } from '@/contexts/LearningLocaleContext';
+import { useLearningLocale } from '@/contexts/LearningLocaleContext';
 import { LEARNING_LOCALES } from '@/lib/learningLocales';
 import { getUserProfile, updateLearningLocale } from '@/api/user';
 import { getPrivilegedHomeRoute, LEARNER_HOME_ROUTE } from '@/lib/homeRoutes';
@@ -383,7 +383,6 @@ export function AppLayout() {
     : profile?.gradeLevel
     ? `${t('app.layout.role.student')} · ${profile.gradeLevel}`
     : t('app.layout.role.student');
-  const learningLocaleDirection = getLearningLocaleDirection(learningLocale);
   // Home button priority mirrors the post-login dispatcher in lib/homeRoutes:
   // Lingual admin > school admin > teacher > learner. Reusing
   // `getPrivilegedHomeRoute` keeps the logo destination in lockstep with
@@ -442,7 +441,7 @@ export function AppLayout() {
   return (
     <div
       className="min-h-screen bg-background font-body text-foreground flex flex-col"
-      dir={learningLocaleDirection}
+      dir="ltr"
       lang={learningLocale}
     >
       <Toaster position="top-right" richColors />

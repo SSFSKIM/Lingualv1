@@ -1,6 +1,6 @@
 import { ReactNode } from 'react';
 import { Header } from './Header';
-import { getLearningLocaleDirection, useLearningLocale } from '@/contexts/LearningLocaleContext';
+import { useLearningLocale } from '@/contexts/LearningLocaleContext';
 
 interface LegacyAppLayoutProps {
   children: ReactNode;
@@ -13,7 +13,7 @@ export function LegacyAppLayout({ children, showHeader = true }: LegacyAppLayout
   return (
     <div
       className="h-screen flex flex-col"
-      dir={getLearningLocaleDirection(learningLocale)}
+      dir="ltr"
       lang={learningLocale}
     >
       {showHeader && <Header />}

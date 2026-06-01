@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { AppGamesPage } from '@/pages/AppGamesPage';
 
 const learningLocaleState = vi.hoisted(() => ({
@@ -16,16 +16,22 @@ const learningLocaleState = vi.hoisted(() => ({
 }));
 
 const getChatSessionsMock = vi.fn();
+const minigameRenderers = vi.hoisted(() => ({
+  FlashcardFlip: vi.fn(() => <div data-testid="flashcard-flip" />),
+  GrammarChallenge: vi.fn(() => <div data-testid="grammar-challenge" />),
+  ListeningQuiz: vi.fn(() => <div data-testid="listening-quiz" />),
+  WordMatch: vi.fn(() => <div data-testid="word-match" />),
+}));
 
 vi.mock('motion/react', () => ({
   AnimatePresence: ({ children }: { children: ReactNode }) => <>{children}</>,
 }));
 
 vi.mock('@/components/minigames', () => ({
-  FlashcardFlip: () => <div data-testid="flashcard-flip" />,
-  GrammarChallenge: () => <div data-testid="grammar-challenge" />,
-  ListeningQuiz: () => <div data-testid="listening-quiz" />,
-  WordMatch: () => <div data-testid="word-match" />,
+  FlashcardFlip: (props: unknown) => minigameRenderers.FlashcardFlip(props),
+  GrammarChallenge: (props: unknown) => minigameRenderers.GrammarChallenge(props),
+  ListeningQuiz: (props: unknown) => minigameRenderers.ListeningQuiz(props),
+  WordMatch: (props: unknown) => minigameRenderers.WordMatch(props),
 }));
 
 vi.mock('@/contexts/LanguageContext', () => ({
@@ -35,6 +41,7 @@ vi.mock('@/contexts/LanguageContext', () => ({
 }));
 
 vi.mock('@/contexts/LearningLocaleContext', () => ({
+  getLearningLocaleDirection: (locale: string) => (locale === 'he-IL' ? 'rtl' : 'ltr'),
   useLearningLocale: () => ({
     learningLocale: learningLocaleState.value,
     setLearningLocale: learningLocaleState.setLearningLocale,
@@ -53,6 +60,10 @@ vi.mock('@/api/minigames', () => ({
 describe('AppGamesPage', () => {
   beforeEach(() => {
     getChatSessionsMock.mockReset();
+    minigameRenderers.FlashcardFlip.mockReset();
+    minigameRenderers.GrammarChallenge.mockReset();
+    minigameRenderers.ListeningQuiz.mockReset();
+    minigameRenderers.WordMatch.mockReset();
     learningLocaleState.value = 'ko-KR';
   });
 
@@ -117,5 +128,26 @@ describe('AppGamesPage', () => {
     expect(screen.queryByText('No game curriculum available for this locale yet')).not.toBeInTheDocument();
     expect(screen.getByText('Listening Quiz')).toBeInTheDocument();
     expect(screen.getByText('Grammar Challenge')).toBeInTheDocument();
+  });
+
+  it('passes rtl direction into Hebrew minigame modals', async () => {
+    learningLocaleState.value = 'he-IL';
+    getChatSessionsMock.mockResolvedValue([]);
+
+    render(<AppGamesPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Meeting a new classmate')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /Listening Quiz/ }));
+
+    await waitFor(() => {
+      expect(minigameRenderers.ListeningQuiz).toHaveBeenCalled();
+    });
+
+    expect(minigameRenderers.ListeningQuiz.mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({ dir: 'rtl', locale: 'he-IL' })
+    );
   });
 });

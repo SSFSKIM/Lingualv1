@@ -12,6 +12,7 @@ interface Flashcard {
 
 interface FlashcardFlipProps {
   flashcards: Flashcard[];
+  dir: 'ltr' | 'rtl';
   onClose: () => void;
 }
 
@@ -66,7 +67,7 @@ function flashcardReducer(state: FlashcardState, action: FlashcardAction): Flash
   }
 }
 
-export function FlashcardFlip({ flashcards, onClose }: FlashcardFlipProps) {
+export function FlashcardFlip({ flashcards, dir, onClose }: FlashcardFlipProps) {
   const [flashcardState, dispatchFlashcard] = useReducer(
     flashcardReducer,
     INITIAL_FLASHCARD_STATE
@@ -140,6 +141,7 @@ export function FlashcardFlip({ flashcards, onClose }: FlashcardFlipProps) {
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       className="fixed inset-0 bg-foreground/60 flex items-center justify-center z-50 p-4"
+      dir={dir}
     >
       <m.div
         initial={{ scale: 0.9, opacity: 0 }}
@@ -148,7 +150,7 @@ export function FlashcardFlip({ flashcards, onClose }: FlashcardFlipProps) {
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex justify-between items-center mb-6">
+        <div className="flex items-center justify-between gap-4 mb-6">
           <div className="flex items-center gap-3">
             <div className="size-10 rounded-xl bg-primary/10 text-primary border-2 border-primary/30 flex items-center justify-center">
               <Sparkles size={20} strokeWidth={2.5} />
@@ -223,7 +225,7 @@ export function FlashcardFlip({ flashcards, onClose }: FlashcardFlipProps) {
             onChange={(e) => dispatchFlashcard({ type: 'answerChanged', answer: e.target.value })}
             placeholder="Type the English translation..."
             disabled={showResult !== null}
-            className="w-full px-4 py-3 text-lg bg-card border-2 border-border rounded-xl focus:border-primary focus:outline-none disabled:bg-secondary disabled:text-muted-foreground font-medium placeholder:text-muted-foreground transition-colors"
+            className="w-full px-4 py-3 text-lg bg-card border-2 border-border rounded-xl focus:border-primary focus:outline-none disabled:bg-secondary disabled:text-muted-foreground font-medium placeholder:text-muted-foreground transition-colors text-start"
           />
           <Button
             type="submit"

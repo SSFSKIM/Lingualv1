@@ -15,6 +15,7 @@ interface WordPair {
 
 interface WordMatchProps {
   wordPairs: WordPair[];
+  dir: 'ltr' | 'rtl';
   onClose: () => void;
 }
 
@@ -108,7 +109,7 @@ function wordMatchReducer(state: WordMatchState, action: WordMatchAction): WordM
   }
 }
 
-export function WordMatch({ wordPairs, onClose }: WordMatchProps) {
+export function WordMatch({ wordPairs, dir, onClose }: WordMatchProps) {
   // Shuffle words for columns
   const leftWords = useMemo(() => shuffleWords(wordPairs.map((w) => w.korean)), [wordPairs]);
   const rightWords = useMemo(
@@ -139,6 +140,7 @@ export function WordMatch({ wordPairs, onClose }: WordMatchProps) {
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       className="fixed inset-0 bg-foreground/60 flex items-center justify-center z-50 p-4"
+      dir={dir}
     >
       <m.div
         initial={{ scale: 0.9, opacity: 0 }}
@@ -203,7 +205,7 @@ export function WordMatch({ wordPairs, onClose }: WordMatchProps) {
             </Button>
           </div>
         ) : (
-          <div className="flex flex-row gap-8 justify-center">
+          <div className={dir === 'rtl' ? 'flex flex-row-reverse gap-8 justify-center' : 'flex flex-row gap-8 justify-center'}>
             {/* Left Column (Korean) */}
             <div className="flex flex-col gap-3">
               <p className="text-xs uppercase tracking-wider text-muted-foreground font-semibold text-center mb-2">

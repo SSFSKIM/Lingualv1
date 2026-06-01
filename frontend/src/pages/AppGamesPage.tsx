@@ -10,7 +10,7 @@ import curriculumExampleKo from '@/data/curriculum_example_ko.json';
 import curriculumExampleRu from '@/data/curriculum_example_ru.json';
 import curriculumExampleTl from '@/data/curriculum_example_tl.json';
 import { useLanguage } from '@/contexts/LanguageContext';
-import { useLearningLocale } from '@/contexts/LearningLocaleContext';
+import { getLearningLocaleDirection, useLearningLocale } from '@/contexts/LearningLocaleContext';
 import { getChatSessions } from '@/api/chat';
 import {
   buildGrammarChallengeQuestions,
@@ -990,11 +990,14 @@ function GameModals({
   onGrammarComplete,
   onListeningComplete,
 }: GameModalsProps) {
+  const direction = getLearningLocaleDirection(learningLocale);
+
   return (
     <AnimatePresence>
       {visibility.listeningQuiz && listeningQuestions.length > 0 && activeGameContext ? (
         <ListeningQuiz
           questions={listeningQuestions}
+          dir={direction}
           locale={learningLocale}
           scenarioTitle={activeGameContext.scenarioTitle}
           onClose={onCloseListeningQuiz}
@@ -1004,16 +1007,17 @@ function GameModals({
       {visibility.grammarChallenge && grammarQuestions.length > 0 && activeGameContext ? (
         <GrammarChallenge
           questions={grammarQuestions}
+          dir={direction}
           scenarioTitle={activeGameContext.scenarioTitle}
           onClose={onCloseGrammarChallenge}
           onComplete={onGrammarComplete}
         />
       ) : null}
       {visibility.flashcards && flashcards.length > 0 ? (
-        <FlashcardFlip flashcards={flashcards} onClose={onCloseFlashcards} />
+        <FlashcardFlip flashcards={flashcards} dir={direction} onClose={onCloseFlashcards} />
       ) : null}
       {visibility.wordMatch && wordMatchPairs.length > 0 ? (
-        <WordMatch wordPairs={wordMatchPairs} onClose={onCloseWordMatch} />
+        <WordMatch wordPairs={wordMatchPairs} dir={direction} onClose={onCloseWordMatch} />
       ) : null}
     </AnimatePresence>
   );
