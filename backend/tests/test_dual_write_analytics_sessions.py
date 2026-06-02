@@ -172,17 +172,17 @@ class TestSessionShadowGating(unittest.TestCase):
                 lambda: object(), session_firestore_id='s1', updates={'prompt_version': 'v9'})
             run.assert_not_called()  # nothing PG-relevant -> no checkout
 
-    def test_update_still_fires_when_events_flag_set_early(self):
-        # §5b.2 #7 / codex P2: the self-disable lands WITH Slice C's shadow_write_turn,
-        # NOT now. Until then, an early DUAL_WRITE_ANALYTICS_EVENTS=1 must NOT silently
-        # drop the PG session UPDATE — shadow_update still fires on SESSIONS=1.
+    def test_update_self_disables_when_events_flag_on(self):
+        # §5b.2 #7 (Slice C): with the events flag on, shadow_write_turn writes the
+        # summary UPDATE in the same transaction as the turn's events, so this
+        # standalone path MUST self-disable — one pool checkout per turn, not two.
         os.environ['DUAL_WRITE_ANALYTICS_SESSIONS'] = '1'
         os.environ['DUAL_WRITE_ANALYTICS_EVENTS'] = '1'
         with mock.patch.object(da, '_run_with_timeout') as run:
             da.shadow_update_practice_session(
                 lambda: object(), session_firestore_id='s1',
                 updates={'status': 'completed'})
-            run.assert_called_once()
+            run.assert_not_called()
 
     def test_create_still_fires_when_events_flag_on(self):
         # Session-create is unchanged by the events flag (matrix: both on-rows use
@@ -194,6 +194,115 @@ class TestSessionShadowGating(unittest.TestCase):
             da.shadow_create_practice_session(
                 lambda: object(), session_doc={'id': 's1', 'org_id': 'o1'})
             run.assert_called_once()
+
+
+class TestShadowWriteTurn(unittest.TestCase):
+    """Slice C: one batched transaction per turn (events + summary UPDATE), §5b.2."""
+
+    def setUp(self):
+        for k in ('DUAL_WRITE_ANALYTICS_SESSIONS', 'DUAL_WRITE_ANALYTICS_EVENTS'):
+            os.environ.pop(k, None)
+            self.addCleanup(lambda key=k: os.environ.pop(key, None))
+
+    def _events(self, n=2):
+        base = {'org_id': 'o1', 'class_id': 'c1', 'assignment_id': 'a1',
+                'session_id': 's1', 'student_uid': 'u1', 'turn_index': 3}
+        return [
+            {**base, 'id': f'ev{i}', 'event_type': 'student.turn', 'payload': {'k': i}}
+            for i in range(n)
+        ]
+
+    def test_noop_when_events_flag_off(self):
+        os.environ['DUAL_WRITE_ANALYTICS_SESSIONS'] = '1'  # sessions on, events OFF
+        with mock.patch.object(da, '_run_with_timeout') as run:
+            da.shadow_write_turn(
+                lambda: object(), session_firestore_id='s1',
+                events=self._events(), session_updates={'status': 'completed'})
+            run.assert_not_called()
+
+    def test_noop_when_no_events_and_no_session_values(self):
+        os.environ['DUAL_WRITE_ANALYTICS_EVENTS'] = '1'
+        with mock.patch.object(da, '_run_with_timeout') as run:
+            da.shadow_write_turn(
+                lambda: object(), session_firestore_id='s1',
+                events=[], session_updates={'prompt_version': 'v9'})  # no mutable cols
+            run.assert_not_called()
+
+    def test_skips_events_without_id(self):
+        os.environ['DUAL_WRITE_ANALYTICS_EVENTS'] = '1'
+        with mock.patch.object(da, '_run_with_timeout') as run:
+            da.shadow_write_turn(
+                lambda: object(), session_firestore_id='s1',
+                events=[{'org_id': 'o1', 'event_type': 'x'}],  # no 'id' -> can't dedupe
+                session_updates={})
+            run.assert_not_called()  # nothing valid to write
+
+    def test_inserts_events_and_update_in_one_txn_at_2000ms(self):
+        os.environ['DUAL_WRITE_ANALYTICS_EVENTS'] = '1'
+        captured = {}
+
+        def fake_run(engine, op_name, fn, *, timeout_ms):
+            captured['op_name'] = op_name
+            captured['timeout_ms'] = timeout_ms
+            sess = _RecordingSession()
+            fn(sess)
+            captured['sql'] = [str(s) for s in sess.statements]
+
+        with mock.patch.object(da, '_run_with_timeout', fake_run), \
+                mock.patch('backend.db.repository.resolution.resolve_legacy_id',
+                           return_value='uuid-x'):
+            da.shadow_write_turn(
+                lambda: object(), session_firestore_id='s1',
+                events=self._events(2),
+                session_updates={'session_summary': {'turns': 3}, 'status': 'active'})
+
+        self.assertEqual(captured['op_name'], 'write_turn')
+        self.assertEqual(captured['timeout_ms'], 2000)
+        joined = '\n'.join(captured['sql'])
+        self.assertIn('INSERT INTO learning_events', joined)
+        self.assertIn('UPDATE practice_sessions', joined)
+        # Event insert precedes the summary UPDATE (UPDATE is the last statement).
+        self.assertLess(
+            joined.index('INSERT INTO learning_events'),
+            joined.index('UPDATE practice_sessions'),
+        )
+
+    def test_resolves_four_parents_once_regardless_of_event_count(self):
+        os.environ['DUAL_WRITE_ANALYTICS_EVENTS'] = '1'
+
+        def fake_run(engine, op_name, fn, *, timeout_ms):
+            fn(_RecordingSession())
+
+        with mock.patch.object(da, '_run_with_timeout', fake_run), \
+                mock.patch('backend.db.repository.resolution.resolve_legacy_id',
+                           return_value='uuid-x') as resolve:
+            da.shadow_write_turn(
+                lambda: object(), session_firestore_id='s1',
+                events=self._events(5), session_updates={})
+        # O(4) resolutions (org/class/assignment/session) for the whole turn, not O(4N).
+        self.assertEqual(resolve.call_count, 4)
+
+    def test_unresolved_parent_drops_events_but_keeps_session_update(self):
+        os.environ['DUAL_WRITE_ANALYTICS_EVENTS'] = '1'
+        captured = {}
+
+        def fake_run(engine, op_name, fn, *, timeout_ms):
+            sess = _RecordingSession()
+            fn(sess)
+            captured['sql'] = [str(s) for s in sess.statements]
+
+        # session FK unresolved -> events can't insert (accepted drop, §5b.6); the
+        # UPDATE is keyed by legacy_firestore_id and still issues (0 rows if absent).
+        with mock.patch.object(da, '_run_with_timeout', fake_run), \
+                mock.patch('backend.db.repository.resolution.resolve_legacy_id',
+                           return_value=None):
+            da.shadow_write_turn(
+                lambda: object(), session_firestore_id='s1',
+                events=self._events(2), session_updates={'status': 'completed'})
+
+        joined = '\n'.join(captured['sql'])
+        self.assertNotIn('INSERT INTO learning_events', joined)
+        self.assertIn('UPDATE practice_sessions', joined)
 
 
 class TestSweepOrphanedSessions(unittest.TestCase):

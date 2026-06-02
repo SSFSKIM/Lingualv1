@@ -1,8 +1,9 @@
 """Flag-gated Postgres shadow-write for the ANALYTICS family.
 
 Slice A: assignments (DUAL_WRITE_ASSIGNMENTS). Slice B: practice_sessions
-(DUAL_WRITE_ANALYTICS_SESSIONS). Slice C (later): learning_events
-(DUAL_WRITE_ANALYTICS_EVENTS) — `shadow_write_turn`, not yet built.
+(DUAL_WRITE_ANALYTICS_SESSIONS). Slice C: learning_events
+(DUAL_WRITE_ANALYTICS_EVENTS) — `shadow_write_turn`, one batched transaction per
+turn that subsumes the per-turn session UPDATE (§5b.2 #7 flag matrix).
 
 Companion to `dual_write.py` (enrollments) and `dual_write_school_chain.py`
 (org/membership/class): the SAME fail-open contract, gated on its OWN flag.
@@ -104,14 +105,19 @@ def _enabled_sessions() -> bool:
     return os.environ.get('DUAL_WRITE_ANALYTICS_SESSIONS') == '1'
 
 
-# NOTE: there is deliberately NO `_enabled_events()` gate in Slice B. The §5b.2 #7
-# flag matrix says that when DUAL_WRITE_ANALYTICS_EVENTS=1, Slice C's per-turn
-# `shadow_write_turn` writes the events AND the session-summary UPDATE in one
-# transaction, and the standalone `shadow_update_practice_session` must self-disable
-# to keep one pool checkout per turn. That self-disable is a SLICE C change — it must
-# land in the SAME commit as shadow_write_turn. Adding it now (before that writer
-# exists) would silently drop the PG session UPDATE whenever the events flag is set
-# early — a footgun with no upside until Slice C (codex P2).
+def _enabled_events() -> bool:
+    """learning_event shadow gate (Slice C). OFF unless DUAL_WRITE_ANALYTICS_EVENTS='1'.
+
+    Per §5b.5 this flag is meaningful ONLY when DUAL_WRITE_ANALYTICS_SESSIONS=1 too:
+    events FK to practice_sessions, so with sessions absent every event shadow is a
+    silent FK no-op. The §5b.2 #7 flag matrix composes the two:
+
+      sessions=1, events=0 -> shadow_update_practice_session (standalone per-turn UPDATE)
+      sessions=1, events=1 -> shadow_write_turn subsumes that UPDATE + inserts the
+                              turn's events in ONE transaction; the standalone
+                              shadow_update self-disables (one pool checkout per turn).
+    """
+    return os.environ.get('DUAL_WRITE_ANALYTICS_EVENTS') == '1'
 
 
 def _utcnow() -> datetime.datetime:
@@ -253,14 +259,15 @@ def shadow_update_practice_session(
     gate reconciles it before Firestore writes retire. 2000ms hot-path budget
     (§5b.2 #1).
 
-    Slice C composition (§5b.2 #7): when DUAL_WRITE_ANALYTICS_EVENTS lands, its
-    per-turn `shadow_write_turn` will write the events AND this summary UPDATE in
-    ONE transaction. At THAT point Slice C must add a self-disable here (gated on
-    the events flag) so the turn takes one pool checkout, not two. It is NOT gated
-    on the events flag yet: shadow_write_turn does not exist, so self-disabling now
-    would SILENTLY DROP the PG session UPDATE if that flag were set early (codex P2).
+    Slice C composition (§5b.2 #7): when DUAL_WRITE_ANALYTICS_EVENTS=1, the per-turn
+    `shadow_write_turn` writes the events AND this summary UPDATE in ONE transaction,
+    so this standalone path SELF-DISABLES (the events-on guard below) to keep the turn
+    at one pool checkout, not two. This is the §5b.2 #7 self-disable the Slice B codex-
+    P2 fix deferred to "land WITH shadow_write_turn" — it is safe now because that
+    writer exists and carries `session_updates`. Net matrix: this runs only on
+    sessions=1 AND events=0.
     """
-    if not _enabled_sessions():
+    if not _enabled_sessions() or _enabled_events():
         return
     from sqlalchemy import update
 
@@ -280,6 +287,106 @@ def shadow_update_practice_session(
         )
 
     _run_with_timeout(sql_engine, 'update_practice_session', op, timeout_ms=2000)
+
+
+# --- Slice C: learning_events (per-turn, batched) ----------------------------
+
+
+def shadow_write_turn(
+    sql_engine: Any,
+    *,
+    session_firestore_id: str,
+    events: list[dict[str, Any]],
+    session_updates: dict[str, Any] | None = None,
+) -> None:
+    """Mirror ONE practice turn into Postgres: the turn's learning_events AND the
+    session-summary/finalize UPDATE, in a SINGLE transaction / one pool checkout.
+
+    `events` is the list of event docs the route just wrote to Firestore, each
+    carrying its Firestore doc id as 'id' (the legacy_firestore_id — REQUIRED for
+    `on_conflict_do_nothing` idempotency; a null id can't dedupe, §5b.2 #1). All
+    events in a turn share the same org/class/assignment/session parents (copied
+    from one `session_record`), so the four FKs resolve ONCE per turn, not per
+    event (§6.1, codex-validated). `session_updates` is the same dict handed to
+    `update_practice_session`; when present its mutable columns are applied as the
+    LAST statement so the rolling summary / `session.ended` finalize rides the same
+    transaction as the event inserts (§5b.2 #2/#7).
+
+    Gating (§5b.2 #7): this is the events-flag-ON path. It SUBSUMES the standalone
+    `shadow_update_practice_session`, which self-disables while the events flag is
+    on — so a turn takes one checkout (events + summary), never two.
+
+    Fail-open (2000ms hot-path budget). Unresolved parents (session not yet in PG,
+    or it predates DUAL_WRITE_ANALYTICS_SESSIONS=1) make the event insert a silent
+    accepted coexistence drop (§5b.6) reconciled by the term-scope backfill +
+    per-session count-parity gate before Firestore writes retire; the session
+    UPDATE is keyed by legacy_firestore_id (0 rows when absent), independent of
+    that resolution. DURABILITY INVARIANT: every row is built from request scope
+    here — NEVER re-read events from Firestore (would break post-cutover, §5b.2 #3).
+    """
+    if not _enabled_events():
+        return
+
+    valid_events = [e for e in (events or []) if e.get('id')]
+    clean_updates = _strip_sentinels(session_updates or {})
+    session_values = {
+        k: clean_updates[k] for k in _SESSION_MUTABLE_COLUMNS if k in clean_updates
+    }
+    if not valid_events and not session_values:
+        return
+
+    from sqlalchemy import update
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    from backend.db.models.assignment import Assignment
+    from backend.db.models.org import Class, Organization
+    from backend.db.models.practice import LearningEvent, PracticeSession
+    from backend.db.repository.normalization import coerce_jsonb
+    from backend.db.repository.resolution import resolve_legacy_id
+
+    def op(session: Any) -> None:
+        rows: list[dict[str, Any]] = []
+        if valid_events:
+            first = valid_events[0]
+            org_uuid = resolve_legacy_id(session, Organization, first.get('org_id'))
+            class_uuid = resolve_legacy_id(session, Class, first.get('class_id'))
+            assignment_uuid = resolve_legacy_id(session, Assignment, first.get('assignment_id'))
+            session_uuid = resolve_legacy_id(session, PracticeSession, session_firestore_id)
+            # All four NOT-NULL FKs must resolve or the turn's events stay Firestore-
+            # only this turn (accepted coexistence drop, §5b.6 — reconciled by backfill).
+            if None not in (org_uuid, class_uuid, assignment_uuid, session_uuid):
+                rows = [
+                    {
+                        'legacy_firestore_id': e['id'],
+                        'org_id': org_uuid,
+                        'class_id': class_uuid,
+                        'assignment_id': assignment_uuid,
+                        'session_id': session_uuid,
+                        # Rename (not an FK): Firestore student_uid -> student_firebase_uid.
+                        'student_firebase_uid': e.get('student_uid') or '',
+                        'event_type': e.get('event_type'),
+                        'turn_index': e.get('turn_index'),
+                        'payload': coerce_jsonb(e.get('payload'), default={}),
+                        'created_at': e.get('created_at'),
+                    }
+                    for e in valid_events
+                ]
+        if rows:
+            session.execute(
+                pg_insert(LearningEvent)
+                .values(rows)
+                .on_conflict_do_nothing(index_elements=['legacy_firestore_id'])
+            )
+        # The summary/finalize UPDATE rides the same transaction (last statement),
+        # keyed by legacy_firestore_id; 0 rows when the session is not in PG.
+        if session_values:
+            session.execute(
+                update(PracticeSession)
+                .where(PracticeSession.legacy_firestore_id == session_firestore_id)
+                .values(**session_values, updated_at=_utcnow())
+            )
+
+    _run_with_timeout(sql_engine, 'write_turn', op, timeout_ms=2000)
 
 
 def sweep_orphaned_sessions(sql_engine: Any, *, idle_minutes: int = 90) -> dict[str, Any]:

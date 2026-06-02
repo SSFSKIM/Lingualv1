@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from flask import Blueprint, jsonify, request
 
 import database
+from backend.db import dual_write_analytics
 from backend.route_deps import RouteDeps
 from backend.services.assignment_resolver import (
     SUPPORTED_ASSIGNMENT_STATUSES,
@@ -487,16 +488,25 @@ def create_curriculum_admin_blueprint(deps: RouteDeps) -> Blueprint:
             session_id = deps.db.create_practice_session(session_payload, sql_engine=deps.sql_engine)
             session_record = deps.db.get_practice_session(session_id)
 
-            deps.db.create_learning_event(
-                build_learning_event_payload(
-                    session_record,
-                    event_type='session.started',
-                    payload={
-                        'chatId': chat_id,
-                        'uiLanguage': ui_language,
-                        'modality': session_record.get('modality'),
-                    },
-                )
+            started_payload = build_learning_event_payload(
+                session_record,
+                event_type='session.started',
+                payload={
+                    'chatId': chat_id,
+                    'uiLanguage': ui_language,
+                    'modality': session_record.get('modality'),
+                },
+            )
+            started_event_id = deps.db.create_learning_event(started_payload)
+            # Shadow session.started too, so PG event count matches Firestore per
+            # session (the §4.5/§5b.4 count-parity gate). The session row was just
+            # created (shadow_create_practice_session above), so its FK resolves.
+            # No session_updates here — create only, no summary mutation.
+            dual_write_analytics.shadow_write_turn(
+                deps.sql_engine,
+                session_firestore_id=session_id,
+                events=[{**started_payload, 'id': started_event_id}],
+                session_updates={},
             )
 
             return jsonify({
@@ -554,14 +564,19 @@ def create_curriculum_admin_blueprint(deps: RouteDeps) -> Blueprint:
                     )
                     return jsonify(err.to_payload()), 403
 
-            deps.db.create_learning_event(
-                build_learning_event_payload(
-                    session_record,
-                    event_type=event_type,
-                    turn_index=turn_index,
-                    payload=payload,
-                )
+            # Collect every event of this turn with the Firestore id create_learning_event
+            # returns — that id is the legacy_firestore_id shadow_write_turn dedupes on
+            # (§5b.2 #1). The primary + all derived events share one session_record, so
+            # the PG shadow resolves their four FK parents once per turn, not per event.
+            primary_payload = build_learning_event_payload(
+                session_record,
+                event_type=event_type,
+                turn_index=turn_index,
+                payload=payload,
             )
+            turn_events = [
+                {**primary_payload, 'id': deps.db.create_learning_event(primary_payload)}
+            ]
             session_updates = apply_learning_event_to_session(
                 session_record,
                 event_type=event_type,
@@ -575,8 +590,21 @@ def create_curriculum_admin_blueprint(deps: RouteDeps) -> Blueprint:
                 payload=payload,
                 updated_session_summary=session_updates.get('session_summary'),
             ):
-                deps.db.create_learning_event(derived_event)
+                turn_events.append(
+                    {**derived_event, 'id': deps.db.create_learning_event(derived_event)}
+                )
+            # Firestore session UPDATE (system of record) + the events-flag-OFF session
+            # shadow (shadow_update_practice_session, which self-disables when the events
+            # flag is on, §5b.2 #7).
             deps.db.update_practice_session(session_id, session_updates, sql_engine=deps.sql_engine)
+            # Events-flag-ON path: one batched PG transaction for the turn's events AND
+            # the summary/finalize UPDATE (subsumes the standalone session shadow above).
+            dual_write_analytics.shadow_write_turn(
+                deps.sql_engine,
+                session_firestore_id=session_id,
+                events=turn_events,
+                session_updates=session_updates,
+            )
 
             return jsonify({
                 'success': True,

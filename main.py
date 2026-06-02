@@ -499,6 +499,25 @@ def register_domain_blueprints():
                 'are a no-op until one is configured'
             )
 
+    if os.environ.get('DUAL_WRITE_ANALYTICS_EVENTS') == '1':
+        # §5b.5: events FK to practice_sessions, so this flag is meaningful only with
+        # DUAL_WRITE_ANALYTICS_SESSIONS=1; otherwise every per-turn event shadow is a
+        # silent FK no-op. Warn loudly on that misconfiguration.
+        if not sql_enabled():
+            print(
+                '[startup warning] DUAL_WRITE_ANALYTICS_EVENTS=1 but no Cloud SQL target '
+                '(INSTANCE_CONNECTION_NAME/DATABASE_URL) set — learning_event shadow writes '
+                'are a no-op until one is configured'
+            )
+        elif os.environ.get('DUAL_WRITE_ANALYTICS_SESSIONS') != '1':
+            print(
+                '[startup warning] DUAL_WRITE_ANALYTICS_EVENTS=1 but '
+                'DUAL_WRITE_ANALYTICS_SESSIONS!=1 — events FK to practice_sessions, so '
+                'every event shadow will be a silent FK no-op (§5b.5 ordering)'
+            )
+        else:
+            print('[startup] DUAL_WRITE_ANALYTICS_EVENTS=1 — learning_event writes shadow to Postgres (one batched txn/turn)')
+
     # Read-cutover flag (default OFF). 'shadow' = Firestore authoritative + PG
     # parity compare logged; '1' = PG authoritative, fail-open to Firestore.
     _read_org = os.environ.get('READ_PG_ORGANIZATIONS', '')
