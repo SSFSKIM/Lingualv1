@@ -171,10 +171,15 @@ substitutions:
   # non-backfilled smoke-test session), Pass 2 event-COUNT in_sync (1408=1408), a live
   # shadow compare (1 compared/0 mismatched), and post-flip teacher analytics PG-served
   # with 0 fail-open. Default bumped shadow->'1' for durability. Rollback instant: =shadow
-  # (or '0'). EVENTS stays '0' until the GIN (0003) is applied to prod + the event-read
-  # shadow soak.
+  # (or '0').
   _READ_PG_ANALYTICS_SESSIONS: '1'
-  _READ_PG_ANALYTICS_EVENTS: '0'
+  # EVENTS FLIPPED to '1' (PG-AUTHORITATIVE, fail-open) 2026-06-03 (rev 00061-29z) after:
+  # Alembic 0003 payload GIN applied to prod (alembic upgrade head as postgres owner;
+  # learning_events_payload_gin_idx backs the context_tag/error payload aggregations),
+  # Pass 2 event-COUNT in_sync (1408=1408), a live event-read shadow compare (1/0 via
+  # list_assignment_learning_events), post-flip pedagogy aggregations PG-served 0 fail-open.
+  # Default bumped 0->'1'. Rollback instant: =shadow (or '0'). ALL analytics reads now PG.
+  _READ_PG_ANALYTICS_EVENTS: '1'
 
 # Store images in Artifact Registry
 images:
