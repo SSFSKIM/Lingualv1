@@ -114,7 +114,10 @@ substitutions:
   # scripts/backfill_learning_events_term.py --write (chunked bulk) + --parity
   # (per-session COUNT in_sync) FIRST, then --update-env-vars DUAL_WRITE_ANALYTICS_EVENTS=1,
   # then bump this default 0->1 for durability. Rollback is instant: =0 (no rebuild).
-  _DUAL_WRITE_ANALYTICS_EVENTS: '0'
+  # FLIPPED to '1' (LIVE) 2026-06-03 (rev 00058) after Slice B soak: events term-backfill
+  # 1401 inserted/0 errors + --parity per-session COUNT in_sync (fs 1401 = pg 1401, 0
+  # short/0 surplus). Default bumped 0->1 so a redeploy preserves the live shadow.
+  _DUAL_WRITE_ANALYTICS_EVENTS: '1'
   # Read-cutover flags (read phase). Per entity: '0'/'' = Firestore only,
   # 'shadow' = Firestore authoritative + PG parity compare (logged), '1' = PG
   # authoritative, fail-open to Firestore. organizations FLIPPED to '1' on
@@ -163,7 +166,11 @@ substitutions:
   # Soak/flip order: deploy → READ_PG_ANALYTICS_SESSIONS=shadow (soak, run
   # scripts/analytics_read_parity.py Pass 1) → '1' → (after events live) EVENTS=shadow
   # → '1'. Apply Alembic 0003 (payload GIN) before EVENTS read perf matters.
-  _READ_PG_ANALYTICS_SESSIONS: '0'
+  # SESSIONS set to 'shadow' (LIVE soak) 2026-06-03 (rev 00058); Pass 1 in_sync 48/48,
+  # 0 mismatched (point-in-time). Default bumped 0->'shadow' so a redeploy preserves the
+  # soak. Flip to '1' (Slice E) after the 48h LIVE shadow soak. EVENTS stays '0' until
+  # the GIN (0003) is applied to prod + the event-read shadow soak.
+  _READ_PG_ANALYTICS_SESSIONS: 'shadow'
   _READ_PG_ANALYTICS_EVENTS: '0'
 
 # Store images in Artifact Registry
