@@ -17,9 +17,10 @@ is explicitly prohibited here. Each chunk is ONE multi-row
 `insert(LearningEvent).values([...]).on_conflict_do_nothing(index_elements=
 ['legacy_firestore_id'])` — genuinely idempotent, re-runnable.
 
-§3.4 PARITY — per-session COUNT diff, never a 600k-row id-set diff: for each term
-session compare count(Firestore events) vs count(PG events). `in_sync` = no session has
-fewer PG events than Firestore.
+§3.4/§4.5 PARITY — per-session COUNT diff, never a 600k-row id-set diff: for each term
+session compare count(Firestore events) vs count(PG events). `in_sync` requires STRICT
+per-session equality — a shortfall (PG<FS, a coexistence drop) AND a surplus (PG>FS, an
+overcount) both fail the gate (the read-flip predicate is count(PG)==count(Firestore)).
 
 Connection: Postgres from `backend.db.sql.get_engine()` (set DATABASE_URL or
 INSTANCE_CONNECTION_NAME + DB_* + DB_IAM_AUTH). Firestore via ADC.
@@ -178,9 +179,13 @@ def run(mode: str, term_start: datetime.datetime) -> int:
     pg_session = _make_session()
     try:
         if mode == 'parity':
-            # §3.4 per-session COUNT diff (NOT an id-set diff). missing = sessions
-            # where PG has FEWER events than Firestore (the gate); a PG surplus is
-            # informational (re-derived/forward-written events outside the read scope).
+            # §3.4 / §4.5 per-session COUNT diff (NOT an id-set diff). The read-flip
+            # predicate is STRICT per-session equality count(PG)==count(Firestore), so
+            # BOTH a shortfall (PG < FS, a coexistence drop) AND a surplus (PG > FS, an
+            # overcount → analytics would over-report) fail the gate. Unlike the Slice B
+            # SESSIONS parity (whole-table PG vs term-scoped Firestore, where forward
+            # dual-write legitimately adds out-of-scope PG rows), this counts the SAME
+            # per-session scope on both sides, so a per-session surplus is a real divergence.
             pg_counts = {
                 sid: int(cnt)
                 for sid, cnt in pg_session.execute(
@@ -208,10 +213,13 @@ def run(mode: str, term_start: datetime.datetime) -> int:
                 'sessions_short_in_postgres': short[:50],
                 'sessions_short_total': len(short),
                 'sessions_surplus_in_postgres': surplus[:50],
-                'in_sync': not short,
+                'sessions_surplus_total': len(surplus),
+                # Strict equality gate (§4.5 Pass 2): no session may diverge in EITHER
+                # direction. Shortfall = coexistence drop; surplus = overcount.
+                'in_sync': not short and not surplus,
             }
             _print_report('parity (per-session event COUNT)', report)
-            return 0 if not short else 1
+            return 0 if (not short and not surplus) else 1
 
         # dry-run / write: read every term session's events, resolve, chunk-insert.
         dry_run = mode == 'dry-run'
