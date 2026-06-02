@@ -43,6 +43,7 @@ from backend.db.models.org import (
     Membership,
     Organization,
 )
+from backend.db.models.practice import PracticeSession
 from backend.db.repository.normalization import (
     coerce_jsonb,
     coerce_str_list,
@@ -613,6 +614,100 @@ def upsert_assignment(
     row = _existing(session, Assignment, legacy_id)
     if row is None:
         row = Assignment(legacy_firestore_id=legacy_id, **fields)
+        session.add(row)
+    else:
+        for key, value in fields.items():
+            setattr(row, key, value)
+    session.flush()
+    return row
+
+
+def upsert_practice_session(
+    session: Any, doc: dict[str, Any], *, warnings: list[Any] | None = None
+) -> PracticeSession:
+    """Upsert one practice session. Idempotent by legacy_firestore_id (session doc id).
+
+    Resolves ALL THREE FK parents via legacy_firestore_id (RAISE if unresolved —
+    org, class, AND assignment must be migrated first; the relational chain + Slice
+    A assignments are all live):
+      org_id        (Firestore org doc id)        -> organizations.id
+      class_id      (Firestore class doc id)       -> classes.id
+      assignment_id (Firestore assignment doc id)  -> assignments.id
+
+    Field rename: student_uid -> student_firebase_uid (a column rename, NOT an FK
+    resolution — student_firebase_uid is a plain Text column, no membership lookup).
+    The JSONB snapshot/summary fields coerce to {} (their NOT-NULL '{}' default);
+    started_at/ended_at are Firestore timestamps -> tz-aware datetime|None. status
+    passes through; the model CHECK ('active'|'completed'|'abandoned') rejects an
+    invalid value at flush, surfaced as a per-row error by the SAVEPOINT loop.
+
+    NOT in `_PIPELINE`: practice_sessions are TERM-SCOPED, backfilled by
+    scripts/backfill_practice_sessions_term.py (§3.2/§3.3), never by run_backfill.
+    """
+    legacy_id = doc.get('id')
+    org_firestore_id = doc.get('org_id')
+    org_uuid = resolve_legacy_id(session, Organization, org_firestore_id)
+    if org_uuid is None:
+        raise UnresolvedParentError(
+            f'practice_session {legacy_id!r}: organization {org_firestore_id!r} has no '
+            'migrated row (organizations must be backfilled first)'
+        )
+    class_firestore_id = doc.get('class_id')
+    class_uuid = resolve_legacy_id(session, Class, class_firestore_id)
+    if class_uuid is None:
+        raise UnresolvedParentError(
+            f'practice_session {legacy_id!r}: class {class_firestore_id!r} has no '
+            'migrated row (classes must be backfilled first)'
+        )
+    assignment_firestore_id = doc.get('assignment_id')
+    assignment_uuid = resolve_legacy_id(session, Assignment, assignment_firestore_id)
+    if assignment_uuid is None:
+        raise UnresolvedParentError(
+            f'practice_session {legacy_id!r}: assignment {assignment_firestore_id!r} has '
+            'no migrated row (assignments must be backfilled first — Slice A)'
+        )
+
+    fields = {
+        'org_id': org_uuid,
+        'class_id': class_uuid,
+        'assignment_id': assignment_uuid,
+        # Renamed: Firestore student_uid -> student_firebase_uid (plain Text column).
+        'student_firebase_uid': doc.get('student_uid') or '',
+        'mapping_snapshot': coerce_jsonb(doc.get('mapping_snapshot'), default={}),
+        'assignment_snapshot': coerce_jsonb(doc.get('assignment_snapshot'), default={}),
+        'curriculum_snapshot': coerce_jsonb(doc.get('curriculum_snapshot'), default={}),
+        'pedagogy_snapshot': coerce_jsonb(doc.get('pedagogy_snapshot'), default={}),
+        'class_snapshot': coerce_jsonb(doc.get('class_snapshot'), default={}),
+        'modality': doc.get('modality') or 'hybrid',
+        'voice_enabled': bool(doc.get('voice_enabled', False)),
+        'text_enabled': bool(doc.get('text_enabled', True)),
+        'status': doc.get('status') or 'active',
+        'started_at': parse_firestore_timestamp(doc.get('started_at')),
+        'ended_at': parse_firestore_timestamp(doc.get('ended_at')),
+        'prompt_version': doc.get('prompt_version'),
+        'system_prompt_preview': doc.get('system_prompt_preview'),
+        'transcript_ref': coerce_jsonb(doc.get('transcript_ref'), default={}),
+        'cost_summary': coerce_jsonb(doc.get('cost_summary'), default={}),
+        'session_summary': coerce_jsonb(doc.get('session_summary'), default={}),
+        'analysis_state': coerce_jsonb(doc.get('analysis_state'), default={}),
+        'teacher_preview': bool(doc.get('teacher_preview', False)),
+        'ui_language': doc.get('ui_language') or 'en',
+        'org_status_when_created': doc.get('org_status_when_created'),
+    }
+
+    # Preserve the Firestore timestamps when the doc carries them (the term-scope
+    # backfill reads real docs with resolved timestamps), so a backfilled row keeps
+    # its TRUE created_at/started_at. The live shadow strips SERVER_TIMESTAMP to None
+    # (the create payload actually carries real datetimes), so missing keys fall
+    # through to the column server_default now() — same pattern as upsert_assignment.
+    for ts_key in ('created_at', 'updated_at'):
+        ts_val = doc.get(ts_key)
+        if ts_val is not None:
+            fields[ts_key] = ts_val
+
+    row = _existing(session, PracticeSession, legacy_id)
+    if row is None:
+        row = PracticeSession(legacy_firestore_id=legacy_id, **fields)
         session.add(row)
     else:
         for key, value in fields.items():

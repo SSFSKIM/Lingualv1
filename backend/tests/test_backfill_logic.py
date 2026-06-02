@@ -17,10 +17,13 @@ table keyed by (model, legacy_firestore_id), so resolution + idempotency are
 exercised exactly as the repository code calls them.
 """
 
+import datetime
 import unittest
 import uuid
 
+from backend.db.models.assignment import Assignment
 from backend.db.models.org import Class, Enrollment, Membership, Organization
+from backend.db.models.practice import PracticeSession
 from backend.db.repository import backfill
 
 
@@ -156,6 +159,8 @@ def _parse_stmt(stmt):
         Membership.__tablename__: Membership,
         Class.__tablename__: Class,
         Enrollment.__tablename__: Enrollment,
+        Assignment.__tablename__: Assignment,
+        PracticeSession.__tablename__: PracticeSession,
     }[model.name]
 
     # Is this select(Model.id) (resolution) or select(Model) (existence)?
@@ -186,6 +191,32 @@ def _class_doc(**o):
 
 def _enrollment_doc(**o):
     base = {'id': 'class1_studentA', 'class_id': 'class1', 'student_uid': 'studentA'}
+    base.update(o)
+    return base
+
+
+def _assignment_doc(**o):
+    base = {
+        'id': 'asg1',
+        'org_id': 'org1',
+        'class_id': 'class1',
+        'title': 'Cafe',
+        'instructions': 'order a coffee',
+        'generated_scenario': 'a cafe',
+    }
+    base.update(o)
+    return base
+
+
+def _practice_session_doc(**o):
+    base = {
+        'id': 'sess1',
+        'org_id': 'org1',
+        'class_id': 'class1',
+        'assignment_id': 'asg1',
+        'student_uid': 'studentA',
+        'status': 'active',
+    }
     base.update(o)
     return base
 
@@ -319,6 +350,78 @@ class TestEnrollmentUpsert(unittest.TestCase):
         backfill.upsert_organization(s, _org_doc())
         with self.assertRaises(backfill.UnresolvedParentError):
             backfill.upsert_enrollment(s, _enrollment_doc(class_id='ghost'))
+
+
+class TestPracticeSessionUpsert(unittest.TestCase):
+    """Slice B: practice_sessions upsert — 3-parent FK resolution + student_uid rename."""
+
+    def _session_with_assignment(self):
+        s = _FakeSession()
+        backfill.upsert_organization(s, _org_doc())
+        backfill.upsert_class(s, _class_doc())
+        backfill.upsert_assignment(s, _assignment_doc())
+        return s
+
+    def test_resolves_three_fk_parents_to_uuids(self):
+        s = self._session_with_assignment()
+        org_uuid = s.store[(Organization, 'org1')].id
+        class_uuid = s.store[(Class, 'class1')].id
+        asg_uuid = s.store[(Assignment, 'asg1')].id
+        row = backfill.upsert_practice_session(s, _practice_session_doc())
+        # FKs emitted as resolved UUIDs, never the Firestore string ids.
+        self.assertEqual(row.org_id, org_uuid)
+        self.assertEqual(row.class_id, class_uuid)
+        self.assertEqual(row.assignment_id, asg_uuid)
+
+    def test_student_uid_renamed_not_resolved(self):
+        s = self._session_with_assignment()
+        row = backfill.upsert_practice_session(s, _practice_session_doc(student_uid='studentZ'))
+        # Renamed verbatim to student_firebase_uid — a Firebase UID, never a UUID.
+        self.assertEqual(row.student_firebase_uid, 'studentZ')
+
+    def test_unresolved_assignment_raises(self):
+        # org + class present, assignment missing — the Slice-B-specific 3rd FK gate
+        # (enrollments only resolve org/class; sessions add the assignment parent).
+        s = _FakeSession()
+        backfill.upsert_organization(s, _org_doc())
+        backfill.upsert_class(s, _class_doc())
+        with self.assertRaises(backfill.UnresolvedParentError):
+            backfill.upsert_practice_session(s, _practice_session_doc(assignment_id='ghost'))
+
+    def test_unresolved_org_raises(self):
+        s = _FakeSession()
+        with self.assertRaises(backfill.UnresolvedParentError):
+            backfill.upsert_practice_session(s, _practice_session_doc())
+
+    def test_jsonb_fields_default_to_empty_dict(self):
+        s = self._session_with_assignment()
+        row = backfill.upsert_practice_session(s, _practice_session_doc())
+        # NOT-NULL JSONB columns coerce None -> {} (never None, which would violate NOT NULL).
+        self.assertEqual(row.session_summary, {})
+        self.assertEqual(row.mapping_snapshot, {})
+
+    def test_status_defaults_to_active(self):
+        s = self._session_with_assignment()
+        row = backfill.upsert_practice_session(s, _practice_session_doc(status=None))
+        self.assertEqual(row.status, 'active')
+
+    def test_backfill_preserves_real_timestamps(self):
+        s = self._session_with_assignment()
+        ts = datetime.datetime(2026, 1, 15, tzinfo=datetime.timezone.utc)
+        row = backfill.upsert_practice_session(
+            s, _practice_session_doc(created_at=ts, started_at=ts)
+        )
+        # The term-scope backfill carries real Firestore timestamps; they're preserved.
+        self.assertEqual(row.created_at, ts)
+        self.assertEqual(row.started_at, ts)
+
+    def test_idempotent_updates_in_place(self):
+        s = self._session_with_assignment()
+        backfill.upsert_practice_session(s, _practice_session_doc())
+        row2 = backfill.upsert_practice_session(s, _practice_session_doc(status='completed'))
+        self.assertEqual(row2.status, 'completed')
+        added_sessions = [o for o in s.added if isinstance(o, PracticeSession)]
+        self.assertEqual(len(added_sessions), 1)  # one row, updated in place
 
 
 class TestRunBackfillOrchestration(unittest.TestCase):

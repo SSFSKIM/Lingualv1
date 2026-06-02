@@ -305,7 +305,7 @@ class SuspendedOrgFake:
     def set_user_last_active_membership(self, *_args, **_kwargs):
         pass
 
-    def create_practice_session(self, payload, session_id=None):
+    def create_practice_session(self, payload, session_id=None, *, sql_engine=None):
         self._counter += 1
         sid = session_id or f'sess-{self._counter}'
         self.practice_sessions[sid] = {'id': sid, **payload}
@@ -315,7 +315,7 @@ class SuspendedOrgFake:
         record = self.practice_sessions.get(session_id)
         return dict(record) if record else None
 
-    def update_practice_session(self, session_id, updates):
+    def update_practice_session(self, session_id, updates, *, sql_engine=None):
         if session_id in self.practice_sessions:
             self.practice_sessions[session_id].update(updates)
 

@@ -168,6 +168,7 @@ from backend.routes.schools import create_schools_blueprint
 from backend.routes.guardian import create_guardian_blueprint
 from backend.routes.teacher import create_teacher_blueprint
 from backend.routes.curriculum_admin import create_curriculum_admin_blueprint
+from backend.routes.analytics_internal import create_analytics_internal_blueprint
 from backend.routes.admin import create_admin_blueprint
 from backend.routes.integrations import create_integrations_blueprint
 from backend.routes.canvas_practice import create_canvas_practice_blueprint
@@ -488,6 +489,16 @@ def register_domain_blueprints():
                 'are a no-op until one is configured'
             )
 
+    if os.environ.get('DUAL_WRITE_ANALYTICS_SESSIONS') == '1':
+        if sql_enabled():
+            print('[startup] DUAL_WRITE_ANALYTICS_SESSIONS=1 — practice_session writes shadow to Postgres')
+        else:
+            print(
+                '[startup warning] DUAL_WRITE_ANALYTICS_SESSIONS=1 but no Cloud SQL target '
+                '(INSTANCE_CONNECTION_NAME/DATABASE_URL) set — practice_session shadow writes '
+                'are a no-op until one is configured'
+            )
+
     # Read-cutover flag (default OFF). 'shadow' = Firestore authoritative + PG
     # parity compare logged; '1' = PG authoritative, fail-open to Firestore.
     _read_org = os.environ.get('READ_PG_ORGANIZATIONS', '')
@@ -543,6 +554,9 @@ def register_domain_blueprints():
     app.register_blueprint(create_guardian_blueprint(deps))
     app.register_blueprint(create_teacher_blueprint(deps))
     app.register_blueprint(create_curriculum_admin_blueprint(deps))
+    # Internal-only (shared-secret) reconciler surface for the analytics migration;
+    # routes are auth-gated + flag-gated internally, so registration is unconditional.
+    app.register_blueprint(create_analytics_internal_blueprint(deps))
     app.register_blueprint(create_admin_blueprint(deps))
     app.register_blueprint(create_integrations_blueprint(deps))
     app.register_blueprint(create_canvas_practice_blueprint(deps))

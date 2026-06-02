@@ -484,7 +484,7 @@ def create_curriculum_admin_blueprint(deps: RouteDeps) -> Blueprint:
             session_payload['org_status_when_created'] = (
                 (session_org or {}).get('status') or database.ORG_STATUS_ACTIVE
             )
-            session_id = deps.db.create_practice_session(session_payload)
+            session_id = deps.db.create_practice_session(session_payload, sql_engine=deps.sql_engine)
             session_record = deps.db.get_practice_session(session_id)
 
             deps.db.create_learning_event(
@@ -576,7 +576,7 @@ def create_curriculum_admin_blueprint(deps: RouteDeps) -> Blueprint:
                 updated_session_summary=session_updates.get('session_summary'),
             ):
                 deps.db.create_learning_event(derived_event)
-            deps.db.update_practice_session(session_id, session_updates)
+            deps.db.update_practice_session(session_id, session_updates, sql_engine=deps.sql_engine)
 
             return jsonify({
                 'success': True,

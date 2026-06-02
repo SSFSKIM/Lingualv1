@@ -1,10 +1,19 @@
-"""Flag-gated Postgres shadow-write for the ANALYTICS family — Slice A: assignments.
+"""Flag-gated Postgres shadow-write for the ANALYTICS family.
+
+Slice A: assignments (DUAL_WRITE_ASSIGNMENTS). Slice B: practice_sessions
+(DUAL_WRITE_ANALYTICS_SESSIONS). Slice C (later): learning_events
+(DUAL_WRITE_ANALYTICS_EVENTS) — `shadow_write_turn`, not yet built.
 
 Companion to `dual_write.py` (enrollments) and `dual_write_school_chain.py`
-(org/membership/class): the SAME fail-open `_run` contract, gated on its OWN flag
-DUAL_WRITE_ASSIGNMENTS. Assignments are the FK PARENT of practice_sessions and
-learning_events, so they migrate first (ANALYTICS_MIGRATION.md Slice A); the
-session/event shadows land in later slices and will live here too.
+(org/membership/class): the SAME fail-open contract, gated on its OWN flag.
+Assignments are the FK PARENT of practice_sessions and learning_events, so they
+migrate first (ANALYTICS_MIGRATION.md Slice A); sessions resolve org+class+
+assignment FKs and are the parent of events (Slice B/C).
+
+Hot-path note: session writes ride the live voice/text practice path, so unlike
+the low-churn assignment shadow they use `_run_with_timeout` (a parameterized
+statement_timeout) NOT the shared `_run` (hardcoded 10s — a worst-case ceiling,
+not a hot-path budget). See ANALYTICS_MIGRATION.md §2.3 / §5b.2.
 
 Mirror strategy (assignments are LOW-CHURN curriculum docs, not a hot path):
   - CREATE / EDIT reuse the idempotent `backfill.upsert_assignment`. The Firestore
@@ -26,8 +35,9 @@ Heavy imports stay lazy inside function bodies; flag-OFF cost is os + logging.
 from __future__ import annotations
 
 import datetime
+import logging
 import os
-from typing import Any
+from typing import Any, Callable
 
 # Shared, safety-critical infra (one copy of the open-session / SET LOCAL
 # statement_timeout / swallow-and-log contract, and the SERVER_TIMESTAMP
@@ -35,10 +45,67 @@ from typing import Any
 from backend.db.dual_write import _run
 from backend.db.dual_write_school_chain import _strip_sentinels
 
+_log = logging.getLogger(__name__)
+
+
+def _run_with_timeout(
+    sql_engine: Any, op_name: str, fn: Callable[[Any], None], *, timeout_ms: int
+) -> None:
+    """Like `dual_write._run`, but with a caller-supplied statement_timeout.
+
+    The hot-path variant for the analytics family. `_run` hardcodes 10s, which is
+    a worst-case ceiling — wrong as a hot-path budget on the live practice route
+    (ANALYTICS_MIGRATION.md §2.3 forbids reusing it; §5b.2 #1). `timeout_ms` is
+    keyword-only so a caller can't pass it positionally where `_run` takes none.
+
+    Same fail-open contract as `_run`: `UnresolvedParentError` is the expected
+    coexistence no-op (parent not yet backfilled) logged at debug; any other
+    exception is logged and NEVER re-raised into the live request. `with
+    Session(engine)` returns the connection to the pool on every exit path.
+    """
+    from backend.db.dual_write import _resolve_engine
+
+    engine = _resolve_engine(sql_engine)
+    if engine is None:
+        return
+    from sqlalchemy import text
+    from sqlalchemy.orm import Session
+
+    from backend.db.repository.backfill import UnresolvedParentError
+
+    try:
+        with Session(engine) as session:
+            session.execute(text(f"SET LOCAL statement_timeout = '{timeout_ms}ms'"))
+            fn(session)
+            session.commit()
+    except UnresolvedParentError:
+        _log.debug('dual-write %s: parent not yet backfilled; shadow skipped', op_name)
+    except Exception:  # noqa: BLE001 — shadow failures are non-fatal to the request
+        _log.exception('dual-write %s: Postgres shadow write failed (non-fatal)', op_name)
+
 
 def _enabled_assignments() -> bool:
     """Read the flag on EVERY call (not a module constant). OFF unless '1'."""
     return os.environ.get('DUAL_WRITE_ASSIGNMENTS') == '1'
+
+
+def _enabled_sessions() -> bool:
+    """practice_session shadow gate (Slice B). OFF unless DUAL_WRITE_ANALYTICS_SESSIONS='1'."""
+    return os.environ.get('DUAL_WRITE_ANALYTICS_SESSIONS') == '1'
+
+
+def _enabled_events() -> bool:
+    """learning_event shadow gate (Slice C — shadow_write_turn, not yet built).
+
+    Read here ONLY so the Slice B session-update shadow can self-disable when the
+    events flag is on: per the §5b.2 #7 flag matrix, when DUAL_WRITE_ANALYTICS_EVENTS=1
+    the per-turn `shadow_write_turn` writes the events AND the session-summary
+    UPDATE in ONE transaction (one pool checkout). The standalone
+    `shadow_update_practice_session` must NOT also fire, or the turn would take two
+    checkouts. So shadow_update is the events-flag-OFF path; shadow_write_turn
+    subsumes it when events are on.
+    """
+    return os.environ.get('DUAL_WRITE_ANALYTICS_EVENTS') == '1'
 
 
 def _utcnow() -> datetime.datetime:
@@ -117,3 +184,124 @@ def shadow_set_assignment_grade_config(
         )
 
     _run(sql_engine, 'set_assignment_grade_config', op)
+
+
+# --- Slice B: practice_sessions ----------------------------------------------
+#
+# Sessions ride the LIVE practice path (create on launch; one UPDATE per turn at
+# curriculum_admin.py:579), so both shadows use `_run_with_timeout` (bounded
+# hot-path budget), NOT the 10s `_run`. Firestore is written first (system of
+# record); the shadow mirrors after and never raises. FK parents (org/class/
+# assignment) must already be in Postgres — an unresolved parent is a quiet
+# coexistence no-op (UnresolvedParentError, swallowed), reconciled by the
+# mandatory term-scope backfill before Firestore writes retire (§5b.6).
+
+# Mutable practice_session columns mirrored by the per-turn / finalize UPDATE.
+# Anything else in the Firestore `updates` dict (e.g. its own `updated_at`) is
+# ignored; `updated_at` is always re-stamped here.
+_SESSION_MUTABLE_COLUMNS = (
+    'session_summary',
+    'cost_summary',
+    'analysis_state',
+    'status',
+    'ended_at',
+)
+
+
+def shadow_create_practice_session(sql_engine: Any, *, session_doc: dict[str, Any]) -> None:
+    """Mirror a practice-session CREATE into Postgres (idempotent upsert).
+
+    `session_doc` is the full doc just written to Firestore, with 'id' set to the
+    server-assigned doc id (the legacy_firestore_id). Idempotent by that key.
+    `upsert_practice_session` resolves org+class+assignment -> UUIDs and raises
+    UnresolvedParentError (quiet no-op via `_run_with_timeout`) if any parent is
+    not migrated yet. One write per session; the student already waits on session
+    init, so 1000ms is an acceptable bound (§2.4).
+    """
+    if not _enabled_sessions():
+        return
+    from backend.db.repository import backfill
+
+    # _strip_sentinels scrubs any SERVER_TIMESTAMP -> None (the create payload
+    # actually carries real _utc_now() datetimes today, so this is defensive and
+    # keeps parity with the assignment shadow).
+    doc = {**_strip_sentinels(session_doc)}
+    if not doc.get('id'):
+        _log.debug('dual-write create_practice_session: doc missing id; shadow skipped')
+        return
+
+    def op(session: Any) -> None:
+        backfill.upsert_practice_session(session, doc)
+
+    _run_with_timeout(sql_engine, 'create_practice_session', op, timeout_ms=1000)
+
+
+def shadow_update_practice_session(
+    sql_engine: Any, *, session_firestore_id: str, updates: dict[str, Any]
+) -> None:
+    """Mirror a practice-session UPDATE (rolling summary every turn AND finalize).
+
+    Targeted UPDATE of the mutable columns present in `updates`, keyed by
+    legacy_firestore_id. 0 rows affected (session not in PG yet) is a SILENT
+    accepted coexistence drop (§5b.6) — the term-scope backfill + count-parity
+    gate reconciles it before Firestore writes retire. 2000ms hot-path budget
+    (§5b.2 #1).
+
+    Events-flag-OFF path of the §5b.2 #7 matrix: when DUAL_WRITE_ANALYTICS_EVENTS
+    is on, Slice C's per-turn `shadow_write_turn` writes the events AND this
+    summary UPDATE in one transaction, so this standalone shadow MUST self-disable
+    (else two pool checkouts per turn). Hence the `not _enabled_events()` guard.
+    """
+    if not _enabled_sessions() or _enabled_events():
+        return
+    from sqlalchemy import update
+
+    from backend.db.models.practice import PracticeSession
+
+    clean = _strip_sentinels(updates)
+    values = {k: clean[k] for k in _SESSION_MUTABLE_COLUMNS if k in clean}
+    if not values:
+        return  # nothing PG-relevant in this update
+    values['updated_at'] = _utcnow()
+
+    def op(session: Any) -> None:
+        session.execute(
+            update(PracticeSession)
+            .where(PracticeSession.legacy_firestore_id == session_firestore_id)
+            .values(**values)
+        )
+
+    _run_with_timeout(sql_engine, 'update_practice_session', op, timeout_ms=2000)
+
+
+def sweep_orphaned_sessions(sql_engine: Any, *, idle_minutes: int = 90) -> dict[str, Any]:
+    """Reconciler: mark PG practice_sessions stuck 'active' past `idle_minutes`
+    as 'abandoned' (ended_at=now). Resolves the no-server-owned-close gap (§5b.2
+    #5): a client that never sends `session.ended` (browser close) leaves a row
+    permanently 'active'. Idempotent; at beta touches ~0 rows. Gated on the
+    SESSIONS flag (dormant until on); fail-open. Returns {'swept': int}.
+
+    90 min default: a class period is <=60 min. Uses a Python cutoff (not a raw
+    SQL INTERVAL) so the comparison stays type-safe against the tz-aware column.
+    """
+    if not _enabled_sessions():
+        return {'swept': 0, 'status': 'flag_off'}
+    from sqlalchemy import update
+
+    from backend.db.models.practice import PracticeSession
+
+    cutoff = _utcnow() - datetime.timedelta(minutes=idle_minutes)
+    now = _utcnow()
+    result: dict[str, Any] = {'swept': 0}
+
+    def op(session: Any) -> None:
+        res = session.execute(
+            update(PracticeSession)
+            .where(PracticeSession.status == 'active')
+            .where(PracticeSession.started_at < cutoff)
+            .values(status='abandoned', ended_at=now, updated_at=now)
+        )
+        result['swept'] = res.rowcount or 0
+
+    _run_with_timeout(sql_engine, 'sweep_orphaned_sessions', op, timeout_ms=2000)
+    return result

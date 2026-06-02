@@ -718,7 +718,7 @@ class FakeDbBase:
 
     # -- Practice sessions --
 
-    def create_practice_session(self, payload: dict) -> str:
+    def create_practice_session(self, payload: dict, *, sql_engine=None) -> str:
         sid = self._next_id("session")
         self.practice_sessions[sid] = {"id": sid, **payload}
         return sid
@@ -727,7 +727,7 @@ class FakeDbBase:
         s = self.practice_sessions.get(session_id)
         return dict(s) if s else None
 
-    def update_practice_session(self, session_id: str, updates: dict):
+    def update_practice_session(self, session_id: str, updates: dict, *, sql_engine=None):
         if session_id in self.practice_sessions:
             self.practice_sessions[session_id].update(updates)
 

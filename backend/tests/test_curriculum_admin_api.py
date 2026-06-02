@@ -246,7 +246,7 @@ class FakeCurriculumDb:
 
     # ---- practice sessions -------------------------------------------------
 
-    def create_practice_session(self, payload):
+    def create_practice_session(self, payload, *, sql_engine=None):
         self._session_counter += 1
         session_id = f'session-{self._session_counter}'
         self.practice_sessions[session_id] = {
@@ -259,7 +259,7 @@ class FakeCurriculumDb:
         session_record = self.practice_sessions.get(session_id)
         return dict(session_record) if session_record else None
 
-    def update_practice_session(self, session_id, updates):
+    def update_practice_session(self, session_id, updates, *, sql_engine=None):
         if session_id in self.practice_sessions:
             self.practice_sessions[session_id].update(updates)
 

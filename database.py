@@ -2346,7 +2346,9 @@ def list_student_classes(student_uid):
     return classes
 
 
-def create_practice_session(session_data, session_id=None, *, org_status_when_created=ORG_STATUS_ACTIVE):
+def create_practice_session(
+    session_data, session_id=None, *, org_status_when_created=ORG_STATUS_ACTIVE, sql_engine=None
+):
     """Create a practice session document.
 
     ``org_status_when_created`` snapshots the org's lifecycle status at the
@@ -2358,13 +2360,25 @@ def create_practice_session(session_data, session_id=None, *, org_status_when_cr
     route-level guard blocks them first. The kwarg is keyword-only so it
     cannot accidentally shadow ``session_id`` positionally; the dict
     payload key takes precedence when the caller has already injected one.
+
+    ``sql_engine`` (deps.sql_engine) opts into the fail-open Postgres
+    practice_session shadow (gated on DUAL_WRITE_ANALYTICS_SESSIONS,
+    ANALYTICS_MIGRATION Slice B). Firestore is the system of record — written
+    first; the shadow mirrors after and never raises.
     """
     doc_ref = get_practice_session_ref(session_id) if session_id else get_practice_sessions_collection().document()
     payload = dict(session_data or {})
     payload.setdefault('org_status_when_created', org_status_when_created)
     payload.setdefault('created_at', _utc_now())
     payload['updated_at'] = _utc_now()
-    doc_ref.set(payload)
+    doc_ref.set(payload)  # Firestore is the system of record — write it first.
+    if sql_engine is not None:
+        from backend.db import dual_write_analytics as _da
+        # `payload` is exactly the doc just written; inject the server-assigned id
+        # so the shadow needs no second Firestore read on the session-init path.
+        _da.shadow_create_practice_session(
+            sql_engine, session_doc={**payload, 'id': doc_ref.id}
+        )
     return doc_ref.id
 
 
@@ -2378,11 +2392,23 @@ def get_practice_session(session_id):
     return data
 
 
-def update_practice_session(session_id, updates):
-    """Update a practice session."""
+def update_practice_session(session_id, updates, *, sql_engine=None):
+    """Update a practice session.
+
+    ``sql_engine`` (deps.sql_engine) opts into the fail-open Postgres
+    practice_session shadow (gated on DUAL_WRITE_ANALYTICS_SESSIONS, Slice B).
+    The shadow mirrors the rolling-summary UPDATE every turn AND the
+    session.ended finalize; it self-disables when DUAL_WRITE_ANALYTICS_EVENTS=1,
+    where Slice C's per-turn shadow_write_turn subsumes it (§5b.2 #7).
+    """
     payload = dict(updates or {})
     payload['updated_at'] = _utc_now()
     get_practice_session_ref(session_id).update(payload)
+    if sql_engine is not None:
+        from backend.db import dual_write_analytics as _da
+        _da.shadow_update_practice_session(
+            sql_engine, session_firestore_id=session_id, updates=updates
+        )
 
 
 def list_assignment_practice_sessions(assignment_id):
