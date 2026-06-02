@@ -273,6 +273,14 @@ _weaker_mode('READ_PG_ASSIGNMENTS', 'READ_PG_ANALYTICS_SESSIONS')
 ```python
 _weaker_mode('READ_PG_ANALYTICS_SESSIONS', 'READ_PG_ANALYTICS_EVENTS')
 ```
+> **Implementation note (Slice D, 2026-06-03):** the shipped event-reader gate is
+> `_weaker_mode('READ_PG_ANALYTICS_EVENTS', 'READ_PG_ANALYTICS_SESSIONS', 'READ_PG_ASSIGNMENTS')`
+> — `READ_PG_ASSIGNMENTS` is added because `_weaker_mode` reads RAW flags (it is not
+> transitive through the session gate), so without it, rolling assignments back to
+> Firestore while sessions+events stay `'1'` would leave events serving PG in a
+> mixed-store request. Same rollback-ordering safety as the `list_student_classes`
+> two-flag gate. Strictly more conservative than this §4.4 baseline (can only refuse
+> a PG serve, never wrongly grant one).
 
 `_route_read`'s `also` parameter currently accepts a single string. It must be extended to accept a tuple of flags. This is a small interface change in `read_router.py`.
 

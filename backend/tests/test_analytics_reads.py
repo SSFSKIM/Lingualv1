@@ -195,8 +195,11 @@ class TestAnalyticsRouting(unittest.TestCase):
         self.assertEqual(read_router._shadow_stats['READ_PG_ANALYTICS_SESSIONS'][0], 1)
 
     def test_event_reader_serves_pg_when_both_flags_one(self):
+        # Event gate is the weaker of EVENTS, SESSIONS, AND ASSIGNMENTS (transitive
+        # rollback safety) — all three must be '1' to serve PG.
         os.environ['READ_PG_ANALYTICS_EVENTS'] = '1'
         os.environ['READ_PG_ANALYTICS_SESSIONS'] = '1'
+        os.environ['READ_PG_ASSIGNMENTS'] = '1'
         router = ReadRouter(self._fs(), sql_engine=lambda: object())
         with mock.patch.object(ReadRouter, '_pg_read', lambda self, pc, eng: [{'id': 'e-pg'}]):
             self.assertEqual(router.list_session_learning_events('s1'), [{'id': 'e-pg'}])
@@ -210,6 +213,20 @@ class TestAnalyticsRouting(unittest.TestCase):
         with mock.patch.object(ReadRouter, '_pg_read',
                                lambda self, pc, eng: pg_called.append(1) or [{'id': 'e-pg'}]):
             out = router.list_student_class_learning_events('c1', 'u1')
+        self.assertEqual(out[0]['id'], 'e-fs')
+        self.assertEqual(pg_called, [])
+
+    def test_event_reader_gates_off_when_assignments_rolled_back(self):
+        # EVENTS=1 + SESSIONS=1 but ASSIGNMENTS off -> transitive weaker gate = off ->
+        # Firestore (the rollback-ordering safety: events never serve PG in a mixed-
+        # store request when an upstream family is rolled back).
+        os.environ['READ_PG_ANALYTICS_EVENTS'] = '1'
+        os.environ['READ_PG_ANALYTICS_SESSIONS'] = '1'  # ASSIGNMENTS left OFF
+        router = ReadRouter(self._fs(), sql_engine=lambda: object())
+        pg_called = []
+        with mock.patch.object(ReadRouter, '_pg_read',
+                               lambda self, pc, eng: pg_called.append(1) or [{'id': 'e-pg'}]):
+            out = router.list_assignment_learning_events('a1')
         self.assertEqual(out[0]['id'], 'e-fs')
         self.assertEqual(pg_called, [])
 
@@ -228,6 +245,7 @@ class TestAnalyticsRouting(unittest.TestCase):
     def test_event_type_filter_passed_through(self):
         os.environ['READ_PG_ANALYTICS_EVENTS'] = '1'
         os.environ['READ_PG_ANALYTICS_SESSIONS'] = '1'
+        os.environ['READ_PG_ASSIGNMENTS'] = '1'
         router = ReadRouter(self._fs(), sql_engine=lambda: object())
         seen = {}
 

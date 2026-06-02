@@ -181,13 +181,33 @@ def _events(session: Any, stmt) -> list[dict[str, Any]]:
     ]
 
 
+def _normalize_event_types(event_types: Any) -> list[str]:
+    """Mirror database._normalize_string_list EXACTLY so the SQL filter is the same
+    set as the Firestore reader's Python filter: a non-list (incl. a bare string or
+    tuple) is NO filter; strings are stripped; blanks / non-strings dropped; deduped."""
+    if not isinstance(event_types, list):
+        return []
+    seen: set[str] = set()
+    out: list[str] = []
+    for value in event_types:
+        if not isinstance(value, str):
+            continue
+        cleaned = value.strip()
+        if not cleaned or cleaned in seen:
+            continue
+        seen.add(cleaned)
+        out.append(cleaned)
+    return out
+
+
 def list_assignment_learning_events(
     session: Any, assignment_uuid: Any, event_types: Any = None
 ) -> list[dict[str, Any]]:
     """All events for an assignment, optionally filtered to `event_types` (pushed
-    into SQL — the Firestore reader filters in Python; same result set)."""
+    into SQL — the Firestore reader filters in Python; SAME result set via the shared
+    normalization). Empty/non-list event_types => no filter (all events)."""
     stmt = _EVENT_SELECT.where(LearningEvent.assignment_id == assignment_uuid)
-    allowed = [t for t in event_types if t] if isinstance(event_types, (list, tuple)) else []
+    allowed = _normalize_event_types(event_types)
     if allowed:
         stmt = stmt.where(LearningEvent.event_type.in_(allowed))
     return _events(session, stmt.order_by(LearningEvent.created_at))

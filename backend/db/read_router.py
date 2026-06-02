@@ -673,11 +673,17 @@ class ReadRouter:
 
     # --- analytics: learning_events (Slice D) ----------------------------
     #
-    # Gated READ_PG_ANALYTICS_EVENTS, also READ_PG_ANALYTICS_SESSIONS (§4.4): events
-    # invert session_id to its legacy id via JOIN, so they are only as cut-over as
-    # sessions (which transitively gate on assignments). DORMANT until Slice C's
-    # DUAL_WRITE_ANALYTICS_EVENTS is enabled + the event term-backfill runs — until
-    # then PG has no events and the shadow id-set diff would show every event missing.
+    # Gated READ_PG_ANALYTICS_EVENTS, also (READ_PG_ANALYTICS_SESSIONS,
+    # READ_PG_ASSIGNMENTS) — the weaker mode wins. §4.4 names only the sessions
+    # dependency, but `_weaker_mode` is NOT transitive (it reads raw flags, not the
+    # effective session-read mode), so assignments is listed explicitly: an event read
+    # inverts assignment_id (and, via the session, depends on assignments). Without it,
+    # rolling READ_PG_ASSIGNMENTS back to shadow while sessions+events stay '1' would
+    # leave events serving PG in a mixed-store analytics request — the same rollback-
+    # ordering footgun the list_student_classes two-flag gate guards against.
+    # DORMANT until Slice C's DUAL_WRITE_ANALYTICS_EVENTS is enabled + the event
+    # term-backfill runs — until then PG has no events and the shadow id-set diff would
+    # show every event missing.
 
     def list_assignment_learning_events(self, assignment_id, event_types=None):
         def pg_call(session):
@@ -695,7 +701,7 @@ class ReadRouter:
             lambda: self._fs.list_assignment_learning_events(assignment_id, event_types),
             pg_call,
             ignore=_ANALYTICS_SHADOW_IGNORE,
-            also='READ_PG_ANALYTICS_SESSIONS',
+            also=('READ_PG_ANALYTICS_SESSIONS', 'READ_PG_ASSIGNMENTS'),
         )
 
     def list_session_learning_events(self, session_id):
@@ -712,7 +718,7 @@ class ReadRouter:
             lambda: self._fs.list_session_learning_events(session_id),
             pg_call,
             ignore=_ANALYTICS_SHADOW_IGNORE,
-            also='READ_PG_ANALYTICS_SESSIONS',
+            also=('READ_PG_ANALYTICS_SESSIONS', 'READ_PG_ASSIGNMENTS'),
         )
 
     def list_student_class_learning_events(self, class_id, student_uid):
@@ -731,5 +737,5 @@ class ReadRouter:
             lambda: self._fs.list_student_class_learning_events(class_id, student_uid),
             pg_call,
             ignore=_ANALYTICS_SHADOW_IGNORE,
-            also='READ_PG_ANALYTICS_SESSIONS',
+            also=('READ_PG_ANALYTICS_SESSIONS', 'READ_PG_ASSIGNMENTS'),
         )

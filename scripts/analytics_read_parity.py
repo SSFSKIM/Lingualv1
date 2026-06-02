@@ -37,6 +37,7 @@ import datetime
 import json
 import logging
 import sys
+from typing import Any
 
 logger = logging.getLogger('analytics_read_parity')
 
@@ -86,48 +87,68 @@ def _term_sessions(db, term_start: datetime.datetime) -> dict[str, dict]:
     return out
 
 
-def _pass1(db, pg_session, term_start: datetime.datetime) -> dict:
-    """Per-session session_summary field diff (Firestore vs PG). Zero-divergence gate."""
+def _pg_term_session_summaries(pg_session, term_start: datetime.datetime) -> dict[str, Any]:
+    """PG practice_session (legacy_firestore_id -> session_summary) for the term.
+
+    Scoped by the SAME predicate as the Firestore side (started_at >= term_start), so
+    the id-set diff catches a PG-ONLY session (extra), not just a PG shortfall — a
+    one-sided `legacy_firestore_id IN (firestore ids)` query would hide a surplus and
+    let the gate false-pass (the same surplus footgun fixed in the Slice C backfill parity)."""
     from sqlalchemy import select
 
     from backend.db.models.practice import PracticeSession
-    from backend.db.read_router import _diff_dict
 
-    fs_sessions = _term_sessions(db, term_start)
-    pg_summaries = {
+    return {
         legacy: summary
         for legacy, summary in pg_session.execute(
             select(PracticeSession.legacy_firestore_id, PracticeSession.session_summary)
-            .where(PracticeSession.legacy_firestore_id.in_(list(fs_sessions)))
+            .where(PracticeSession.started_at >= term_start)
         ).all()
     }
 
+
+def _pass1(db, pg_session, term_start: datetime.datetime) -> dict:
+    """Per-session session_summary field diff (Firestore vs PG). Zero-divergence gate.
+
+    in_sync requires the id-sets to MATCH (no missing AND no extra) and every shared
+    session's session_summary to be field-equal."""
+    from backend.db.read_router import _diff_dict
+
+    fs_sessions = _term_sessions(db, term_start)
+    pg_summaries = _pg_term_session_summaries(pg_session, term_start)
+
+    missing_in_pg = sorted(set(fs_sessions) - set(pg_summaries))
+    extra_in_pg = sorted(set(pg_summaries) - set(fs_sessions))
     mismatched: list[dict] = []
-    missing_in_pg: list[str] = []
-    for sid, doc in fs_sessions.items():
-        if sid not in pg_summaries:
-            missing_in_pg.append(sid)
-            continue
+    for sid in set(fs_sessions) & set(pg_summaries):
         # Clock-skew/derived noise is not part of session_summary; compare the blob whole.
-        diff = _diff_dict(doc.get('session_summary') or {}, pg_summaries[sid] or {}, frozenset())
+        diff = _diff_dict(
+            fs_sessions[sid].get('session_summary') or {}, pg_summaries[sid] or {}, frozenset()
+        )
         if diff:
             mismatched.append({'session': sid, 'diff': diff})
 
     report = {
-        'sessions': len(fs_sessions),
-        'compared': len(fs_sessions) - len(missing_in_pg),
+        'firestore_sessions': len(fs_sessions),
+        'postgres_sessions': len(pg_summaries),
+        'compared': len(set(fs_sessions) & set(pg_summaries)),
         'missing_in_postgres': missing_in_pg[:50],
         'missing_in_postgres_total': len(missing_in_pg),
+        'extra_in_postgres': extra_in_pg[:50],
+        'extra_in_postgres_total': len(extra_in_pg),
         'summary_mismatched': mismatched[:50],
         'summary_mismatched_total': len(mismatched),
-        'in_sync': not missing_in_pg and not mismatched,
+        'in_sync': not missing_in_pg and not extra_in_pg and not mismatched,
     }
     _print_report('PASS 1 — session_summary parity (zero-divergence gate)', report)
     return report
 
 
 def _pass2(db, pg_session, term_start: datetime.datetime) -> dict:
-    """Per-session event COUNT parity (Firestore vs PG). Strict equality gate."""
+    """Per-session event COUNT parity (Firestore vs PG). Strict equality gate.
+
+    Counts over the UNION of term sessions on both sides, so a PG-only session's
+    events surface as a surplus (not silently dropped by a Firestore-keyed query)."""
     from sqlalchemy import func, select
 
     from backend.db.models.practice import LearningEvent, PracticeSession
@@ -138,7 +159,7 @@ def _pass2(db, pg_session, term_start: datetime.datetime) -> dict:
         for sid, cnt in pg_session.execute(
             select(PracticeSession.legacy_firestore_id, func.count(LearningEvent.id))
             .join(LearningEvent, LearningEvent.session_id == PracticeSession.id)
-            .where(PracticeSession.legacy_firestore_id.in_(list(fs_sessions)))
+            .where(PracticeSession.started_at >= term_start)
             .group_by(PracticeSession.legacy_firestore_id)
         ).all()
     }
@@ -146,9 +167,10 @@ def _pass2(db, pg_session, term_start: datetime.datetime) -> dict:
     short: list[dict] = []
     surplus: list[dict] = []
     fs_total = 0
-    for sid in fs_sessions:
-        fs_n = sum(
-            1 for _ in db.collection('learning_events').where('session_id', '==', sid).stream()
+    for sid in set(fs_sessions) | set(pg_counts):
+        fs_n = (
+            sum(1 for _ in db.collection('learning_events').where('session_id', '==', sid).stream())
+            if sid in fs_sessions else 0
         )
         fs_total += fs_n
         pg_n = pg_counts.get(sid, 0)
@@ -158,7 +180,8 @@ def _pass2(db, pg_session, term_start: datetime.datetime) -> dict:
             surplus.append({'session': sid, 'firestore': fs_n, 'postgres': pg_n})
 
     report = {
-        'sessions': len(fs_sessions),
+        'firestore_sessions': len(fs_sessions),
+        'postgres_sessions': len(pg_counts),
         'firestore_event_total': fs_total,
         'postgres_event_total': sum(pg_counts.values()),
         'sessions_short_in_postgres': short[:50],
