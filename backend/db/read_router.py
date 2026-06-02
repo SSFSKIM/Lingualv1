@@ -111,6 +111,14 @@ _ENROLLMENT_SHADOW_IGNORE = frozenset({'created_at', 'updated_at'})
 # real value drift still surfaces while benign tz-suffix / legacy-enum skew does not.
 _ASSIGNMENT_SHADOW_IGNORE = frozenset({'created_at', 'updated_at', 'mapping_id'})
 
+# Analytics (practice_session + learning_event) shadow-ignore. The routed analytics
+# readers are all LIST reads, so the live shadow compares by id-SET (`_diff_list`,
+# which ignores this field-level set) — the id-set IS the coverage parity that gates
+# the read flip (§4.5 Pass-1/Pass-2 field-level metric parity is the OFFLINE
+# scripts/analytics_read_parity.py gate, not the live router compare). Kept for the
+# clock-skew fields if a point-field diff is ever added.
+_ANALYTICS_SHADOW_IGNORE = frozenset({'created_at', 'updated_at'})
+
 
 # Per-field normalizers applied to BOTH the Firestore and PG values before the
 # shadow diff, so an INTENDED transform is not flagged but a real drift still is
@@ -580,4 +588,148 @@ class ReadRouter:
             'READ_PG_ASSIGNMENTS',
             lambda: self._fs.list_class_assignments(class_id, statuses),
             pg_call,
+        )
+
+    # --- analytics: practice_sessions (Slice D) --------------------------
+    #
+    # Gated READ_PG_ANALYTICS_SESSIONS, also READ_PG_ASSIGNMENTS (§4.4): the
+    # serializer inverts assignment_id to its legacy id via JOIN, so a session read is
+    # only as cut-over as assignments (READ_PG_CLASSES is omitted — it is already '1',
+    # a vacuous check). The pg_call resolves the parent legacy id -> UUID and returns
+    # _FALLBACK if unmigrated, so an absent parent degrades to Firestore (not an
+    # authoritative empty list, which would blank a teacher's analytics).
+
+    def list_assignment_practice_sessions(self, assignment_id):
+        def pg_call(session):
+            from backend.db.models.assignment import Assignment
+            from backend.db.repository import analytics_reads, resolution
+            assignment_uuid = resolution.resolve_legacy_id(session, Assignment, assignment_id)
+            if assignment_uuid is None:
+                return _FALLBACK
+            return analytics_reads.list_assignment_practice_sessions(session, assignment_uuid)
+
+        return self._route_read(
+            'READ_PG_ANALYTICS_SESSIONS',
+            lambda: self._fs.list_assignment_practice_sessions(assignment_id),
+            pg_call,
+            ignore=_ANALYTICS_SHADOW_IGNORE,
+            also='READ_PG_ASSIGNMENTS',
+        )
+
+    def list_student_assignment_practice_sessions(self, assignment_id, student_uid):
+        def pg_call(session):
+            from backend.db.models.assignment import Assignment
+            from backend.db.repository import analytics_reads, resolution
+            assignment_uuid = resolution.resolve_legacy_id(session, Assignment, assignment_id)
+            if assignment_uuid is None:
+                return _FALLBACK
+            return analytics_reads.list_student_assignment_practice_sessions(
+                session, assignment_uuid, student_uid
+            )
+
+        return self._route_read(
+            'READ_PG_ANALYTICS_SESSIONS',
+            lambda: self._fs.list_student_assignment_practice_sessions(assignment_id, student_uid),
+            pg_call,
+            ignore=_ANALYTICS_SHADOW_IGNORE,
+            also='READ_PG_ASSIGNMENTS',
+        )
+
+    def list_class_practice_sessions(self, class_id):
+        def pg_call(session):
+            from backend.db.models.org import Class
+            from backend.db.repository import analytics_reads, resolution
+            class_uuid = resolution.resolve_legacy_id(session, Class, class_id)
+            if class_uuid is None:
+                return _FALLBACK
+            return analytics_reads.list_class_practice_sessions(session, class_uuid)
+
+        return self._route_read(
+            'READ_PG_ANALYTICS_SESSIONS',
+            lambda: self._fs.list_class_practice_sessions(class_id),
+            pg_call,
+            ignore=_ANALYTICS_SHADOW_IGNORE,
+            also='READ_PG_ASSIGNMENTS',
+        )
+
+    def list_student_class_practice_sessions(self, class_id, student_uid):
+        def pg_call(session):
+            from backend.db.models.org import Class
+            from backend.db.repository import analytics_reads, resolution
+            class_uuid = resolution.resolve_legacy_id(session, Class, class_id)
+            if class_uuid is None:
+                return _FALLBACK
+            return analytics_reads.list_student_class_practice_sessions(
+                session, class_uuid, student_uid
+            )
+
+        return self._route_read(
+            'READ_PG_ANALYTICS_SESSIONS',
+            lambda: self._fs.list_student_class_practice_sessions(class_id, student_uid),
+            pg_call,
+            ignore=_ANALYTICS_SHADOW_IGNORE,
+            also='READ_PG_ASSIGNMENTS',
+        )
+
+    # --- analytics: learning_events (Slice D) ----------------------------
+    #
+    # Gated READ_PG_ANALYTICS_EVENTS, also READ_PG_ANALYTICS_SESSIONS (§4.4): events
+    # invert session_id to its legacy id via JOIN, so they are only as cut-over as
+    # sessions (which transitively gate on assignments). DORMANT until Slice C's
+    # DUAL_WRITE_ANALYTICS_EVENTS is enabled + the event term-backfill runs — until
+    # then PG has no events and the shadow id-set diff would show every event missing.
+
+    def list_assignment_learning_events(self, assignment_id, event_types=None):
+        def pg_call(session):
+            from backend.db.models.assignment import Assignment
+            from backend.db.repository import analytics_reads, resolution
+            assignment_uuid = resolution.resolve_legacy_id(session, Assignment, assignment_id)
+            if assignment_uuid is None:
+                return _FALLBACK
+            return analytics_reads.list_assignment_learning_events(
+                session, assignment_uuid, event_types
+            )
+
+        return self._route_read(
+            'READ_PG_ANALYTICS_EVENTS',
+            lambda: self._fs.list_assignment_learning_events(assignment_id, event_types),
+            pg_call,
+            ignore=_ANALYTICS_SHADOW_IGNORE,
+            also='READ_PG_ANALYTICS_SESSIONS',
+        )
+
+    def list_session_learning_events(self, session_id):
+        def pg_call(session):
+            from backend.db.models.practice import PracticeSession
+            from backend.db.repository import analytics_reads, resolution
+            session_uuid = resolution.resolve_legacy_id(session, PracticeSession, session_id)
+            if session_uuid is None:
+                return _FALLBACK
+            return analytics_reads.list_session_learning_events(session, session_uuid)
+
+        return self._route_read(
+            'READ_PG_ANALYTICS_EVENTS',
+            lambda: self._fs.list_session_learning_events(session_id),
+            pg_call,
+            ignore=_ANALYTICS_SHADOW_IGNORE,
+            also='READ_PG_ANALYTICS_SESSIONS',
+        )
+
+    def list_student_class_learning_events(self, class_id, student_uid):
+        def pg_call(session):
+            from backend.db.models.org import Class
+            from backend.db.repository import analytics_reads, resolution
+            class_uuid = resolution.resolve_legacy_id(session, Class, class_id)
+            if class_uuid is None:
+                return _FALLBACK
+            return analytics_reads.list_student_class_learning_events(
+                session, class_uuid, student_uid
+            )
+
+        return self._route_read(
+            'READ_PG_ANALYTICS_EVENTS',
+            lambda: self._fs.list_student_class_learning_events(class_id, student_uid),
+            pg_call,
+            ignore=_ANALYTICS_SHADOW_IGNORE,
+            also='READ_PG_ANALYTICS_SESSIONS',
         )

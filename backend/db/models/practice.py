@@ -111,4 +111,10 @@ class LearningEvent(Base):
             'student_firebase_uid',
             'created_at',
         ),
+        # GIN on the payload JSONB — the event-derived analytics aggregations
+        # (_aggregate_context_tag_counts / _aggregate_error_event_metadata) read
+        # payload per row; without this they scan JSONB for every event in the scope.
+        # Required before the Slice E read flip (ANALYTICS_MIGRATION §4.1). Added live
+        # via Alembic 0003 (the instance was created from the 0001 metadata baseline).
+        Index('learning_events_payload_gin_idx', 'payload', postgresql_using='gin'),
     )

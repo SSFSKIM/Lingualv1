@@ -564,6 +564,32 @@ def register_domain_blueprints():
                 'target set — enrollment reads stay on Firestore (router fails open)'
             )
 
+    _read_asess = os.environ.get('READ_PG_ANALYTICS_SESSIONS', '')
+    if _read_asess in ('shadow', '1'):
+        if sql_enabled():
+            print(f'[startup] READ_PG_ANALYTICS_SESSIONS={_read_asess} — practice_session reads '
+                  f'{"shadow-compared against" if _read_asess == "shadow" else "served from"} Postgres')
+        else:
+            print(
+                f'[startup warning] READ_PG_ANALYTICS_SESSIONS={_read_asess} but no Cloud SQL '
+                'target set — practice_session reads stay on Firestore (router fails open)'
+            )
+
+    _read_aevt = os.environ.get('READ_PG_ANALYTICS_EVENTS', '')
+    if _read_aevt in ('shadow', '1'):
+        # §4.4: event reads also-gate on READ_PG_ANALYTICS_SESSIONS (weaker mode wins),
+        # which itself gates on READ_PG_ASSIGNMENTS — so this only truly serves PG once
+        # the upstream families are at least as cut-over. Warn if events are ahead.
+        if not sql_enabled():
+            print(
+                f'[startup warning] READ_PG_ANALYTICS_EVENTS={_read_aevt} but no Cloud SQL '
+                'target set — learning_event reads stay on Firestore (router fails open)'
+            )
+        else:
+            print(f'[startup] READ_PG_ANALYTICS_EVENTS={_read_aevt} — learning_event reads '
+                  f'{"shadow-compared against" if _read_aevt == "shadow" else "served from"} Postgres '
+                  '(effective mode = weaker of this and READ_PG_ANALYTICS_SESSIONS)')
+
     app.register_blueprint(create_auth_blueprint(deps))
     app.register_blueprint(create_chat_blueprint(deps))
     app.register_blueprint(create_assessment_blueprint(deps))
