@@ -599,6 +599,26 @@ class ReadRouter:
     # _FALLBACK if unmigrated, so an absent parent degrades to Firestore (not an
     # authoritative empty list, which would blank a teacher's analytics).
 
+    def get_practice_session(self, session_id):
+        """practice_session POINT-GET (read-after-write + chat.py session validation),
+        routed by READ_PG_ANALYTICS_SESSIONS (also READ_PG_ASSIGNMENTS — the serializer
+        JOINs assignments for the legacy id). REQUIRED before WRITE_FIRESTORE_ANALYTICS=0:
+        under retirement a session exists only in PG, so this read must resolve from PG.
+        A PG miss -> _FALLBACK (fall open to Firestore), NOT an authoritative None — a 404
+        on the session-create read-back would block the student's whole session."""
+        def pg_call(session):
+            from backend.db.repository import analytics_reads
+            result = analytics_reads.get_practice_session(session, session_id)
+            return _FALLBACK if result is None else result
+
+        return self._route_read(
+            'READ_PG_ANALYTICS_SESSIONS',
+            lambda: self._fs.get_practice_session(session_id),
+            pg_call,
+            ignore=_ANALYTICS_SHADOW_IGNORE,
+            also='READ_PG_ASSIGNMENTS',
+        )
+
     def list_assignment_practice_sessions(self, assignment_id):
         def pg_call(session):
             from backend.db.models.assignment import Assignment

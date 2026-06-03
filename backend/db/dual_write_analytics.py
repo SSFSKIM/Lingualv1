@@ -95,6 +95,58 @@ def _run_with_timeout(
         _log.exception('dual-write %s: Postgres shadow write failed (non-fatal)', op_name)
 
 
+def _run_with_timeout_strict(
+    sql_engine: Any, op_name: str, fn: Callable[[Any], None], *, timeout_ms: int
+) -> None:
+    """FAIL-CLOSED counterpart of `_run_with_timeout` for `WRITE_FIRESTORE_ANALYTICS='0'`.
+
+    Same own-Session / `SET LOCAL statement_timeout` / commit skeleton, but exceptions
+    PROPAGATE to the caller instead of being swallowed. When Firestore writes are retired
+    (Slice E), Postgres is the SOLE store — a swallowed failure here would be silent data
+    loss (the turn is gone from BOTH stores). Letting it raise makes the route handler
+    return 500 so the SPA retries (the existing 5xx-retry contract). This is the inherent
+    cost of removing the Firestore safety net, and is WHY `WRITE_FIRESTORE_ANALYTICS`
+    defaults '1' for a confidence sprint before the flip (ANALYTICS_MIGRATION.md §5 Slice E).
+
+    A separate function (NOT a `raise_on_failure` flag on `_run_with_timeout`) deliberately
+    keeps the swallow-all path and the propagate path structurally distinct — a conditional
+    re-raise inside the shared swallow would invert that helper's correctness contract.
+    """
+    from backend.db.dual_write import _resolve_engine
+
+    engine = _resolve_engine(sql_engine)
+    if engine is None:
+        # PG is the sole store but no engine is configured — a real misconfiguration,
+        # not a fail-open coexistence case. Surface it.
+        raise RuntimeError(
+            f'{op_name}: WRITE_FIRESTORE_ANALYTICS=0 (Postgres is the sole store) but no '
+            'Cloud SQL engine is available'
+        )
+    from sqlalchemy import text
+    from sqlalchemy.orm import Session
+
+    with Session(engine) as session:
+        session.execute(text(f"SET LOCAL statement_timeout = '{timeout_ms}ms'"))
+        fn(session)
+        session.commit()
+
+
+def firestore_analytics_enabled() -> bool:
+    """WRITE_FIRESTORE_ANALYTICS gate (Slice E retirement). Default ON.
+
+    '1' (or unset/any non-'0'): Firestore is the system of record for the analytics
+    family (practice_sessions + learning_events) — written first, PG mirrors fail-open.
+    '0': Firestore writes are RETIRED; Postgres is the SOLE store and writes are
+    fail-CLOSED (`primary_*` paths). Read on every call (not a module constant); the
+    safe default keeps a brand-new flag from silently dropping Firestore writes.
+
+    Hard operational constraint when '0': READ_PG_ANALYTICS_SESSIONS=1 (so the
+    `get_practice_session` read-after-write resolves from PG) AND
+    DUAL_WRITE_ANALYTICS_EVENTS=1 (so events still persist). main.py warns otherwise.
+    """
+    return os.environ.get('WRITE_FIRESTORE_ANALYTICS', '1') != '0'
+
+
 def _enabled_assignments() -> bool:
     """Read the flag on EVERY call (not a module constant). OFF unless '1'."""
     return os.environ.get('DUAL_WRITE_ASSIGNMENTS') == '1'
@@ -326,15 +378,172 @@ def shadow_write_turn(
     """
     if not _enabled_events():
         return
+    valid_events, session_values = _prepare_turn(events, session_updates)
+    if not valid_events and not session_values:
+        return
+    _run_with_timeout(
+        sql_engine,
+        'write_turn',
+        lambda s: _apply_turn(
+            s,
+            session_firestore_id=session_firestore_id,
+            valid_events=valid_events,
+            session_values=session_values,
+            strict=False,
+        ),
+        timeout_ms=2000,
+    )
 
+
+def primary_write_turn(
+    sql_engine: Any,
+    *,
+    session_firestore_id: str,
+    events: list[dict[str, Any]],
+    session_updates: dict[str, Any] | None = None,
+) -> None:
+    """PRIMARY (fail-closed) counterpart of `shadow_write_turn` for
+    `WRITE_FIRESTORE_ANALYTICS='0'` (Postgres is the SOLE store).
+
+    Identical row-building / FK-resolve-once / one-transaction logic (shared via
+    `_apply_turn`), but: (1) it runs through `_run_with_timeout_strict`, so a PG failure
+    PROPAGATES (route -> 500 -> SPA retry) instead of a silent drop; (2) `strict=True`,
+    so an UNRESOLVED FK parent RAISES rather than silently dropping the turn's events —
+    with no Firestore backup, a drop would be permanent data loss. In the retired state
+    all parents (org/class/assignment) are PG-authoritative and the session was just
+    created in PG, so resolution should always succeed; a failure is a real error.
+
+    Same §5b.2 #7 gating as the shadow: events-flag-ON path; subsumes the standalone
+    session UPDATE (which self-disables). DURABILITY INVARIANT (§5b.2 #3) holds — every
+    row is built from request scope, never re-read from Firestore.
+    """
+    if not _enabled_events():
+        return
+    valid_events, session_values = _prepare_turn(events, session_updates)
+    if not valid_events and not session_values:
+        return
+    _run_with_timeout_strict(
+        sql_engine,
+        'write_turn',
+        lambda s: _apply_turn(
+            s,
+            session_firestore_id=session_firestore_id,
+            valid_events=valid_events,
+            session_values=session_values,
+            strict=True,
+        ),
+        timeout_ms=2000,
+    )
+
+
+def write_turn(
+    sql_engine: Any,
+    *,
+    session_firestore_id: str,
+    events: list[dict[str, Any]],
+    session_updates: dict[str, Any] | None = None,
+) -> None:
+    """Dispatch one practice turn to the PRIMARY (fail-closed) or SHADOW (fail-open) PG
+    write based on `WRITE_FIRESTORE_ANALYTICS`. The route calls only this — it is unaware
+    of which store is the system of record. Zero behavioral change while the flag is '1'.
+    """
+    if firestore_analytics_enabled():
+        shadow_write_turn(
+            sql_engine,
+            session_firestore_id=session_firestore_id,
+            events=events,
+            session_updates=session_updates,
+        )
+    else:
+        primary_write_turn(
+            sql_engine,
+            session_firestore_id=session_firestore_id,
+            events=events,
+            session_updates=session_updates,
+        )
+
+
+def primary_create_practice_session(sql_engine: Any, *, session_doc: dict[str, Any]) -> None:
+    """PRIMARY (fail-closed) session CREATE for `WRITE_FIRESTORE_ANALYTICS='0'`.
+
+    Reuses the same idempotent `backfill.upsert_practice_session` as the shadow, but
+    through `_run_with_timeout_strict` so a PG/FK failure propagates (route -> 500). The
+    caller (`database.create_practice_session`) supplies a client-side-minted id (no
+    Firestore write) as `session_doc['id']` -> legacy_firestore_id.
+    """
+    from backend.db.repository import backfill
+
+    doc = {**_strip_sentinels(session_doc)}
+    if not doc.get('id'):
+        raise RuntimeError('primary_create_practice_session: session_doc missing id')
+
+    def op(session: Any) -> None:
+        backfill.upsert_practice_session(session, doc)
+
+    _run_with_timeout_strict(sql_engine, 'create_practice_session', op, timeout_ms=1000)
+
+
+def primary_update_practice_session(
+    sql_engine: Any, *, session_firestore_id: str, updates: dict[str, Any]
+) -> None:
+    """PRIMARY (fail-closed) session UPDATE for `WRITE_FIRESTORE_ANALYTICS='0'`.
+
+    Self-disables when DUAL_WRITE_ANALYTICS_EVENTS=1 (mirrors `shadow_update_practice_session`
+    §5b.2 #7) — the per-turn UPDATE rides `primary_write_turn` then. So this fires only in
+    the degenerate sessions=1/events=0 state; in normal retirement (events=1) it is a no-op.
+    """
+    if _enabled_events():
+        return
+    clean = _strip_sentinels(updates)
+    values = {k: clean[k] for k in _SESSION_MUTABLE_COLUMNS if k in clean}
+    if not values:
+        return
+    values['updated_at'] = _utcnow()
+
+    def op(session: Any) -> None:
+        from sqlalchemy import update
+
+        from backend.db.models.practice import PracticeSession
+
+        session.execute(
+            update(PracticeSession)
+            .where(PracticeSession.legacy_firestore_id == session_firestore_id)
+            .values(**values)
+        )
+
+    _run_with_timeout_strict(sql_engine, 'update_practice_session', op, timeout_ms=2000)
+
+
+def _prepare_turn(
+    events: list[dict[str, Any]] | None, session_updates: dict[str, Any] | None
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Shared prep for shadow/primary write_turn: drop id-less events (can't dedupe,
+    §5b.2 #1) and project the session_updates dict to the mutable PG columns."""
     valid_events = [e for e in (events or []) if e.get('id')]
     clean_updates = _strip_sentinels(session_updates or {})
     session_values = {
         k: clean_updates[k] for k in _SESSION_MUTABLE_COLUMNS if k in clean_updates
     }
-    if not valid_events and not session_values:
-        return
+    return valid_events, session_values
 
+
+def _apply_turn(
+    session: Any,
+    *,
+    session_firestore_id: str,
+    valid_events: list[dict[str, Any]],
+    session_values: dict[str, Any],
+    strict: bool,
+) -> None:
+    """The single transaction body shared by shadow_write_turn (fail-open) and
+    primary_write_turn (fail-closed). Resolves the four FK parents ONCE, bulk-inserts the
+    turn's events (`on_conflict_do_nothing` on legacy_firestore_id), then applies the
+    session summary/finalize UPDATE as the last statement.
+
+    `strict` selects the unresolved-parent contract: shadow (False) silently drops the
+    events as an accepted coexistence drop (§5b.6, reconciled by the backfill); primary
+    (True) RAISES — with Firestore retired there is no backup, so a drop is data loss.
+    """
     from sqlalchemy import update
     from sqlalchemy.dialects.postgresql import insert as pg_insert
 
@@ -344,49 +553,53 @@ def shadow_write_turn(
     from backend.db.repository.normalization import coerce_jsonb
     from backend.db.repository.resolution import resolve_legacy_id
 
-    def op(session: Any) -> None:
-        rows: list[dict[str, Any]] = []
-        if valid_events:
-            first = valid_events[0]
-            org_uuid = resolve_legacy_id(session, Organization, first.get('org_id'))
-            class_uuid = resolve_legacy_id(session, Class, first.get('class_id'))
-            assignment_uuid = resolve_legacy_id(session, Assignment, first.get('assignment_id'))
-            session_uuid = resolve_legacy_id(session, PracticeSession, session_firestore_id)
-            # All four NOT-NULL FKs must resolve or the turn's events stay Firestore-
-            # only this turn (accepted coexistence drop, §5b.6 — reconciled by backfill).
-            if None not in (org_uuid, class_uuid, assignment_uuid, session_uuid):
-                rows = [
-                    {
-                        'legacy_firestore_id': e['id'],
-                        'org_id': org_uuid,
-                        'class_id': class_uuid,
-                        'assignment_id': assignment_uuid,
-                        'session_id': session_uuid,
-                        # Rename (not an FK): Firestore student_uid -> student_firebase_uid.
-                        'student_firebase_uid': e.get('student_uid') or '',
-                        'event_type': e.get('event_type'),
-                        'turn_index': e.get('turn_index'),
-                        'payload': coerce_jsonb(e.get('payload'), default={}),
-                        'created_at': e.get('created_at'),
-                    }
-                    for e in valid_events
-                ]
-        if rows:
-            session.execute(
-                pg_insert(LearningEvent)
-                .values(rows)
-                .on_conflict_do_nothing(index_elements=['legacy_firestore_id'])
-            )
-        # The summary/finalize UPDATE rides the same transaction (last statement),
-        # keyed by legacy_firestore_id; 0 rows when the session is not in PG.
-        if session_values:
-            session.execute(
-                update(PracticeSession)
-                .where(PracticeSession.legacy_firestore_id == session_firestore_id)
-                .values(**session_values, updated_at=_utcnow())
-            )
-
-    _run_with_timeout(sql_engine, 'write_turn', op, timeout_ms=2000)
+    rows: list[dict[str, Any]] = []
+    if valid_events:
+        first = valid_events[0]
+        org_uuid = resolve_legacy_id(session, Organization, first.get('org_id'))
+        class_uuid = resolve_legacy_id(session, Class, first.get('class_id'))
+        assignment_uuid = resolve_legacy_id(session, Assignment, first.get('assignment_id'))
+        session_uuid = resolve_legacy_id(session, PracticeSession, session_firestore_id)
+        if None in (org_uuid, class_uuid, assignment_uuid, session_uuid):
+            if strict:
+                # PG is the sole store (WRITE_FIRESTORE_ANALYTICS=0): a drop is permanent
+                # data loss, not a reconcilable coexistence no-op. Surface it.
+                raise RuntimeError(
+                    'primary write_turn: unresolved FK parent for session '
+                    f'{session_firestore_id} (org/class/assignment/session must all be in PG)'
+                )
+            # shadow: accepted coexistence drop (§5b.6) — reconciled by the term backfill.
+        else:
+            rows = [
+                {
+                    'legacy_firestore_id': e['id'],
+                    'org_id': org_uuid,
+                    'class_id': class_uuid,
+                    'assignment_id': assignment_uuid,
+                    'session_id': session_uuid,
+                    # Rename (not an FK): Firestore student_uid -> student_firebase_uid.
+                    'student_firebase_uid': e.get('student_uid') or '',
+                    'event_type': e.get('event_type'),
+                    'turn_index': e.get('turn_index'),
+                    'payload': coerce_jsonb(e.get('payload'), default={}),
+                    'created_at': e.get('created_at'),
+                }
+                for e in valid_events
+            ]
+    if rows:
+        session.execute(
+            pg_insert(LearningEvent)
+            .values(rows)
+            .on_conflict_do_nothing(index_elements=['legacy_firestore_id'])
+        )
+    # The summary/finalize UPDATE rides the same transaction (last statement),
+    # keyed by legacy_firestore_id; 0 rows when the session is not in PG.
+    if session_values:
+        session.execute(
+            update(PracticeSession)
+            .where(PracticeSession.legacy_firestore_id == session_firestore_id)
+            .values(**session_values, updated_at=_utcnow())
+        )
 
 
 def sweep_orphaned_sessions(sql_engine: Any, *, idle_minutes: int = 90) -> dict[str, Any]:

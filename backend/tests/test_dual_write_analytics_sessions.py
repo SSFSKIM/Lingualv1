@@ -381,5 +381,117 @@ class TestReconcilerRoute(unittest.TestCase):
         self.assertEqual(body['swept'], 3)
 
 
+class TestWriteRetirement(unittest.TestCase):
+    """Slice E: WRITE_FIRESTORE_ANALYTICS retirement — the fail-closed primary path
+    and the write_turn dispatcher."""
+
+    def setUp(self):
+        for k in ('WRITE_FIRESTORE_ANALYTICS', 'DUAL_WRITE_ANALYTICS_EVENTS'):
+            os.environ.pop(k, None)
+            self.addCleanup(lambda key=k: os.environ.pop(key, None))
+
+    def test_firestore_enabled_defaults_on(self):
+        self.assertTrue(da.firestore_analytics_enabled())  # unset -> on
+
+    def test_firestore_enabled_off_only_for_zero(self):
+        os.environ['WRITE_FIRESTORE_ANALYTICS'] = '0'
+        self.assertFalse(da.firestore_analytics_enabled())
+        os.environ['WRITE_FIRESTORE_ANALYTICS'] = '1'
+        self.assertTrue(da.firestore_analytics_enabled())
+
+    def test_write_turn_dispatches_to_shadow_when_flag_on(self):
+        os.environ['DUAL_WRITE_ANALYTICS_EVENTS'] = '1'  # so neither path no-ops early
+        with mock.patch.object(da, 'shadow_write_turn') as shadow, \
+                mock.patch.object(da, 'primary_write_turn') as primary:
+            da.write_turn(lambda: object(), session_firestore_id='s1',
+                          events=[{'id': 'e1'}], session_updates={})
+        shadow.assert_called_once()
+        primary.assert_not_called()
+
+    def test_write_turn_dispatches_to_primary_when_flag_off(self):
+        os.environ['WRITE_FIRESTORE_ANALYTICS'] = '0'
+        os.environ['DUAL_WRITE_ANALYTICS_EVENTS'] = '1'
+        with mock.patch.object(da, 'shadow_write_turn') as shadow, \
+                mock.patch.object(da, 'primary_write_turn') as primary:
+            da.write_turn(lambda: object(), session_firestore_id='s1',
+                          events=[{'id': 'e1'}], session_updates={})
+        primary.assert_called_once()
+        shadow.assert_not_called()
+
+    def test_strict_runner_propagates_exception(self):
+        """_run_with_timeout_strict must NOT swallow — the whole point vs _run_with_timeout."""
+        with mock.patch('backend.db.dual_write._resolve_engine', return_value=object()), \
+                mock.patch('sqlalchemy.orm.Session', _RecordingSession):
+            def boom(_s):
+                raise RuntimeError('pg down')
+            with self.assertRaises(RuntimeError):
+                da._run_with_timeout_strict(lambda: object(), 'op', boom, timeout_ms=2000)
+
+    def test_strict_runner_raises_when_no_engine(self):
+        with mock.patch('backend.db.dual_write._resolve_engine', return_value=None):
+            with self.assertRaises(RuntimeError):
+                da._run_with_timeout_strict(lambda: object(), 'op', lambda _s: None, timeout_ms=2000)
+
+    def test_primary_write_turn_uses_strict_runner(self):
+        os.environ['DUAL_WRITE_ANALYTICS_EVENTS'] = '1'
+        captured = {}
+
+        def fake_strict(engine, op_name, fn, *, timeout_ms):
+            captured['op_name'] = op_name
+            captured['timeout_ms'] = timeout_ms
+
+        with mock.patch.object(da, '_run_with_timeout_strict', fake_strict):
+            da.primary_write_turn(lambda: object(), session_firestore_id='s1',
+                                  events=[{'id': 'e1'}], session_updates={'status': 'completed'})
+        self.assertEqual(captured['op_name'], 'write_turn')
+        self.assertEqual(captured['timeout_ms'], 2000)
+
+    def test_primary_write_turn_noop_when_events_flag_off(self):
+        # events flag off -> primary_write_turn self-guards like the shadow
+        with mock.patch.object(da, '_run_with_timeout_strict') as run:
+            da.primary_write_turn(lambda: object(), session_firestore_id='s1',
+                                  events=[{'id': 'e1'}], session_updates={})
+            run.assert_not_called()
+
+    def test_apply_turn_strict_raises_on_unresolved_parent(self):
+        """Fail-closed core: with PG the sole store, an unresolved FK parent must RAISE
+        (data loss otherwise), unlike the shadow which silently drops (§5b.6)."""
+        with mock.patch('backend.db.repository.resolution.resolve_legacy_id', return_value=None):
+            with self.assertRaises(RuntimeError):
+                da._apply_turn(
+                    _RecordingSession(), session_firestore_id='s1',
+                    valid_events=[{'id': 'e1', 'org_id': 'o1', 'class_id': 'c1',
+                                   'assignment_id': 'a1', 'event_type': 'student.turn'}],
+                    session_values={}, strict=True,
+                )
+
+    def test_apply_turn_shadow_drops_silently_on_unresolved_parent(self):
+        """Same unresolved parent in shadow mode (strict=False) -> no raise, no insert."""
+        rec = _RecordingSession()
+        with mock.patch('backend.db.repository.resolution.resolve_legacy_id', return_value=None):
+            da._apply_turn(
+                rec, session_firestore_id='s1',
+                valid_events=[{'id': 'e1', 'org_id': 'o1', 'class_id': 'c1',
+                               'assignment_id': 'a1', 'event_type': 'student.turn'}],
+                session_values={}, strict=False,
+            )
+        self.assertEqual(rec.statements, [])  # no insert when parents unresolved
+
+    def test_primary_create_uses_strict_runner(self):
+        captured = {}
+
+        def fake_strict(engine, op_name, fn, *, timeout_ms):
+            captured['op_name'] = op_name
+            captured['timeout_ms'] = timeout_ms
+
+        with mock.patch.object(da, '_run_with_timeout_strict', fake_strict):
+            da.primary_create_practice_session(
+                lambda: object(),
+                session_doc={'id': 'sess-9', 'org_id': 'o1', 'class_id': 'c1',
+                             'assignment_id': 'a1', 'student_uid': 'u1'})
+        self.assertEqual(captured['op_name'], 'create_practice_session')
+        self.assertEqual(captured['timeout_ms'], 1000)
+
+
 if __name__ == '__main__':
     unittest.main()

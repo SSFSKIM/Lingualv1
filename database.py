@@ -2366,17 +2366,30 @@ def create_practice_session(
     ANALYTICS_MIGRATION Slice B). Firestore is the system of record — written
     first; the shadow mirrors after and never raises.
     """
+    # `.document()` (no id) mints a Firestore-style id CLIENT-SIDE with no network write,
+    # so `doc_ref.id` is available as the stable id whether or not we write Firestore.
     doc_ref = get_practice_session_ref(session_id) if session_id else get_practice_sessions_collection().document()
     payload = dict(session_data or {})
     payload.setdefault('org_status_when_created', org_status_when_created)
     payload.setdefault('created_at', _utc_now())
     payload['updated_at'] = _utc_now()
-    doc_ref.set(payload)  # Firestore is the system of record — write it first.
-    if sql_engine is not None:
-        from backend.db import dual_write_analytics as _da
-        # `payload` is exactly the doc just written; inject the server-assigned id
-        # so the shadow needs no second Firestore read on the session-init path.
-        _da.shadow_create_practice_session(
+    from backend.db import dual_write_analytics as _da
+    if _da.firestore_analytics_enabled():
+        doc_ref.set(payload)  # Firestore is the system of record — write it first.
+        if sql_engine is not None:
+            # `payload` is exactly the doc just written; inject the server-assigned id
+            # so the shadow needs no second Firestore read on the session-init path.
+            _da.shadow_create_practice_session(
+                sql_engine, session_doc={**payload, 'id': doc_ref.id}
+            )
+    else:
+        # WRITE_FIRESTORE_ANALYTICS=0 (Slice E retirement): Postgres is the SOLE store.
+        # Skip the Firestore write; the PG write is fail-CLOSED (raises -> route 500).
+        if sql_engine is None:
+            raise RuntimeError(
+                'create_practice_session: WRITE_FIRESTORE_ANALYTICS=0 requires sql_engine'
+            )
+        _da.primary_create_practice_session(
             sql_engine, session_doc={**payload, 'id': doc_ref.id}
         )
     return doc_ref.id
@@ -2401,14 +2414,23 @@ def update_practice_session(session_id, updates, *, sql_engine=None):
     session.ended finalize; it self-disables when DUAL_WRITE_ANALYTICS_EVENTS=1,
     where Slice C's per-turn shadow_write_turn subsumes it (§5b.2 #7).
     """
-    payload = dict(updates or {})
-    payload['updated_at'] = _utc_now()
-    get_practice_session_ref(session_id).update(payload)
-    if sql_engine is not None:
-        from backend.db import dual_write_analytics as _da
-        _da.shadow_update_practice_session(
-            sql_engine, session_firestore_id=session_id, updates=updates
-        )
+    from backend.db import dual_write_analytics as _da
+    if _da.firestore_analytics_enabled():
+        payload = dict(updates or {})
+        payload['updated_at'] = _utc_now()
+        get_practice_session_ref(session_id).update(payload)
+        if sql_engine is not None:
+            _da.shadow_update_practice_session(
+                sql_engine, session_firestore_id=session_id, updates=updates
+            )
+    else:
+        # WRITE_FIRESTORE_ANALYTICS=0: skip Firestore. The fail-closed PG UPDATE
+        # self-disables when DUAL_WRITE_ANALYTICS_EVENTS=1 (the per-turn UPDATE rides
+        # write_turn); it fires only in the degenerate sessions=1/events=0 state.
+        if sql_engine is not None:
+            _da.primary_update_practice_session(
+                sql_engine, session_firestore_id=session_id, updates=updates
+            )
 
 
 def list_assignment_practice_sessions(assignment_id):
@@ -2493,11 +2515,20 @@ def list_student_class_learning_events(class_id, student_uid):
 
 
 def create_learning_event(event_data, event_id=None):
-    """Create a learning event."""
+    """Create a learning event (Firestore), returning its id.
+
+    When WRITE_FIRESTORE_ANALYTICS=0 (Slice E retirement) this mints a Firestore-style id
+    CLIENT-SIDE (`.document()`, no network write) and SKIPS the Firestore write — the PG
+    row for the event is inserted by `dual_write_analytics.write_turn` in the route, which
+    consumes this returned id as the event's legacy_firestore_id. The route's contract is
+    unchanged: it always captures the id this returns and hands it to `write_turn`.
+    """
     doc_ref = get_learning_event_ref(event_id) if event_id else get_learning_events_collection().document()
-    payload = dict(event_data or {})
-    payload.setdefault('created_at', _utc_now())
-    doc_ref.set(payload)
+    from backend.db import dual_write_analytics as _da
+    if _da.firestore_analytics_enabled():
+        payload = dict(event_data or {})
+        payload.setdefault('created_at', _utc_now())
+        doc_ref.set(payload)
     return doc_ref.id
 
 

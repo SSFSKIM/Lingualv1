@@ -498,11 +498,12 @@ def create_curriculum_admin_blueprint(deps: RouteDeps) -> Blueprint:
                 },
             )
             started_event_id = deps.db.create_learning_event(started_payload)
-            # Shadow session.started too, so PG event count matches Firestore per
-            # session (the §4.5/§5b.4 count-parity gate). The session row was just
-            # created (shadow_create_practice_session above), so its FK resolves.
-            # No session_updates here — create only, no summary mutation.
-            dual_write_analytics.shadow_write_turn(
+            # Write session.started to PG too, so the per-session event count matches
+            # Firestore (the §4.5/§5b.4 count-parity gate). `write_turn` dispatches to the
+            # fail-open shadow (WRITE_FIRESTORE_ANALYTICS=1) or the fail-closed primary
+            # (=0, PG sole store). The session row was just created above, so its FK
+            # resolves. No session_updates here — create only, no summary mutation.
+            dual_write_analytics.write_turn(
                 deps.sql_engine,
                 session_firestore_id=session_id,
                 events=[{**started_payload, 'id': started_event_id}],
@@ -593,13 +594,15 @@ def create_curriculum_admin_blueprint(deps: RouteDeps) -> Blueprint:
                 turn_events.append(
                     {**derived_event, 'id': deps.db.create_learning_event(derived_event)}
                 )
-            # Firestore session UPDATE (system of record) + the events-flag-OFF session
-            # shadow (shadow_update_practice_session, which self-disables when the events
-            # flag is on, §5b.2 #7).
+            # Session UPDATE: Firestore (system of record) when WRITE_FIRESTORE_ANALYTICS=1,
+            # else skipped (PG sole store). The standalone session shadow/primary
+            # self-disables when the events flag is on (§5b.2 #7) — the per-turn UPDATE
+            # rides write_turn below.
             deps.db.update_practice_session(session_id, session_updates, sql_engine=deps.sql_engine)
-            # Events-flag-ON path: one batched PG transaction for the turn's events AND
-            # the summary/finalize UPDATE (subsumes the standalone session shadow above).
-            dual_write_analytics.shadow_write_turn(
+            # Events-flag-ON path: one batched PG transaction for the turn's events AND the
+            # summary/finalize UPDATE (subsumes the standalone session UPDATE above).
+            # write_turn dispatches fail-open shadow (=1) or fail-closed primary (=0).
+            dual_write_analytics.write_turn(
                 deps.sql_engine,
                 session_firestore_id=session_id,
                 events=turn_events,

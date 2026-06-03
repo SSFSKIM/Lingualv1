@@ -149,6 +149,7 @@ class TestAnalyticsRouting(unittest.TestCase):
 
     def _fs(self):
         return types.SimpleNamespace(
+            get_practice_session=lambda sid: {'id': 's-fs', 'sid': sid},
             list_assignment_practice_sessions=lambda aid: [{'id': 's-fs'}],
             list_student_assignment_practice_sessions=lambda aid, uid: [{'id': 's-fs', 'u': uid}],
             list_class_practice_sessions=lambda cid: [{'id': 's-fs'}],
@@ -171,6 +172,29 @@ class TestAnalyticsRouting(unittest.TestCase):
         router = ReadRouter(self._fs(), sql_engine=lambda: object())
         with mock.patch.object(ReadRouter, '_pg_read', lambda self, pc, eng: [{'id': 's-pg'}]):
             self.assertEqual(router.list_class_practice_sessions('c1'), [{'id': 's-pg'}])
+
+    def test_get_practice_session_passthrough_when_flags_off(self):
+        router = ReadRouter(self._fs(), sql_engine=lambda: object())
+        self.assertEqual(router.get_practice_session('s1')['sid'], 's1')
+
+    def test_get_practice_session_serves_pg_when_flags_one(self):
+        os.environ['READ_PG_ANALYTICS_SESSIONS'] = '1'
+        os.environ['READ_PG_ASSIGNMENTS'] = '1'
+        router = ReadRouter(self._fs(), sql_engine=lambda: object())
+        with mock.patch.object(ReadRouter, '_pg_read', lambda self, pc, eng: {'id': 's-pg'}):
+            self.assertEqual(router.get_practice_session('s1'), {'id': 's-pg'})
+
+    def test_get_practice_session_fallback_to_firestore_when_pg_absent(self):
+        # PG point-get returns None (session not in PG) -> _FALLBACK -> Firestore, NOT an
+        # authoritative None/404 (would block the session-create read-back).
+        os.environ['READ_PG_ANALYTICS_SESSIONS'] = '1'
+        os.environ['READ_PG_ASSIGNMENTS'] = '1'
+        router = ReadRouter(self._fs(), sql_engine=lambda: object())
+        with mock.patch.object(ReadRouter, '_pg_read', lambda self, pc, eng: pc('SESSION')), \
+                mock.patch('backend.db.repository.analytics_reads.get_practice_session',
+                           return_value=None):
+            out = router.get_practice_session('s1')
+        self.assertEqual(out['id'], 's-fs')  # fell open
 
     def test_session_reader_weaker_flag_gates_to_firestore(self):
         # SESSIONS=1 but the also-gate ASSIGNMENTS is OFF -> weaker=off -> Firestore,

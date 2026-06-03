@@ -111,6 +111,25 @@ def _sessions(session: Any, stmt) -> list[dict[str, Any]]:
     ]
 
 
+def get_practice_session(session: Any, session_firestore_id: str) -> dict[str, Any] | None:
+    """Point-get ONE practice session by its legacy Firestore id (full doc shape).
+
+    The read-after-write dual of the dual-write: needed so the create/event routes
+    (and chat.py's session-validation reads) can resolve a session that, under
+    WRITE_FIRESTORE_ANALYTICS=0, exists ONLY in Postgres. Filters on the unique
+    legacy_firestore_id (O(1)); returns None when absent (the ReadRouter maps None
+    to `_FALLBACK` so a not-yet-migrated session falls open to Firestore — a 404 on
+    the session-create read-back would block the student otherwise).
+    """
+    row = session.execute(
+        _SESSION_SELECT.where(PracticeSession.legacy_firestore_id == session_firestore_id)
+    ).first()
+    if row is None:
+        return None
+    ps, org_legacy, class_legacy, assignment_legacy = row
+    return _serialize_session(ps, org_legacy, class_legacy, assignment_legacy)
+
+
 def list_assignment_practice_sessions(session: Any, assignment_uuid: Any) -> list[dict[str, Any]]:
     """All sessions for an assignment (assignment UUID resolved by the router)."""
     return _sessions(

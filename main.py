@@ -590,6 +590,30 @@ def register_domain_blueprints():
                   f'{"shadow-compared against" if _read_aevt == "shadow" else "served from"} Postgres '
                   '(effective mode = weaker of this and READ_PG_ANALYTICS_SESSIONS)')
 
+    # WRITE_FIRESTORE_ANALYTICS (Slice E retirement). Default ON; '0' retires Firestore
+    # analytics writes (Postgres sole store, fail-closed). Only banner/warn the '0' path —
+    # the default-on case is the unremarkable status quo.
+    if os.environ.get('WRITE_FIRESTORE_ANALYTICS', '1') == '0':
+        if not sql_enabled():
+            print(
+                '[startup warning] WRITE_FIRESTORE_ANALYTICS=0 (Postgres sole store) but no '
+                'Cloud SQL target set — practice_session/learning_event writes will FAIL'
+            )
+        else:
+            print('[startup] WRITE_FIRESTORE_ANALYTICS=0 — Firestore analytics writes RETIRED; '
+                  'Postgres is the sole store (fail-closed)')
+        if os.environ.get('READ_PG_ANALYTICS_SESSIONS', '') != '1':
+            print(
+                '[startup warning] WRITE_FIRESTORE_ANALYTICS=0 but READ_PG_ANALYTICS_SESSIONS!=1 '
+                '— the get_practice_session read-after-write will fall open to Firestore and '
+                '404 on PG-only sessions. Set READ_PG_ANALYTICS_SESSIONS=1 first.'
+            )
+        if os.environ.get('DUAL_WRITE_ANALYTICS_EVENTS') != '1':
+            print(
+                '[startup warning] WRITE_FIRESTORE_ANALYTICS=0 but DUAL_WRITE_ANALYTICS_EVENTS!=1 '
+                '— learning_events would NOT persist to ANY store. Set it to 1 (hard constraint).'
+            )
+
     app.register_blueprint(create_auth_blueprint(deps))
     app.register_blueprint(create_chat_blueprint(deps))
     app.register_blueprint(create_assessment_blueprint(deps))
