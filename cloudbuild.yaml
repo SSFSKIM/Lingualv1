@@ -189,7 +189,16 @@ substitutions:
   # resolve from PG) AND DUAL_WRITE_ANALYTICS_EVENTS=1 (live — else events stop persisting).
   # Flip only after a clean confidence sprint at '1'. Rollback instant: =1 (Firestore
   # writes resume; PG-only sessions created during '0' keep valid Firestore-style ids).
-  _WRITE_FIRESTORE_ANALYTICS: '1'
+  # FLIPPED to '0' (FIRESTORE ANALYTICS WRITES RETIRED — Postgres SOLE STORE) 2026-06-03
+  # (rev lingual-app-00065-ldh, via --update-env-vars on rev 00064 which ran the
+  # retirement image be9071f; both hard prereqs verified live). Startup banner confirmed
+  # "Firestore analytics writes RETIRED; Postgres is the sole store (fail-closed)", 0
+  # warnings. Smoke-test PROOF (PG-only path end-to-end): authenticated POST create-session
+  # (assignment xnVbMFd4GG6H74QKRaE2) → 201 with read-after-write body → POST student.turn
+  # → 200; PG practice_sessions 49→50, session SBub1z0xuZXPi0qk7iLG active w/ 2 events,
+  # Firestore practice_sessions/SBub1z0xuZXPi0qk7iLG ABSENT + 0 Firestore events (writes
+  # correctly skipped). Default bumped 1→0 so a rebuild won't regress the retirement.
+  _WRITE_FIRESTORE_ANALYTICS: '0'
   _READ_PG_ANALYTICS_SESSIONS: '1'
   # EVENTS FLIPPED to '1' (PG-AUTHORITATIVE, fail-open) 2026-06-03 (rev 00061-29z) after:
   # Alembic 0003 payload GIN applied to prod (alembic upgrade head as postgres owner;
