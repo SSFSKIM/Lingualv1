@@ -166,7 +166,7 @@ The repo ships a local plugin at `.claude/plugins/lingual-dev-agents/` with five
 
 ## Working Conventions
 
-- **Do not add a new persistence system.** Firestore is the system of record for beta (see TECH_SPEC §1). The one sanctioned exception is the in-progress school-domain migration to Cloud SQL (PostgreSQL) under `backend/db/` — dual-write now, reads still 100% Firestore. See `backend/CLAUDE.md`; never move a read path off Firestore without checking the current migration phase.
+- **Do not add a new persistence system.** Firestore is the system of record for beta (see TECH_SPEC §1). The one sanctioned exception is the school-domain migration to Cloud SQL (PostgreSQL) under `backend/db/`, now largely complete: **reads are PG-authoritative** (memberships excepted, by design), **analytics writes are PG-sole** (`WRITE_FIRESTORE_ANALYTICS=0`), and the **relational/assignment families still dual-write to Firestore as the intended steady-state rollback bridge — not an unfinished TODO.** See `backend/CLAUDE.md` for the per-family flag state; never flip a read flag or touch a dual-write seam without checking live flags first.
 - **Compliance gating is architecture, not polish.** Voice sessions fail closed without consent. Treat any change that touches voice, audio retention, or guardian flows as high-scrutiny.
 - **Analytics are heuristic for now** (see LIMITATIONS.md #7, #8). Do not market them as model-verified scoring until that's true.
 - **Canvas roster ≠ enrollments.** Preserve the decoupling from 2026-04-21 (see section above).

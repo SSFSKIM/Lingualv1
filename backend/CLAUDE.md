@@ -43,7 +43,14 @@ Domain logic that blueprints compose.
 
 ## Cloud SQL (PostgreSQL) migration layer (`backend/db/`)
 
-In-progress migration of the school domain to Cloud SQL Postgres as system-of-record (ADR-0001). Holds SQLAlchemy `models/`, `repository/`, Alembic `migrations/`, and the dual-write paths (`dual_write.py`, `dual_write_school_chain.py`), gated by `DUAL_WRITE_SCHOOL_CHAIN` / `DUAL_WRITE_ENROLLMENTS`. Current split: writes go to both Firestore + Postgres; **reads are still 100% Firestore**. Remaining phases: parity backfill → read cutover by route-family → retire Firestore writes. This is the sanctioned exception to the root "Firestore for beta" convention — never move a read path off Firestore without checking the current migration phase/flags.
+Migration of the school domain to Cloud SQL Postgres as system-of-record (ADR-0001). Holds SQLAlchemy `models/`, `repository/`, Alembic `migrations/`, the dual-write paths (`dual_write.py`, `dual_write_school_chain.py`, `dual_write_analytics.py`), and the `ReadRouter` (`read_router.py`) on `deps.db`.
+
+**Current state (2026-06-03 — read cutover COMPLETE):**
+- **Reads:** all PG-authoritative (org/class/enrollment/assignment/practice_sessions/learning_events), fail-open to Firestore via the 3-state `READ_PG_*` flags (`''`/`'0'`=Firestore, `shadow`=compare-only, `'1'`=PG-authoritative). The one exception is **memberships** (`READ_PG_MEMBERSHIPS=shadow`): the role-guard `resolve_user_school_context` reads the in-module Firestore primitive, so memberships stay **Firestore-read-authoritative by design** (D4) — see LIMITATIONS.
+- **Writes — analytics family RETIRED:** `practice_sessions` + `learning_events` are **Postgres-sole** (`WRITE_FIRESTORE_ANALYTICS=0`); the `primary_*` paths are **fail-CLOSED** (a PG failure surfaces as a 500 the SPA retries, not a silent drop).
+- **Writes — relational/assignment family STILL DUAL-WRITE (intended steady state, NOT a TODO):** org/class/enrollment/assignment continue to dual-write to Firestore *and* PG (`DUAL_WRITE_SCHOOL_CHAIN`/`DUAL_WRITE_ENROLLMENTS`/`DUAL_WRITE_ASSIGNMENTS=1`), fail-open. **Do not "finish the migration" by retiring these Firestore writes.** Keeping them is deliberate: the Firestore mirror is the instant **read-rollback bridge** (flip `READ_PG_*=shadow` and reads fall back to a live Firestore copy). Retiring relational writes also first requires moving the role-guard off Firestore memberships (security-critical). Revisit only post-beta on a real trigger (long PG confidence at scale, or doing the role-guard work anyway), not as cleanup.
+
+Never move a read path's flag, or touch a dual-write seam, without checking the live flag state first (`gcloud run services describe lingual-app`). This is the sanctioned exception to the root "Firestore for beta" convention.
 
 ## Assignment content lives on the assignment document
 
