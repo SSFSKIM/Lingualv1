@@ -53,6 +53,7 @@ Use these status labels consistently:
 | `17-positioning-competitiveness-research.md` | Founders, PM, GTM | Research-backed read on whether the proposed US and Korea positioning can compete. |
 | `18-plang-school-market-position-research.md` | Founders, PM, GTM | Focused Plang School market-position, Seoul/Jeonnam adoption, and Korea-response memo. |
 | `19-positioning-substitute-risk-research.md` | Founders, PM, GTM | Substitute-risk read for the teacher-designed natural conversation plus classroom-evidence positioning. |
+| `20-zeta-engagement-strategy-research.md` | Founders, PM, product | Strategy evaluation of adopting Zeta (Scatter Lab)-style narrative engagement/gamification to maximize voluntary student speaking time, with execution conditions and guardrails. Written in Korean. |
 
 ## Source hierarchy
 
